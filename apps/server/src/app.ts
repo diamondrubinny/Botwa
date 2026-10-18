@@ -1,6 +1,10 @@
 import cookie from '@fastify/cookie';
 import helmet from '@fastify/helmet';
 import rateLimit from '@fastify/rate-limit';
+import fastifyStatic from '@fastify/static';
+import { existsSync } from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { authRoutes } from './routes/auth.js';
 import { userRoutes } from './routes/users.js';
@@ -46,6 +50,12 @@ export async function buildApp(cfg: Config, db: Db, mgr: ChannelManager): Promis
     await db.query('SELECT 1');
     return { ok: true };
   });
+
+  // Serve the built admin panel (hash-routed SPA) from the same origin, if present.
+  const webDist = cfg.WEB_DIST ?? path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../web/dist');
+  if (existsSync(path.join(webDist, 'index.html'))) {
+    await app.register(fastifyStatic, { root: webDist, wildcard: false, index: ['index.html'] });
+  }
 
   authRoutes(app, db, cfg);
   userRoutes(app, db);

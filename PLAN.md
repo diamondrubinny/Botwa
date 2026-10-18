@@ -1,6 +1,6 @@
 # Botwa – Self-Hosted Bot Manager (WhatsApp + Telegram QR Login)
 
-> Status: **Approved. P0+P1+P2 implemented (apps/server). Next: P3 (web panel), then Telegram QR.**
+> Status: **Approved. P0–P3 implemented (apps/server + apps/web). Next: manual WhatsApp pairing test on the Ubuntu server, then Telegram QR (P5).**
 > Working doc: all progress is tracked here (token-saving workflow).
 
 ## 1. Understanding
@@ -101,6 +101,7 @@ Messages/phone numbers = personal data → Israeli Privacy Law (Amendment 13) & 
 - Hosting: Ubuntu server (Docker Compose + Caddy/Nginx HTTPS) + admin panel.
 - Stack (my call): Node 22 + TS + Fastify + PostgreSQL (plain SQL migrations) + React. Redis deferred (not needed at this scale).
 - Scale: ~4000 customer contacts, 19 staff (roles: admin / supervisor / agent). Low concurrency → single server process is enough.
+- Done in P3: React+Vite admin panel (Hebrew, RTL, hash-routed, served by the API on the same origin): login+MFA, forced MFA enrolment for admin/supervisor, channels + live QR link screen, inbox (list/filter/reply/claim/assign/close), team management, account/password, accessibility statement + privacy page (both DRAFTS), accessibility widget. Playwright+axe-core E2E (e2e/) passes: 0 WCAG 2.1 A/AA violations on all screens, keyboard dialog, mobile 375px no h-scroll.
 - Done in P2: channels + WhatsApp (Baileys) adapter with DB-backed encrypted session, live QR over SSE (admin only), inbox schema (contacts/conversations/messages), agent authz (own+unassigned only, 404 on others), reply/assign/close, retention purge (MESSAGE_RETENTION_DAYS), contact export/erase, auto-start on boot. 19 tests passing. **Real WhatsApp pairing not testable in CI – needs manual test on the server with a phone.**
 - Done in P1: auth, MFA, lockout, sessions, users CRUD, audit, tests (9 passing).
 

@@ -18,6 +18,7 @@ const schema = z.object({
   COOKIE_SECURE: bool('true'),
   TRUST_PROXY: bool('false'),
   SESSION_TTL_HOURS: z.coerce.number().int().min(1).max(168).default(12),
+  WEB_DIST: z.string().optional(),
   MESSAGE_RETENTION_DAYS: z.coerce.number().int().min(0).default(365),
   REQUIRE_MFA_FOR_PRIVILEGED: bool('true'),
 });

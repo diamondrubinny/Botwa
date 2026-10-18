@@ -37,8 +37,10 @@ export function conversationRoutes(app: FastifyInstance, db: Db, mgr: ChannelMan
     const { rows } = await db.query(
       `SELECT c.id, c.channel_id AS "channelId", c.status, c.assigned_to AS "assignedTo", c.unread_count AS "unreadCount",
               c.last_message_at AS "lastMessageAt", ct.display_name AS "contactName", ct.external_id AS "contactId",
+              ch.label AS "channelLabel", ch.type AS "channelType", au.name AS "assignedName",
               (SELECT body FROM messages m WHERE m.conversation_id = c.id ORDER BY created_at DESC LIMIT 1) AS "lastMessage"
          FROM conversations c JOIN contacts ct ON ct.id = c.contact_id
+              JOIN channels ch ON ch.id = c.channel_id LEFT JOIN users au ON au.id = c.assigned_to
         WHERE ($1::text IS NULL OR c.status = $1)
           AND ($2::boolean IS NOT TRUE OR c.assigned_to = $3)
           AND ($4::boolean OR c.assigned_to IS NULL OR c.assigned_to = $3)
@@ -54,9 +56,10 @@ export function conversationRoutes(app: FastifyInstance, db: Db, mgr: ChannelMan
     if (!p.success || !q.success) return reply.code(400).send({ error: 'bad_request' });
     if (!(await loadAccessible(db, req.user!, p.data.id))) return reply.code(404).send({ error: 'not_found' });
     const { rows } = await db.query(
-      `SELECT id, direction, body, sender_user_id AS "senderUserId", created_at AS "createdAt"
-         FROM messages WHERE conversation_id = $1 AND ($2::timestamptz IS NULL OR created_at < $2)
-        ORDER BY created_at DESC LIMIT $3`,
+      `SELECT m.id, m.direction, m.body, m.sender_user_id AS "senderUserId", u.name AS "senderName", m.created_at AS "createdAt"
+         FROM messages m LEFT JOIN users u ON u.id = m.sender_user_id
+        WHERE m.conversation_id = $1 AND ($2::timestamptz IS NULL OR m.created_at < $2)
+        ORDER BY m.created_at DESC LIMIT $3`,
       [p.data.id, q.data.before ?? null, q.data.limit],
     );
     return rows.reverse();

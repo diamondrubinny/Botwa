@@ -2,7 +2,7 @@
 
 Self-hosted customer-support hub: staff log in to a web panel, link WhatsApp / Telegram accounts by **QR scan**, and handle customer conversations. No external AI APIs.
 
-Status: **P0–P2 done** (auth/MFA/users/audit, WhatsApp QR channel, support inbox API). Web UI and Telegram QR are next. See [PLAN.md](PLAN.md) for scope and roadmap.
+Status: **P0–P3 done** (API + Hebrew/RTL admin panel). Telegram QR is next. WhatsApp pairing must be tested manually with a real phone. See [PLAN.md](PLAN.md) for scope and roadmap.
 
 ## Requirements
 Ubuntu server, Node 22+, PostgreSQL 16 (or Docker), HTTPS reverse proxy (Caddy/Nginx).
@@ -15,6 +15,21 @@ cd apps/server
 ADMIN_EMAIL=you@example.com ADMIN_NAME="You" ADMIN_PASSWORD='min-12-chars-long' npm run create-admin
 npm run dev
 ```
+## Web panel
+```bash
+npm run build -w @botwa/web     # API serves apps/web/dist automatically (same origin, no CORS)
+# dev: terminal 1 `npm run dev -w @botwa/server`, terminal 2 `npm run dev -w @botwa/web` (http://localhost:5173)
+#      set APP_ORIGIN=http://localhost:5173 and COOKIE_SECURE=false in .env for dev
+```
+Restart the API after rebuilding the web assets (file list is read at startup).
+
+## End-to-end & accessibility test
+```bash
+# start the server against a scratch DB with an admin admin@e2e.io / e2e-password-123 on :3077, then:
+npm test -w botwa-e2e        # Playwright (Chromium) + axe-core; set CHROME_PATH if needed
+```
+Automated checks do not replace manual screen-reader testing (NVDA/VoiceOver) and an accessibility consultant review.
+
 ## Docker (Ubuntu)
 ```bash
 cp .env.example .env   # set DATABASE_URL=postgres://botwa:<DB_PASSWORD>@db:5432/botwa
