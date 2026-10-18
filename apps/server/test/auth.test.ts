@@ -2,6 +2,7 @@ import { authenticator } from 'otplib';
 import { randomBytes } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { buildApp } from '../src/app.js';
+import { ChannelManager } from '../src/channels/manager.js';
 import { loadConfig } from '../src/config.js';
 import { createDb } from '../src/db.js';
 import { migrate } from '../src/migrate.js';
@@ -42,7 +43,7 @@ beforeAll(async () => {
   await migrate(db);
   await mkUser('admin@t.io', 'admin');
   await mkUser('agent@t.io', 'agent');
-  app = await buildApp(cfg, db);
+  app = await buildApp(cfg, db, new ChannelManager(db, cfg));
 });
 afterAll(async () => {
   await app.close();

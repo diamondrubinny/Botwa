@@ -1,6 +1,6 @@
 # Botwa – Self-Hosted Bot Manager (WhatsApp + Telegram QR Login)
 
-> Status: **Approved. P0+P1 implemented (apps/server). Next: P2.**
+> Status: **Approved. P0+P1+P2 implemented (apps/server). Next: P3 (web panel), then Telegram QR.**
 > Working doc: all progress is tracked here (token-saving workflow).
 
 ## 1. Understanding
@@ -101,6 +101,7 @@ Messages/phone numbers = personal data → Israeli Privacy Law (Amendment 13) & 
 - Hosting: Ubuntu server (Docker Compose + Caddy/Nginx HTTPS) + admin panel.
 - Stack (my call): Node 22 + TS + Fastify + PostgreSQL (plain SQL migrations) + React. Redis deferred (not needed at this scale).
 - Scale: ~4000 customer contacts, 19 staff (roles: admin / supervisor / agent). Low concurrency → single server process is enough.
+- Done in P2: channels + WhatsApp (Baileys) adapter with DB-backed encrypted session, live QR over SSE (admin only), inbox schema (contacts/conversations/messages), agent authz (own+unassigned only, 404 on others), reply/assign/close, retention purge (MESSAGE_RETENTION_DAYS), contact export/erase, auto-start on boot. 19 tests passing. **Real WhatsApp pairing not testable in CI – needs manual test on the server with a phone.**
 - Done in P1: auth, MFA, lockout, sessions, users CRUD, audit, tests (9 passing).
 
 ## 12. Open questions (answered – see 11a)

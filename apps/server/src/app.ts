@@ -4,10 +4,13 @@ import rateLimit from '@fastify/rate-limit';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { authRoutes } from './routes/auth.js';
 import { userRoutes } from './routes/users.js';
+import { channelRoutes } from './routes/channels.js';
+import { conversationRoutes } from './routes/conversations.js';
+import type { ChannelManager } from './channels/manager.js';
 import type { Config } from './config.js';
 import type { Db } from './db.js';
 
-export async function buildApp(cfg: Config, db: Db): Promise<FastifyInstance> {
+export async function buildApp(cfg: Config, db: Db, mgr: ChannelManager): Promise<FastifyInstance> {
   const app = Fastify({
     logger: {
       level: cfg.NODE_ENV === 'test' ? 'silent' : 'info',
@@ -46,5 +49,7 @@ export async function buildApp(cfg: Config, db: Db): Promise<FastifyInstance> {
 
   authRoutes(app, db, cfg);
   userRoutes(app, db);
+  channelRoutes(app, db, mgr);
+  conversationRoutes(app, db, mgr);
   return app;
 }
