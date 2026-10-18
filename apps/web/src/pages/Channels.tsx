@@ -67,9 +67,9 @@ export function Channels({ isAdmin }: { isAdmin: boolean }) {
             <label htmlFor="ch-type">פלטפורמה</label>
             <select id="ch-type" value={type} onChange={(e) => setType(e.target.value as 'whatsapp')}>
               <option value="whatsapp">ווצאפ (סריקת QR)</option>
-              <option value="telegram" disabled>טלגרם (בקרוב)</option>
+              <option value="telegram">טלגרם (חשבון משתמש, סריקת QR)</option>
             </select>
-            <p className="hint">הערה: החיבור לווצאפ נעשה באמצעות ספרייה לא רשמית. קיים סיכון לחסימת המספר.</p>
+            <p className="hint">הערה: החיבור לווצאפ נעשה באמצעות ספרייה לא רשמית וקיים סיכון לחסימת המספר. גם שליחה אוטומטית מחשבון טלגרם עלולה להוביל להגבלת החשבון.</p>
           </div>
           <button className="primary" type="submit">יצירה</button>
         </form>
@@ -99,6 +99,9 @@ function LinkPanel({ channel, onClose }: { channel: Channel; onClose: () => void
   const [status, setStatus] = useState('connecting');
   const [qr, setQr] = useState<string | null>(null);
   const [lost, setLost] = useState(false);
+  const [pw, setPw] = useState('');
+  const [pwErr, setPwErr] = useState('');
+  const platform = channel.type === 'whatsapp' ? 'ווצאפ' : 'טלגרם';
   const closeRef = useRef(onClose);
   closeRef.current = onClose;
 
@@ -111,6 +114,7 @@ function LinkPanel({ channel, onClose }: { channel: Channel; onClose: () => void
       if (d.type === 'status' && d.status) {
         setStatus(d.status);
         if (d.status !== 'qr') setQr(null);
+        if (d.status !== 'password') setPw('');
       }
     };
     es.onerror = () => setLost(true);
@@ -125,13 +129,39 @@ function LinkPanel({ channel, onClose }: { channel: Channel; onClose: () => void
       </p>
       {qr && (
         <>
-          <img className="qr" src={qr} alt="קוד QR לקישור ווצאפ" width={320} height={320} />
-          <ol>
-            <li>פתחו את ווצאפ בטלפון.</li>
-            <li>הגדרות ← מכשירים מקושרים ← קישור מכשיר.</li>
-            <li>סרקו את הקוד. הקוד מתחדש אוטומטית.</li>
-          </ol>
+          <img className="qr" src={qr} alt={`קוד QR לקישור ${platform}`} width={320} height={320} />
+          {channel.type === 'whatsapp' ? (
+            <ol>
+              <li>פתחו את ווצאפ בטלפון.</li>
+              <li>הגדרות ← מכשירים מקושרים ← קישור מכשיר.</li>
+              <li>סרקו את הקוד. הקוד מתחדש אוטומטית.</li>
+            </ol>
+          ) : (
+            <ol>
+              <li>פתחו את טלגרם בטלפון.</li>
+              <li>הגדרות ← מכשירים ← קישור מכשיר שולחן עבודה.</li>
+              <li>סרקו את הקוד. הקוד מתחדש אוטומטית.</li>
+            </ol>
+          )}
         </>
+      )}
+      {status === 'password' && (
+        <form
+          onSubmit={async (e) => {
+            e.preventDefault();
+            setPwErr('');
+            try { await api('POST', `/channels/${channel.id}/password`, { password: pw }); setPw(''); }
+            catch (er) { setPwErr(errText(er instanceof ApiError ? er.code : 'generic')); }
+          }}
+        >
+          <div className="field">
+            <label htmlFor={`tgpw-${channel.id}`}>סיסמת האימות הדו-שלבי של טלגרם</label>
+            <input id={`tgpw-${channel.id}`} type="password" autoComplete="off" required value={pw} onChange={(e) => setPw(e.target.value)} dir="ltr" aria-describedby={`tgpw-h-${channel.id}`} />
+            <p id={`tgpw-h-${channel.id}`} className="hint">הסיסמה משמשת רק להשלמת ההתחברות ואינה נשמרת בשרת.</p>
+          </div>
+          <button className="primary" type="submit">שליחה</button>
+          <p role="alert" className="error">{pwErr}</p>
+        </form>
       )}
       {status === 'connected' && <p className="ok">החשבון מחובר.</p>}
       {(status === 'stopped' || status === 'logged_out') && <p>לא התקבלה סריקה. לחצו "קישור / הפעלה" לניסיון נוסף.</p>}

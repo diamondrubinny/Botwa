@@ -1,6 +1,6 @@
 # Botwa – Self-Hosted Bot Manager (WhatsApp + Telegram QR Login)
 
-> Status: **Approved. P0–P3 implemented (apps/server + apps/web). Next: manual WhatsApp pairing test on the Ubuntu server, then Telegram QR (P5).**
+> Status: **Approved. P0–P5 implemented. Next: deploy to the Ubuntu server (docs/DEPLOY.md) and manually test WhatsApp + Telegram pairing with real phones.**
 > Working doc: all progress is tracked here (token-saving workflow).
 
 ## 1. Understanding
@@ -101,6 +101,8 @@ Messages/phone numbers = personal data → Israeli Privacy Law (Amendment 13) & 
 - Hosting: Ubuntu server (Docker Compose + Caddy/Nginx HTTPS) + admin panel.
 - Stack (my call): Node 22 + TS + Fastify + PostgreSQL (plain SQL migrations) + React. Redis deferred (not needed at this scale).
 - Scale: ~4000 customer contacts, 19 staff (roles: admin / supervisor / agent). Low concurrency → single server process is enough.
+- Done in P5: Telegram user-account QR adapter (gramJS) incl. 2FA password step (in-memory, never stored), QR refresh, 3-minute scan window, revoked-session detection, contact id = userId:accessHash so replies work after restarts. Requires TELEGRAM_API_ID/HASH. **Could not be exercised against real Telegram servers from the dev sandbox (network blocked).**
+- Done in P6 (partial): docs/DEPLOY.md, docker-compose with Caddy auto-HTTPS, scripts/backup.sh, docs/PRODUCTION_CHECKLIST.md. Docker image build itself was not run (no daemon); production-dependency install + boot was simulated instead.
 - Done in P3: React+Vite admin panel (Hebrew, RTL, hash-routed, served by the API on the same origin): login+MFA, forced MFA enrolment for admin/supervisor, channels + live QR link screen, inbox (list/filter/reply/claim/assign/close), team management, account/password, accessibility statement + privacy page (both DRAFTS), accessibility widget. Playwright+axe-core E2E (e2e/) passes: 0 WCAG 2.1 A/AA violations on all screens, keyboard dialog, mobile 375px no h-scroll.
 - Done in P2: channels + WhatsApp (Baileys) adapter with DB-backed encrypted session, live QR over SSE (admin only), inbox schema (contacts/conversations/messages), agent authz (own+unassigned only, 404 on others), reply/assign/close, retention purge (MESSAGE_RETENTION_DAYS), contact export/erase, auto-start on boot. 19 tests passing. **Real WhatsApp pairing not testable in CI – needs manual test on the server with a phone.**
 - Done in P1: auth, MFA, lockout, sessions, users CRUD, audit, tests (9 passing).

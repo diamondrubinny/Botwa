@@ -5,6 +5,7 @@ import type { Db } from '../db.js';
 import { ingestInbound } from '../inbox.js';
 import { createAuthStore } from './auth-store.js';
 import type { AdapterFactory, ChannelAdapter, ChannelStatus, ChannelType } from './types.js';
+import { TelegramAdapter } from './telegram.js';
 import { WhatsAppAdapter } from './whatsapp.js';
 
 export type BusEvent =
@@ -12,7 +13,15 @@ export type BusEvent =
   | { channelId: string; type: 'qr'; qr: string } // PNG data URL
   | { channelId: string; type: 'message'; conversationId: string; messageId: string };
 
-export const defaultFactory: AdapterFactory = (type, ctx) => (type === 'whatsapp' ? new WhatsAppAdapter(ctx) : null);
+export function createDefaultFactory(cfg: Config): AdapterFactory {
+  return (type, ctx) => {
+    if (type === 'whatsapp') return new WhatsAppAdapter(ctx);
+    if (type === 'telegram' && cfg.TELEGRAM_API_ID && cfg.TELEGRAM_API_HASH) {
+      return new TelegramAdapter(ctx, { apiId: cfg.TELEGRAM_API_ID, apiHash: cfg.TELEGRAM_API_HASH });
+    }
+    return null;
+  };
+}
 
 export class ChannelManager {
   readonly bus = new EventEmitter();
@@ -23,7 +32,7 @@ export class ChannelManager {
   constructor(
     private readonly db: Db,
     private readonly cfg: Config,
-    private readonly factory: AdapterFactory = defaultFactory,
+    private readonly factory: AdapterFactory = createDefaultFactory(cfg),
   ) {
     this.bus.setMaxListeners(100);
   }
@@ -109,6 +118,13 @@ export class ChannelManager {
     this.statuses.delete(channelId);
     this.lastQr.delete(channelId);
     await this.db.query('DELETE FROM channels WHERE id=$1', [channelId]);
+  }
+
+  /** Telegram 2FA: hand the cloud password to the waiting login flow (kept in memory only). */
+  submitPassword(channelId: string, password: string): void {
+    const a = this.adapters.get(channelId);
+    if (!a?.submitPassword || this.statuses.get(channelId) !== 'password') throw new Error('password_not_requested');
+    a.submitPassword(password);
   }
 
   async sendText(channelId: string, externalContactId: string, text: string) {

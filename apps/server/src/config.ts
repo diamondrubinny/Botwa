@@ -18,6 +18,9 @@ const schema = z.object({
   COOKIE_SECURE: bool('true'),
   TRUST_PROXY: bool('false'),
   SESSION_TTL_HOURS: z.coerce.number().int().min(1).max(168).default(12),
+  // Telegram user-account login (QR). Get both from https://my.telegram.org -> API development tools.
+  TELEGRAM_API_ID: z.coerce.number().int().positive().optional(),
+  TELEGRAM_API_HASH: z.string().min(8).optional(),
   WEB_DIST: z.string().optional(),
   MESSAGE_RETENTION_DAYS: z.coerce.number().int().min(0).default(365),
   REQUIRE_MFA_FOR_PRIVILEGED: bool('true'),

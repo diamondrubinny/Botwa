@@ -46,6 +46,20 @@ export function channelRoutes(app: FastifyInstance, db: Db, mgr: ChannelManager)
     });
   }
 
+  // Telegram two-step verification password during QR login. Not persisted, not logged.
+  app.post('/channels/:id/password', { preHandler: adminOnly, config: { rateLimit: { max: 10, timeWindow: '1 minute' } } }, async (req, reply) => {
+    const p = idParam.safeParse(req.params);
+    const b = z.object({ password: z.string().min(1).max(256) }).safeParse(req.body);
+    if (!p.success || !b.success) return reply.code(400).send({ error: 'bad_request' });
+    try {
+      mgr.submitPassword(p.data.id, b.data.password);
+    } catch {
+      return reply.code(409).send({ error: 'password_not_requested' });
+    }
+    await audit(db, { actorId: req.user!.id, action: 'channel.password_submitted', target: p.data.id, ip: req.ip });
+    return { ok: true };
+  });
+
   app.delete('/channels/:id', { preHandler: adminOnly }, async (req, reply) => {
     const p = idParam.safeParse(req.params);
     if (!p.success) return reply.code(400).send({ error: 'bad_request' });

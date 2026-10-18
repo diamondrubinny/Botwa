@@ -1,5 +1,5 @@
 export type ChannelType = 'whatsapp' | 'telegram';
-export type ChannelStatus = 'stopped' | 'connecting' | 'qr' | 'connected' | 'logged_out' | 'error';
+export type ChannelStatus = 'stopped' | 'connecting' | 'qr' | 'connected' | 'logged_out' | 'password' | 'error';
 
 export interface InboundMessage {
   externalContactId: string;
@@ -29,6 +29,8 @@ export interface ChannelAdapter {
   stop(): Promise<void>;
   /** Unlink the device on the platform side if possible and wipe local session. */
   logout(): Promise<void>;
+  /** Telegram only: supply the cloud (2FA) password when status is 'password'. Never stored. */
+  submitPassword?(password: string): void;
   sendText(externalContactId: string, text: string): Promise<{ externalMessageId?: string }>;
 }
 
@@ -37,5 +39,7 @@ export interface AdapterContext {
   store: AuthStore;
   events: AdapterEvents;
 }
+
+export interface TelegramCredentials { apiId: number; apiHash: string }
 
 export type AdapterFactory = (type: ChannelType, ctx: AdapterContext) => ChannelAdapter | null;

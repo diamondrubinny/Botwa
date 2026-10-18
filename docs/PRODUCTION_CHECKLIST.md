@@ -1,0 +1,66 @@
+# Pre-production checklist
+
+Status legend: ✅ done in code/tests · 🔲 must be done by the operator · ⚖️ needs professional sign-off.
+
+## Functional
+- ✅ Auth, MFA, lockout, sessions (24 automated server tests, Playwright E2E)
+- ✅ Inbox: receive, reply, claim/assign/close, dedupe
+- 🔲 Real WhatsApp pairing, receive + send, restart persistence (cannot be tested without a phone)
+- 🔲 Real Telegram QR pairing (+2FA password path), receive + send, restart persistence
+- 🔲 Load sanity: ~4000 contacts, 19 staff polling every 3–5s is low volume; verify with real data
+
+## Authorization & sessions
+- ✅ Server-side checks on every endpoint; agents limited to own/unassigned conversations (404 on others – IDOR tested)
+- ✅ Admin-only: channels, QR stream, user management, export/erase, audit
+- ✅ Sessions revoked on password change, MFA change, deactivate, role change
+- 🔲 Manual review: create one user per role and walk through the UI
+
+## Security
+- ✅ argon2id, AES-256-GCM for TOTP secrets and platform sessions, HttpOnly+SameSite=Strict cookies, Origin check, rate limits, helmet/CSP, no secrets in logs
+- ✅ `npm audit --omit=dev`: 0 known vulnerabilities at time of writing (re-run before each release)
+- 🔲 `.env` is `chmod 600`, not in git; `ENCRYPTION_KEY` backed up separately
+- 🔲 SSH key-only, firewall (ufw) enabled, unattended-upgrades on
+- 🔲 Postgres port not published (compose does not publish it) ✔ verify with `ss -ltnp`
+- ⚖️ Independent penetration test (recommended before storing real customer data)
+- Known limitation: no file/media upload feature yet → no AV scanning needed now. If media is added: allowlist types, size limits, quarantine + ClamAV scan before exposure.
+- Known limitation: login rate limit is per IP (in-memory, single process); account lockout is per account (DB).
+
+## Backup & recovery
+- 🔲 Daily `scripts/backup.sh` cron + off-server copy + GPG encryption
+- 🔲 Restore rehearsal on a scratch database (documented in DEPLOY.md)
+
+## Personal data inventory
+| Data | Purpose | Legal basis (to confirm) | Storage | Retention | Third parties |
+|---|---|---|---|---|---|
+| Staff name, email, role | Authentication, audit | Contract / legitimate interest | PostgreSQL | While employed | None |
+| Staff password hash, TOTP secret (encrypted) | Authentication | Legitimate interest (security) | PostgreSQL | While employed | None |
+| Audit log (actor, action, IP) | Security & accountability | Legitimate interest | PostgreSQL | Not auto-purged ⚠️ define policy | None |
+| Customer phone/Telegram id, display name | Customer support | Contract / legitimate interest | PostgreSQL | With conversation | WhatsApp (Meta), Telegram as transport |
+| Message text (in/out) | Customer support | Contract / legitimate interest | PostgreSQL (not field-encrypted) | `MESSAGE_RETENTION_DAYS` (default 365) | WhatsApp (Meta), Telegram |
+| WhatsApp/Telegram session keys | Operate channel | n/a (credentials) | PostgreSQL, AES-256-GCM | Until logout/delete | None |
+- Not sent to any AI, analytics or advertising service.
+- Data-subject requests: admin export/erase per contact (`/contacts/:id/export|DELETE`). 🔲 Define an operational procedure & response time.
+- ⚖️ Israel Privacy Protection Law + Amendment 13: database registration / DPO / security-level obligations, notice to customers that conversations are recorded. GDPR if EU residents are served (DPA with Meta/Telegram terms, international transfers).
+- ⚖️ WhatsApp & Telegram Terms of Service: unofficial clients are not permitted; risk of number/account ban accepted by owner.
+- ⚖️ Israeli Communications Law §30A (spam) if any outbound marketing is ever added – current product is reply-to-inbound only.
+
+## Cookies / trackers
+| Name | Type | Purpose | Duration | Consent |
+|---|---|---|---|---|
+| `botwa_sid` | First-party, HttpOnly | Login session | `SESSION_TTL_HOURS` (12h) | Not required (strictly necessary) |
+| `localStorage botwa_a11y` | First-party storage | Accessibility preferences | Until cleared | Not required (user-requested function), never sent to server |
+- No analytics, pixels, fonts or scripts from third parties. If any are added: consent banner (accept/reject/manage, reject as prominent as accept), blocking before consent, withdrawal link in footer.
+
+## Accessibility
+- ✅ Automated axe-core (WCAG 2.1 A/AA) passes on all screens incl. high-contrast mode; keyboard dialog; 375px mobile
+- 🔲 Manual: keyboard-only walkthrough, NVDA/VoiceOver, 200% zoom, real mobile devices
+- ⚖️ Accessibility consultant review vs. Israeli Standard 5568 / WCAG 2.1 AA; complete the accessibility statement (coordinator name, contact, date)
+
+## Legal documents (drafts in-app, marked as drafts)
+- ⚖️ Privacy policy – `#/privacy` is a technical draft only
+- ⚖️ Cookie policy – covered inside the privacy draft (essential cookie only)
+- ⚖️ Terms of use – not written yet (internal tool: employment/IT-usage policy may be more appropriate)
+- ⚖️ Accessibility statement – `#/accessibility` draft, placeholders must be completed
+
+## Requires professional approval before go-live
+Lawyer (privacy, ToS risk, employee monitoring/notice) · Privacy officer (if required) · Accessibility consultant · Penetration tester.

@@ -2,7 +2,7 @@
 
 Self-hosted customer-support hub: staff log in to a web panel, link WhatsApp / Telegram accounts by **QR scan**, and handle customer conversations. No external AI APIs.
 
-Status: **P0–P3 done** (API + Hebrew/RTL admin panel). Telegram QR is next. WhatsApp pairing must be tested manually with a real phone. See [PLAN.md](PLAN.md) for scope and roadmap.
+Status: **feature-complete MVP** (API, Hebrew/RTL panel, WhatsApp + Telegram QR). Deployment guide: [docs/DEPLOY.md](docs/DEPLOY.md). Pre-production list: [docs/PRODUCTION_CHECKLIST.md](docs/PRODUCTION_CHECKLIST.md). Real WhatsApp/Telegram pairing must still be tested manually with phones. See [PLAN.md](PLAN.md) for scope and roadmap.
 
 ## Requirements
 Ubuntu server, Node 22+, PostgreSQL 16 (or Docker), HTTPS reverse proxy (Caddy/Nginx).
@@ -31,13 +31,7 @@ npm test -w botwa-e2e        # Playwright (Chromium) + axe-core; set CHROME_PATH
 Automated checks do not replace manual screen-reader testing (NVDA/VoiceOver) and an accessibility consultant review.
 
 ## Docker (Ubuntu)
-```bash
-cp .env.example .env   # set DATABASE_URL=postgres://botwa:<DB_PASSWORD>@db:5432/botwa
-export DB_PASSWORD=...  # same value
-docker compose up -d --build
-docker compose exec server node -e "..."   # or run create-admin via npm in a one-off container
-```
-Put Caddy/Nginx in front with HTTPS; keep port 3000 bound to localhost.
+See [docs/DEPLOY.md](docs/DEPLOY.md) (Compose: Postgres + app + Caddy with automatic HTTPS, backups, restore).
 
 ## Tests
 ```bash
@@ -52,7 +46,7 @@ Authenticated: `POST /auth/logout`, `GET /auth/me`, `POST /auth/password`, `POST
 Admin: `GET/POST /users`, `PATCH /users/:id`, `POST /users/:id/reset-mfa`, `GET /audit` (supervisor may list users)
 
 ## API (P2)
-Admin: `GET/POST /channels`, `POST /channels/:id/start|stop|logout`, `DELETE /channels/:id`, `GET /channels/:id/events` (SSE: status + QR data-URL), `GET /contacts/:id/export`, `DELETE /contacts/:id`
+Admin: `GET/POST /channels`, `POST /channels/:id/start|stop|logout|password` (password = Telegram 2FA during QR login), `DELETE /channels/:id`, `GET /channels/:id/events` (SSE: status + QR data-URL), `GET /contacts/:id/export`, `DELETE /contacts/:id`
 Staff (all roles): `GET /conversations`, `GET /conversations/:id/messages`, `POST /conversations/:id/messages|read|assign|status`
 Agents see only conversations assigned to them or unassigned; supervisors/admins see all.
 

@@ -4,18 +4,43 @@ services:
     restart: unless-stopped
     environment:
       POSTGRES_USER: botwa
-      POSTGRES_PASSWORD: ${DB_PASSWORD:?set DB_PASSWORD}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?set DB_PASSWORD in .env}
       POSTGRES_DB: botwa
     volumes: [pgdata:/var/lib/postgresql/data]
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U botwa"]
       interval: 5s
       retries: 10
+
   server:
     build: { context: ., dockerfile: apps/server/Dockerfile }
     restart: unless-stopped
     env_file: .env
+    environment:
+      DATABASE_URL: postgres://botwa:${DB_PASSWORD}@db:5432/botwa
+      HOST: 0.0.0.0
+      NODE_ENV: production
+      TRUST_PROXY: "true"      # safe: port 3000 is NOT published, only Caddy can reach it
     depends_on: { db: { condition: service_healthy } }
-    ports: ["127.0.0.1:3000:3000"]   # expose only to the local reverse proxy (Caddy/Nginx, HTTPS)
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    environment:
+      DOMAIN: ${DOMAIN:?set DOMAIN in .env}
+    ports: ["80:80", "443:443"]
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on: [server]
+
 volumes:
   pgdata:
+  caddy_data:
+  caddy_config:

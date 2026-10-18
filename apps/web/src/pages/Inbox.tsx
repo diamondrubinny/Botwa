@@ -82,7 +82,7 @@ export function Inbox({ me }: { me: Me }) {
                 <li key={c.id}>
                   <button aria-current={c.id === selId} onClick={() => open(c)}>
                     <span className="conv-name">
-                      <span>{c.contactName ?? c.contactId.split('@')[0]}</span>
+                      <span>{c.contactName ?? c.contactId.split(/[@:]/)[0]}</span>
                       {c.unreadCount > 0 && <span className="unread"><span className="sr-only">הודעות שלא נקראו: </span>{c.unreadCount}</span>}
                     </span>
                     <span className="conv-last">{c.lastMessage}</span>
@@ -99,7 +99,7 @@ export function Inbox({ me }: { me: Me }) {
             <>
               <div className="row" style={{ marginBottom: '.75rem' }}>
                 <button className="back" onClick={() => setSelId(null)}>← חזרה לרשימה</button>
-                <h2 style={{ margin: 0 }}>{sel.contactName ?? sel.contactId.split('@')[0]}</h2>
+                <h2 style={{ margin: 0 }}>{sel.contactName ?? sel.contactId.split(/[@:]/)[0]}</h2>
                 <span className="spacer" />
                 {isManager ? (
                   <>
