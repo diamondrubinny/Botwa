@@ -1,6 +1,6 @@
 # Botwa – Self-Hosted Bot Manager (WhatsApp + Telegram QR Login)
 
-> Status: **SPEC / PLAN – awaiting approval. No code yet.**
+> Status: **Approved. P0+P1 implemented (apps/server). Next: P2.**
 > Working doc: all progress is tracked here (token-saving workflow).
 
 ## 1. Understanding
@@ -94,7 +94,16 @@ Messages/phone numbers = personal data → Israeli Privacy Law (Amendment 13) & 
 6. **P5** Telegram user QR adapter.
 7. **P6** Hardening: tests, dependency scan, a11y audit, pre-prod checklist.
 
-## 12. Open questions (need your answers)
+## 11a. Decisions (from user)
+- WhatsApp: unofficial QR (Baileys), accepted ban risk. **No Claude/AI API** anywhere.
+- Telegram: **user-account QR login** (gramJS). Bot-token adapter optional later.
+- Purpose: **internal customer support** → shared inbox: conversations, assign to agent, internal notes, canned replies, per-agent permissions.
+- Hosting: Ubuntu server (Docker Compose + Caddy/Nginx HTTPS) + admin panel.
+- Stack (my call): Node 22 + TS + Fastify + PostgreSQL (plain SQL migrations) + React. Redis deferred (not needed at this scale).
+- Scale: ~4000 customer contacts, 19 staff (roles: admin / supervisor / agent). Low concurrency → single server process is enough.
+- Done in P1: auth, MFA, lockout, sessions, users CRUD, audit, tests (9 passing).
+
+## 12. Open questions (answered – see 11a)
 1. **WhatsApp**: accept unofficial QR (Baileys) with ban risk, or prefer official Cloud API? (Or both, adapter-based.)
 2. **Telegram**: bot token (BotFather) only, or also user-account QR login (userbot)?
 3. **Purpose of the bot**: personal use / customer support / broadcast / auto-replies / AI? (affects legal + rate-limit design)

@@ -1,0 +1,21 @@
+services:
+  db:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: botwa
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?set DB_PASSWORD}
+      POSTGRES_DB: botwa
+    volumes: [pgdata:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U botwa"]
+      interval: 5s
+      retries: 10
+  server:
+    build: { context: ., dockerfile: apps/server/Dockerfile }
+    restart: unless-stopped
+    env_file: .env
+    depends_on: { db: { condition: service_healthy } }
+    ports: ["127.0.0.1:3000:3000"]   # expose only to the local reverse proxy (Caddy/Nginx, HTTPS)
+volumes:
+  pgdata:
