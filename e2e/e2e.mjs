@@ -1,10 +1,11 @@
 import { chromium } from 'playwright-core';
 import { authenticator } from 'otplib';
 import { readFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import { execSync } from 'node:child_process';
 
 const BASE = 'http://localhost:3077';
-const axeSrc = readFileSync(new URL('./node_modules/axe-core/axe.min.js', import.meta.url), 'utf8');
+const axeSrc = readFileSync(createRequire(import.meta.url).resolve('axe-core/axe.min.js'), 'utf8');
 const psql = (sql) => execSync(`psql -h localhost -U postgres -d botwa_e2e -tAc "${sql}"`, { env: { ...process.env, PGPASSWORD: 'pw' } }).toString().trim();
 let failures = 0;
 const check = (name, ok, extra = '') => { console.log(`${ok ? 'PASS' : 'FAIL'} ${name} ${extra}`); if (!ok) failures++; };
