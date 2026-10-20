@@ -151,6 +151,39 @@ describe('inbox & authorization', () => {
   });
 });
 
+describe('search, notes, canned replies', () => {
+  it('searches by name and message body, escapes wildcards, respects authz', async () => {
+    const q = async (who: string, term: string) => (await call('GET', `/conversations?q=${encodeURIComponent(term)}`, who)).json();
+    expect(await q('sup@t.io', 'dana')).toHaveLength(1);        // contact name, case-insensitive
+    expect(await q('sup@t.io', 'שלום')).toHaveLength(1);         // message body
+    expect(await q('sup@t.io', 'nothing-like-this')).toHaveLength(0);
+    expect(await q('sup@t.io', '%')).toHaveLength(0);           // literal %, not a wildcard
+    expect(await q('a2@t.io', 'dana')).toHaveLength(0);         // a2 may not see a1's conversation
+  });
+
+  it('internal notes: same access rules, never sent to the customer', async () => {
+    const sentBefore = FakeAdapter.last.sent.length;
+    expect((await call('POST', `/conversations/${convId}/notes`, 'a1@t.io', { body: 'לקוח VIP' })).statusCode).toBe(201);
+    expect((await call('POST', `/conversations/${convId}/notes`, 'a2@t.io', { body: 'x' })).statusCode).toBe(404);
+    expect((await call('GET', `/conversations/${convId}/notes`, 'a2@t.io')).statusCode).toBe(404);
+    const notes = (await call('GET', `/conversations/${convId}/notes`, 'sup@t.io')).json();
+    expect(notes).toHaveLength(1);
+    expect(notes[0]).toMatchObject({ body: 'לקוח VIP', authorName: 'a1@t.io' });
+    expect(FakeAdapter.last.sent.length).toBe(sentBefore);
+    expect((await call('POST', `/conversations/${convId}/notes`, 'a1@t.io', { body: '  ' })).statusCode).toBe(400);
+  });
+
+  it('canned replies: all read, only supervisors/admins write', async () => {
+    expect((await call('POST', '/canned-replies', 'a1@t.io', { title: 't', body: 'b' })).statusCode).toBe(403);
+    const c = await call('POST', '/canned-replies', 'sup@t.io', { title: 'ברכה', body: 'שלום, איך אפשר לעזור?' });
+    expect(c.statusCode).toBe(201);
+    expect((await call('GET', '/canned-replies', 'a1@t.io')).json()).toHaveLength(1);
+    expect((await call('DELETE', `/canned-replies/${c.json().id}`, 'a1@t.io')).statusCode).toBe(403);
+    expect((await call('DELETE', `/canned-replies/${c.json().id}`, 'sup@t.io')).statusCode).toBe(200);
+    expect((await call('GET', '/canned-replies')).statusCode).toBe(401);
+  });
+});
+
 describe('privacy & lifecycle', () => {
   it('retention purge removes old messages and empty closed conversations', async () => {
     await call('POST', `/conversations/${convId}/status`, 'a1@t.io', { status: 'closed' });

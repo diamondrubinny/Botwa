@@ -28,6 +28,7 @@ export function conversationRoutes(app: FastifyInstance, db: Db, mgr: ChannelMan
     const q = z
       .object({
         status: z.enum(['open', 'closed']).optional(),
+        q: z.string().trim().min(1).max(100).optional(),
         mine: z.enum(['true', 'false']).optional(),
         limit: z.coerce.number().int().min(1).max(100).default(50),
         offset: z.coerce.number().int().min(0).default(0),
@@ -44,8 +45,10 @@ export function conversationRoutes(app: FastifyInstance, db: Db, mgr: ChannelMan
         WHERE ($1::text IS NULL OR c.status = $1)
           AND ($2::boolean IS NOT TRUE OR c.assigned_to = $3)
           AND ($4::boolean OR c.assigned_to IS NULL OR c.assigned_to = $3)
+          AND ($7::text IS NULL OR ct.display_name ILIKE $7 OR ct.external_id ILIKE $7
+               OR EXISTS (SELECT 1 FROM messages sm WHERE sm.conversation_id = c.id AND sm.body ILIKE $7))
         ORDER BY c.last_message_at DESC LIMIT $5 OFFSET $6`,
-      [q.status ?? null, q.mine === 'true', u.id, isManager(u), q.limit, q.offset],
+      [q.status ?? null, q.mine === 'true', u.id, isManager(u), q.limit, q.offset, q.q ? `%${q.q.replace(/[\\%_]/g, '\\$&')}%` : null],
     );
     return rows;
   });
@@ -130,6 +133,53 @@ export function conversationRoutes(app: FastifyInstance, db: Db, mgr: ChannelMan
     if (!(await loadAccessible(db, req.user!, p.data.id))) return reply.code(404).send({ error: 'not_found' });
     await db.query('UPDATE conversations SET status = $2 WHERE id = $1', [p.data.id, b.data.status]);
     return { ok: true };
+  });
+
+  // Internal notes: visible to staff who can access the conversation, never sent to the customer.
+  app.get('/conversations/:id/notes', { preHandler: any }, async (req, reply) => {
+    const p = idParam.safeParse(req.params);
+    if (!p.success) return reply.code(400).send({ error: 'bad_request' });
+    if (!(await loadAccessible(db, req.user!, p.data.id))) return reply.code(404).send({ error: 'not_found' });
+    const { rows } = await db.query(
+      `SELECT n.id, n.body, u.name AS "authorName", n.created_at AS "createdAt"
+         FROM conversation_notes n LEFT JOIN users u ON u.id = n.author_id WHERE n.conversation_id = $1 ORDER BY n.created_at`,
+      [p.data.id],
+    );
+    return rows;
+  });
+
+  app.post('/conversations/:id/notes', { preHandler: any }, async (req, reply) => {
+    const p = idParam.safeParse(req.params);
+    const b = z.object({ body: z.string().trim().min(1).max(2000) }).safeParse(req.body);
+    if (!p.success || !b.success) return reply.code(400).send({ error: 'bad_request' });
+    if (!(await loadAccessible(db, req.user!, p.data.id))) return reply.code(404).send({ error: 'not_found' });
+    const { rows } = await db.query(
+      `INSERT INTO conversation_notes (conversation_id, author_id, body) VALUES ($1,$2,$3)
+       RETURNING id, body, created_at AS "createdAt"`,
+      [p.data.id, req.user!.id, b.data.body],
+    );
+    return reply.code(201).send(rows[0]);
+  });
+
+  // Canned replies: everyone reads, supervisors/admins curate.
+  const curators = requireAuth(db, ['admin', 'supervisor']);
+  app.get('/canned-replies', { preHandler: any }, async () => {
+    const { rows } = await db.query('SELECT id, title, body FROM canned_replies ORDER BY title');
+    return rows;
+  });
+  app.post('/canned-replies', { preHandler: curators }, async (req, reply) => {
+    const b = z.object({ title: z.string().trim().min(1).max(80), body: z.string().trim().min(1).max(4000) }).safeParse(req.body);
+    if (!b.success) return reply.code(400).send({ error: 'bad_request' });
+    const { rows } = await db.query('INSERT INTO canned_replies (title, body, created_by) VALUES ($1,$2,$3) RETURNING id, title, body', [
+      b.data.title, b.data.body, req.user!.id,
+    ]);
+    return reply.code(201).send(rows[0]);
+  });
+  app.delete('/canned-replies/:id', { preHandler: curators }, async (req, reply) => {
+    const p = idParam.safeParse(req.params);
+    if (!p.success) return reply.code(400).send({ error: 'bad_request' });
+    const r = await db.query('DELETE FROM canned_replies WHERE id=$1', [p.data.id]);
+    return r.rowCount ? { ok: true } : reply.code(404).send({ error: 'not_found' });
   });
 
   // Privacy: data-subject export / erasure for one contact (admin only, audited).

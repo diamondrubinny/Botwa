@@ -26,3 +26,5 @@ export interface Conversation {
   channelLabel: string; channelType: string; lastMessage: string | null;
 }
 export interface Message { id: string; direction: 'in' | 'out'; body: string; senderName: string | null; createdAt: string }
+export interface Note { id: string; body: string; authorName: string | null; createdAt: string }
+export interface Canned { id: string; title: string; body: string }

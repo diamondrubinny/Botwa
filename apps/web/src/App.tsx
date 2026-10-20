@@ -3,6 +3,7 @@ import { api, type Me } from './api';
 import { A11yWidget } from './components/A11yWidget';
 import { useHashRoute } from './hooks';
 import { Account } from './pages/Account';
+import { CannedReplies } from './pages/Canned';
 import { Channels } from './pages/Channels';
 import { Inbox } from './pages/Inbox';
 import { Accessibility, Privacy } from './pages/Legal';
@@ -28,7 +29,7 @@ export function App() {
   const page = me.mfaEnrollmentRequired ? 'account' : route;
 
   const links: [string, string][] = [['inbox', t.nav.inbox]];
-  if (isManager) links.push(['channels', t.nav.channels], ['team', t.nav.team]);
+  if (isManager) links.push(['canned', 'תשובות מוכנות'], ['channels', t.nav.channels], ['team', t.nav.team]);
   links.push(['account', t.nav.account]);
 
   async function logout() {
@@ -59,11 +60,12 @@ export function App() {
         )}
         {page === 'inbox' && <Inbox me={me} />}
         {page === 'channels' && isManager && <Channels isAdmin={isAdmin} />}
+        {page === 'canned' && isManager && <CannedReplies />}
         {page === 'team' && isManager && <Team meId={me.id} isAdmin={isAdmin} />}
         {page === 'account' && <Account me={me} onChanged={loadMe} />}
         {page === 'accessibility' && <Accessibility />}
         {page === 'privacy' && <Privacy />}
-        {!['inbox', 'channels', 'team', 'account', 'accessibility', 'privacy'].includes(page) && (
+        {!['inbox', 'canned', 'channels', 'team', 'account', 'accessibility', 'privacy'].includes(page) && (
           <><h1 tabIndex={-1}>הדף לא נמצא</h1><p><a href="#/inbox">חזרה לשיחות</a></p></>
         )}
       </main>

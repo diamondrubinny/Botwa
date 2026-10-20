@@ -66,6 +66,13 @@ await page.click('button:has-text("יצירת משתמש")');
 await page.waitForSelector('td:has-text("dana@e2e.io")');
 await axe('team');
 
+// canned replies page
+await page.click('nav >> text=תשובות מוכנות');
+await page.fill('#c-title', 'ברכה'); await page.fill('#c-body', 'שלום, איך אפשר לעזור?');
+await page.click('button:has-text("הוספה")');
+await page.waitForSelector('li.card:has-text("ברכה")');
+await axe('canned replies');
+
 // seed an inbound conversation directly (adapter can't reach WhatsApp here)
 const ch = psql("SELECT id FROM channels LIMIT 1");
 psql(`INSERT INTO contacts (channel_id, external_id, display_name) VALUES ('${ch}','972501234567@s.whatsapp.net','יוסי לקוח')`);
@@ -78,6 +85,19 @@ check('conversation listed with unread', (await page.textContent('.unread')).inc
 await page.click('.conv-list button');
 await page.waitForSelector('.msg.in');
 await axe('inbox open conversation');
+await page.selectOption('#canned', { label: 'ברכה' });
+check('canned reply inserted', (await page.inputValue('#reply')).includes('איך אפשר לעזור'));
+await page.fill('#note', 'לקוח חשוב'); await page.click('button:has-text("הוספת הערה")');
+await page.waitForSelector('#notes-h ~ ul li:has-text("לקוח חשוב")');
+check('internal note added', true);
+await axe('inbox with notes + canned');
+await page.fill('#srch', 'הזמנה');
+await page.waitForSelector('.conv-list button');
+await page.fill('#srch', 'zzzz-none');
+await page.waitForSelector('text=אין שיחות להצגה');
+check('search filters list', true);
+await page.fill('#srch', '');
+await page.waitForSelector('.conv-list button');
 await page.fill('#reply', 'שלום, אני בודק'); await page.click('button:has-text("שליחה")');
 await page.waitForSelector('text=הערוץ אינו מחובר');
 check('send while disconnected shows friendly error', true);
