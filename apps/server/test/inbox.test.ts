@@ -18,7 +18,7 @@ const cfg = loadConfig({
   DATABASE_URL: process.env.TEST_DATABASE_URL ?? 'postgres://postgres@localhost:5432/botwa_test',
   ENCRYPTION_KEY: randomBytes(32).toString('base64'),
   APP_ORIGIN: ORIGIN,
-  COOKIE_SECURE: 'false',
+  COOKIE_SECURE: 'false', REQUIRE_MFA_FOR_PRIVILEGED: 'false',
 });
 const db = createDb(cfg.DATABASE_URL);
 
@@ -148,6 +148,21 @@ describe('inbox & authorization', () => {
     FakeAdapter.last.ctx.events.onStatus('stopped');
     await tick();
     expect((await call('POST', `/conversations/${convId}/messages`, 'a1@t.io', { text: 'x' })).statusCode).toBe(409);
+  });
+});
+
+describe('assignment races', () => {
+  it('two agents claiming the same unassigned conversation: exactly one wins', async () => {
+    await FakeAdapter.last.ctx.events.onMessage({ externalContactId: 'race@s.whatsapp.net', externalMessageId: 'r1', text: 'hi', timestamp: new Date() });
+    const id = (await db.query(`SELECT c.id FROM conversations c JOIN contacts ct ON ct.id=c.contact_id WHERE ct.external_id='race@s.whatsapp.net'`)).rows[0].id;
+    const [r1, r2] = await Promise.all([
+      call('POST', `/conversations/${id}/assign`, 'a1@t.io', { userId: ids['a1@t.io'] }),
+      call('POST', `/conversations/${id}/assign`, 'a2@t.io', { userId: ids['a2@t.io'] }),
+    ]);
+    expect([r1.statusCode, r2.statusCode].filter((c) => c === 200)).toHaveLength(1);
+    const owner = (await db.query('SELECT assigned_to FROM conversations WHERE id=$1', [id])).rows[0].assigned_to;
+    expect([ids['a1@t.io'], ids['a2@t.io']]).toContain(owner);
+    await db.query(`DELETE FROM contacts WHERE external_id='race@s.whatsapp.net'`); // keep later retention test's counts exact
   });
 });
 

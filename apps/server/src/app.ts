@@ -29,6 +29,7 @@ export async function buildApp(cfg: Config, db: Db, mgr: ChannelManager, media: 
     bodyLimit: 100 * 1024,
   });
 
+  app.decorate('mfaEnforced', cfg.REQUIRE_MFA_FOR_PRIVILEGED);
   await app.register(helmet, {
     contentSecurityPolicy: { directives: { defaultSrc: ["'self'"], frameAncestors: ["'none'"] } },
     hsts: cfg.COOKIE_SECURE ? { maxAge: 31536000, includeSubDomains: true } : false,

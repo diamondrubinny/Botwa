@@ -110,7 +110,11 @@ export function conversationRoutes(app: FastifyInstance, db: Db, mgr: ChannelMan
       const ok = await db.query('SELECT 1 FROM users WHERE id=$1 AND active', [target]);
       if (!ok.rowCount) return reply.code(400).send({ error: 'invalid_user' });
     }
-    await db.query('UPDATE conversations SET assigned_to = $2 WHERE id = $1', [conv.id, target]);
+    // Non-managers may only change the assignment they validated above: compare-and-set against a concurrent change.
+    const upd = isManager(u)
+      ? await db.query('UPDATE conversations SET assigned_to = $2 WHERE id = $1', [conv.id, target])
+      : await db.query('UPDATE conversations SET assigned_to = $2 WHERE id = $1 AND assigned_to IS NOT DISTINCT FROM $3', [conv.id, target, conv.assigned_to]);
+    if (!upd.rowCount) return reply.code(409).send({ error: 'conflict' });
     await audit(db, { actorId: u.id, action: 'conversation.assign', target: conv.id, ip: req.ip, meta: { to: target } });
     return { ok: true };
   });

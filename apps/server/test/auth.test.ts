@@ -102,12 +102,37 @@ describe('auth', () => {
     expect((await login('mfa@t.io', { totp: authenticator.generate(setup.secret) })).res.statusCode).toBe(200);
   });
 
-  it('locks account after repeated failures', async () => {
+  it('locks account after repeated failures, with a response indistinguishable from a wrong password', async () => {
     await mkUser('lock@t.io', 'agent');
     // rate limiter allows 10/min per IP; stay under it
     for (let i = 0; i < 5; i++) await post('/auth/login', { email: 'lock@t.io', password: 'bad-bad-bad-bad' });
-    const { res } = await login('lock@t.io');
-    expect(res.statusCode).toBe(429);
+    const { res } = await login('lock@t.io'); // correct password, but locked
+    expect(res.statusCode).toBe(401);
+    expect(res.json()).toEqual({ error: 'invalid_credentials' });
+    expect((await db.query(`SELECT locked_until FROM users WHERE email='lock@t.io'`)).rows[0].locked_until).not.toBeNull();
+  });
+
+  it('lockout counter cannot be raced: 25 concurrent wrong guesses still lock the account', async () => {
+    await mkUser('race@t.io', 'agent');
+    await Promise.all(Array.from({ length: 25 }, () => post('/auth/login', { email: 'race@t.io', password: 'bad-bad-bad-bad' })));
+    expect((await db.query(`SELECT locked_until FROM users WHERE email='race@t.io'`)).rows[0].locked_until).not.toBeNull();
+    expect((await login('race@t.io')).res.statusCode).toBe(401);
+  });
+
+  it('server enforces MFA enrolment for privileged roles (not just the UI)', async () => {
+    await mkUser('sup@t.io', 'supervisor');
+    const { cookie } = await login('sup@t.io');
+    const get = (url: string) => app.inject({ url, headers: { cookie } });
+    expect((await get('/users')).json()).toEqual({ error: 'mfa_enrollment_required' });
+    expect((await get('/conversations')).statusCode).toBe(403);
+    expect((await get('/auth/me')).statusCode).toBe(200); // enrolment endpoints stay reachable
+    const setup = (await post('/auth/mfa/setup', {}, cookie)).json();
+    await post('/auth/mfa/enable', { code: authenticator.generate(setup.secret) }, cookie);
+    const again = await login('sup@t.io', { totp: authenticator.generate(setup.secret) });
+    expect((await app.inject({ url: '/users', headers: { cookie: again.cookie } })).statusCode).toBe(200);
+    // non-privileged roles are not affected
+    const agent = await login('agent@t.io');
+    expect((await app.inject({ url: '/conversations', headers: { cookie: agent.cookie } })).statusCode).toBe(200);
   });
 });
 
@@ -127,7 +152,10 @@ describe('rate limit', () => {
 
 describe('users admin', () => {
   it('admin creates, updates, deactivates users; cannot demote self; sessions revoked', async () => {
-    const { cookie } = await login('admin@t.io');
+    // privileged accounts must have MFA: enrol the admin first
+    const adminSecret = authenticator.generateSecret();
+    await db.query('UPDATE users SET totp_enabled = true, totp_secret_enc = $1 WHERE email = $2', [encrypt(adminSecret, cfg.ENCRYPTION_KEY), 'admin@t.io']);
+    const { cookie } = await login('admin@t.io', { totp: authenticator.generate(adminSecret) });
     const created = await post('/users', { email: 'New@T.io', name: 'New', role: 'agent', password: PW }, cookie);
     expect(created.statusCode).toBe(201);
     expect(created.json().email).toBe('new@t.io');

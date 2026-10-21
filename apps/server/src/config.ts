@@ -23,7 +23,10 @@ const schema = z.object({
   TELEGRAM_API_HASH: z.string().min(8).optional(),
   // Media (images/documents/voice). Enabled only when a ClamAV daemon is configured (fail closed).
   MEDIA_DIR: z.string().default('./data/media'),
-  MEDIA_MAX_MB: z.coerce.number().int().min(1).max(100).default(16),
+  // Keep <= clamd StreamMaxLength (default 25 MB) or large files fail to scan (fail closed).
+  MEDIA_MAX_MB: z.coerce.number().int().min(1).max(25).default(16),
+  MEDIA_MAX_TOTAL_GB: z.coerce.number().min(0.1).default(20),
+  MEDIA_MAX_FILES_PER_CONTACT_DAY: z.coerce.number().int().min(1).default(50),
   CLAMAV_HOST: z.string().min(1).optional(),
   CLAMAV_PORT: z.coerce.number().int().default(3310),
   MEDIA_ALLOW_UNSCANNED: bool('false'), // development only: accept files without antivirus

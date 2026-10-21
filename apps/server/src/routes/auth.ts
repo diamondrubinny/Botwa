@@ -18,7 +18,8 @@ const loginBody = z.object({
 });
 
 export function authRoutes(app: FastifyInstance, db: Db, cfg: Config) {
-  const auth = requireAuth(db);
+  // Enrolment endpoints must stay reachable for privileged users who still have to set up MFA.
+  const auth = requireAuth(db, undefined, { allowEnrollment: true });
   const invalid = { error: 'invalid_credentials' };
 
   app.post('/auth/login', { config: { rateLimit: { max: 10, timeWindow: '1 minute' } } }, async (req, reply) => {
@@ -34,8 +35,10 @@ export function authRoutes(app: FastifyInstance, db: Db, cfg: Config) {
       return reply.code(401).send(invalid);
     }
     if (u.locked_until && new Date(u.locked_until) > new Date()) {
+      // Same response as a wrong password: do not reveal that the account exists or is locked.
+      await dummyVerify(password);
       await audit(db, { actorId: u.id, action: 'login.locked', ip: req.ip });
-      return reply.code(429).send({ error: 'account_locked' });
+      return reply.code(401).send(invalid);
     }
 
     let ok = await verifyPassword(u.password_hash, password);
@@ -44,12 +47,15 @@ export function authRoutes(app: FastifyInstance, db: Db, cfg: Config) {
       ok = authenticator.check(totp, decrypt(u.totp_secret_enc, cfg.ENCRYPTION_KEY));
     }
     if (!ok) {
-      const fails = u.failed_logins + 1;
-      const lock = fails >= MAX_FAILS;
-      await db.query(
-        `UPDATE users SET failed_logins = $2, locked_until = CASE WHEN $3 THEN now() + make_interval(mins => $4) END WHERE id = $1`,
-        [u.id, lock ? 0 : fails, lock, LOCK_MINUTES],
+      // Single atomic statement: concurrent guesses cannot read the same counter value.
+      const upd = await db.query(
+        `UPDATE users
+            SET failed_logins = CASE WHEN failed_logins + 1 >= $2 THEN 0 ELSE failed_logins + 1 END,
+                locked_until  = CASE WHEN failed_logins + 1 >= $2 THEN now() + make_interval(mins => $3) ELSE locked_until END
+          WHERE id = $1 RETURNING (failed_logins = 0) AS locked`,
+        [u.id, MAX_FAILS, LOCK_MINUTES],
       );
+      const lock = upd.rows[0]?.locked === true;
       await audit(db, { actorId: u.id, action: lock ? 'login.lockout' : 'login.fail', ip: req.ip });
       return reply.code(401).send(invalid);
     }

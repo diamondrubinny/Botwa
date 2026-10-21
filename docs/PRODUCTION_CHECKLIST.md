@@ -26,7 +26,9 @@ Status legend: ✅ done in code/tests · 🔲 must be done by the operator · �
 - 🔲 Attachments in production: `--profile media` is up and `clamav` is healthy; signatures are current (`docker compose logs clamav | grep -i database`); send a real photo and a PDF from a phone and confirm both arrive as `clean`
 - Known limitations: AV is signature-based (no zero-day guarantee); PDF/Office files are offered as downloads and can still be malicious to open on a workstation – train staff, keep endpoints protected; images are not re-encoded; files are stored unencrypted on the `media` volume (encrypt the disk/volume at rest); voice/video are not transcoded or previewed.
 - 🔲 Back up the `media` volume together with the database; retention deletes files together with messages
-- Known limitation: login rate limit is per IP (in-memory, single process); account lockout is per account (DB).
+- ✅ Independent code-level security review (separate reviewer, read-only, traced end to end): no high-severity issues; the medium/low findings were fixed with regression tests: atomic lockout counter (race-proof), server-side MFA enforcement for admin/supervisor, locked accounts indistinguishable from wrong password, inbound-media quotas + concurrency cap, scan/claim races. This is NOT a penetration test.
+- Known limitation: login rate limit is per IP (in-memory, single process); account lockout is per account (DB). A known email can still be locked out for 15 minutes by an attacker (the response no longer reveals it, but the legitimate user is affected; admin can see `login.lockout` in the audit log).
+- Known limitation: inbound media is fully buffered in memory during download (bounded by `MEDIA_MAX_MB` and max 4 concurrent).
 
 ## Backup & recovery
 - 🔲 Daily `scripts/backup.sh` cron + off-server copy + GPG encryption

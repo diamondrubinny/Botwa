@@ -16,6 +16,10 @@ export interface AuthUser {
 }
 
 declare module 'fastify' {
+  interface FastifyInstance {
+    /** REQUIRE_MFA_FOR_PRIVILEGED: admins/supervisors without TOTP are blocked from everything except enrolment. */
+    mfaEnforced: boolean;
+  }
   interface FastifyRequest {
     user?: AuthUser;
   }
@@ -34,11 +38,14 @@ export async function loadSession(db: Db, token: string): Promise<AuthUser | nul
 }
 
 /** preHandler factory: authenticates via session cookie and optionally restricts roles. */
-export function requireAuth(db: Db, roles?: Role[]) {
+export function requireAuth(db: Db, roles?: Role[], opts?: { allowEnrollment?: boolean }) {
   return async (req: FastifyRequest, reply: FastifyReply) => {
     const token = req.cookies[SESSION_COOKIE];
     const user = token ? await loadSession(db, token) : null;
     if (!user) return reply.code(401).send({ error: 'unauthenticated' });
+    if (!opts?.allowEnrollment && req.server.mfaEnforced && isPrivileged(user.role) && !user.totpEnabled) {
+      return reply.code(403).send({ error: 'mfa_enrollment_required' });
+    }
     if (roles && !roles.includes(user.role)) return reply.code(403).send({ error: 'forbidden' });
     req.user = user;
   };

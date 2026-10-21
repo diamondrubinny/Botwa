@@ -15,7 +15,7 @@ const base = {
   DATABASE_URL: process.env.TEST_DATABASE_URL ?? 'postgres://postgres@localhost:5432/botwa_test',
   ENCRYPTION_KEY: randomBytes(32).toString('base64'),
   APP_ORIGIN: ORIGIN,
-  COOKIE_SECURE: 'false',
+  COOKIE_SECURE: 'false', REQUIRE_MFA_FOR_PRIVILEGED: 'false',
 };
 const cfg = loadConfig(base);
 const db = createDb(cfg.DATABASE_URL);

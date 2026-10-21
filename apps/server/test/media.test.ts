@@ -143,7 +143,7 @@ describe('media pipeline', () => {
     clam = await startFakeClamd();
     cfg = loadConfig({
       NODE_ENV: 'test', DATABASE_URL: process.env.TEST_DATABASE_URL ?? 'postgres://postgres@localhost:5432/botwa_test',
-      ENCRYPTION_KEY: randomBytes(32).toString('base64'), APP_ORIGIN: ORIGIN, COOKIE_SECURE: 'false',
+      ENCRYPTION_KEY: randomBytes(32).toString('base64'), APP_ORIGIN: ORIGIN, COOKIE_SECURE: 'false', REQUIRE_MFA_FOR_PRIVILEGED: 'false',
       MEDIA_DIR: mediaDir, MEDIA_MAX_MB: '1', CLAMAV_HOST: '127.0.0.1', CLAMAV_PORT: String(clam.port),
     });
     await db.query('DROP SCHEMA public CASCADE; CREATE SCHEMA public;');
@@ -266,6 +266,37 @@ describe('media pipeline', () => {
     await clam.close();
     expect((await upload(convId, 'a1@t.io', PNG, 'x.png')).statusCode).toBe(503);
     clam = await startFakeClamd(port);
+  });
+
+  it('concurrent scans of the same pending file never mislabel it as blocked', async () => {
+    const port = clam.port;
+    await clam.close();
+    await inbound('race1', '', { fileName: 'r.png', data: PNG });
+    const a = await att('race1');
+    expect(a.status).toBe('pending');
+    clam = await startFakeClamd(port);
+    await Promise.all([media.scan(a.id), media.scan(a.id), media.scan(a.id)]);
+    expect((await att('race1')).status).toBe('clean');
+    expect((await call('GET', `/attachments/${a.id}`, 'a1@t.io')).statusCode).toBe(200);
+  });
+
+  it('per-contact daily file quota and global byte cap block floods', async () => {
+    const tight = new MediaService(db, loadConfig({
+      NODE_ENV: 'test', DATABASE_URL: cfg.DATABASE_URL, ENCRYPTION_KEY: cfg.ENCRYPTION_KEY, APP_ORIGIN: ORIGIN, COOKIE_SECURE: 'false',
+      MEDIA_DIR: mediaDir, CLAMAV_HOST: '127.0.0.1', CLAMAV_PORT: String(clam.port), MEDIA_MAX_FILES_PER_CONTACT_DAY: '1',
+    }));
+    await inbound('q1', ''); await inbound('q2', '');
+    const id = async (e: string) => (await db.query(`SELECT id FROM messages WHERE external_id=$1`, [e])).rows[0].id;
+    // the conversation already has several attachments today, so even the first one exceeds a cap of 1
+    await tight.ingestInbound(await id('q1'), { fileName: 'a.png', download: async () => PNG });
+    expect(await att('q1')).toMatchObject({ status: 'blocked', detail: 'quota_exceeded', storage_name: null });
+    const capped = new MediaService(db, loadConfig({
+      NODE_ENV: 'test', DATABASE_URL: cfg.DATABASE_URL, ENCRYPTION_KEY: cfg.ENCRYPTION_KEY, APP_ORIGIN: ORIGIN, COOKIE_SECURE: 'false',
+      MEDIA_DIR: mediaDir, CLAMAV_HOST: '127.0.0.1', CLAMAV_PORT: String(clam.port), MEDIA_MAX_TOTAL_GB: '0.1',
+    }));
+    await db.query(`UPDATE attachments SET size = 200 * 1024 * 1024 WHERE id = (SELECT id FROM attachments WHERE storage_name IS NOT NULL LIMIT 1)`);
+    await capped.ingestInbound(await id('q2'), { fileName: 'b.png', download: async () => PNG });
+    expect(await att('q2')).toMatchObject({ status: 'blocked', detail: 'quota_exceeded' });
   });
 
   it('media disabled when no scanner configured (fail closed)', async () => {

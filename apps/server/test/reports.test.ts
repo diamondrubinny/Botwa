@@ -11,7 +11,7 @@ const ORIGIN = 'https://panel.test';
 const PW = 'correct-horse-battery';
 const cfg = loadConfig({
   NODE_ENV: 'test', DATABASE_URL: process.env.TEST_DATABASE_URL ?? 'postgres://postgres@localhost:5432/botwa_test',
-  ENCRYPTION_KEY: randomBytes(32).toString('base64'), APP_ORIGIN: ORIGIN, COOKIE_SECURE: 'false',
+  ENCRYPTION_KEY: randomBytes(32).toString('base64'), APP_ORIGIN: ORIGIN, COOKIE_SECURE: 'false', REQUIRE_MFA_FOR_PRIVILEGED: 'false',
 });
 const db = createDb(cfg.DATABASE_URL);
 let app: Awaited<ReturnType<typeof buildApp>>;

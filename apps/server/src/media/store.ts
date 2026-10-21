@@ -37,7 +37,8 @@ export class MediaService {
   }
 
   async scanBuffer(buf: Buffer): Promise<ScanResult> {
-    if (this.cfg.CLAMAV_HOST) return clamScan(buf, { host: this.cfg.CLAMAV_HOST, port: this.cfg.CLAMAV_PORT });
+    const host = this.cfg.CLAMAV_HOST;
+    if (host) return this.limit(() => clamScan(buf, { host, port: this.cfg.CLAMAV_PORT }));
     return this.cfg.MEDIA_ALLOW_UNSCANNED ? { status: 'clean' } : { status: 'error', detail: 'scanner_not_configured' };
   }
 
@@ -60,8 +61,9 @@ export class MediaService {
     try {
       if (!this.enabled) return await block('media_disabled');
       if (media.size && media.size > this.maxBytes) return await block('too_large');
+      if (!(await this.withinQuota(messageId))) return await block('quota_exceeded');
       let buf: Buffer;
-      try { buf = await media.download(); } catch { return await block('download_failed'); }
+      try { buf = await this.limit(() => media.download()); } catch { return await block('download_failed'); }
       if (buf.length > this.maxBytes) return await block('too_large');
       const d = await detect(buf);
       if (!d) return await block('type_not_allowed');
@@ -78,6 +80,28 @@ export class MediaService {
     }
   }
 
+  // At most a few downloads/scans in flight, so a flood of files cannot exhaust memory.
+  private active = 0;
+  private waiters: (() => void)[] = [];
+  private async limit<T>(fn: () => Promise<T>): Promise<T> {
+    while (this.active >= 4) await new Promise<void>((r) => this.waiters.push(r));
+    this.active++;
+    try { return await fn(); } finally { this.active--; this.waiters.shift()?.(); }
+  }
+
+  /** Disk-fill protection: global byte cap and a per-contact daily file cap (inbound media is customer-controlled). */
+  private async withinQuota(messageId: string): Promise<boolean> {
+    const { rows } = await this.db.query(
+      `SELECT
+         (SELECT COALESCE(sum(size), 0) FROM attachments WHERE storage_name IS NOT NULL)::bigint AS total,
+         (SELECT count(*) FROM attachments a JOIN messages m ON m.id = a.message_id
+            WHERE a.created_at > now() - interval '1 day'
+              AND m.conversation_id = (SELECT conversation_id FROM messages WHERE id = $1))::int AS recent`,
+      [messageId],
+    );
+    return Number(rows[0].total) < this.cfg.MEDIA_MAX_TOTAL_GB * 1024 ** 3 && rows[0].recent < this.cfg.MEDIA_MAX_FILES_PER_CONTACT_DAY;
+  }
+
   private async writeFile(sub: 'quarantine' | 'clean', name: string, buf: Buffer): Promise<void> {
     const p = path.join(this.dir(sub), name);
     await writeFile(p, buf, { mode: 0o600, flag: 'wx' });
@@ -92,28 +116,36 @@ export class MediaService {
     const q = path.join(this.dir('quarantine'), row.storage_name);
     let buf: Buffer;
     try { buf = await readFile(q); } catch {
-      await this.db.query(`UPDATE attachments SET status='blocked', detail='file_missing' WHERE id=$1`, [attachmentId]);
+      const cur = await this.db.query('SELECT status FROM attachments WHERE id=$1', [attachmentId]);
+      if (cur.rows[0] && cur.rows[0].status !== 'pending') return cur.rows[0].status; // a concurrent scan already finished
+      await this.db.query(`UPDATE attachments SET status='blocked', detail='file_missing' WHERE id=$1 AND status='pending'`, [attachmentId]);
       return 'blocked';
     }
     const res = await this.scanBuffer(buf);
     if (res.status === 'clean') {
-      await rename(q, this.cleanPath(row.storage_name));
-      await this.db.query(`UPDATE attachments SET status='clean', detail=NULL WHERE id=$1`, [attachmentId]);
+      try {
+        await rename(q, this.cleanPath(row.storage_name));
+      } catch {
+        // lost a race with a concurrent scan of the same file; its outcome stands
+        const cur = await this.db.query('SELECT status FROM attachments WHERE id=$1', [attachmentId]);
+        return cur.rows[0]?.status ?? 'blocked';
+      }
+      await this.db.query(`UPDATE attachments SET status='clean', detail=NULL WHERE id=$1 AND status='pending'`, [attachmentId]);
       return 'clean';
     }
     if (res.status === 'infected') {
       await unlink(q).catch(() => undefined);
-      await this.db.query(`UPDATE attachments SET status='infected', detail=$2, storage_name=NULL WHERE id=$1`, [attachmentId, res.detail]);
+      await this.db.query(`UPDATE attachments SET status='infected', detail=$2, storage_name=NULL WHERE id=$1 AND status='pending'`, [attachmentId, res.detail]);
       await audit(this.db, { action: 'media.infected', target: attachmentId, meta: { signature: res.detail } });
       return 'infected';
     }
     const attempts = row.scan_attempts + 1;
     if (attempts >= MAX_SCAN_ATTEMPTS) {
       await unlink(q).catch(() => undefined);
-      await this.db.query(`UPDATE attachments SET status='blocked', detail='scan_failed', storage_name=NULL, scan_attempts=$2 WHERE id=$1`, [attachmentId, attempts]);
+      await this.db.query(`UPDATE attachments SET status='blocked', detail='scan_failed', storage_name=NULL, scan_attempts=$2 WHERE id=$1 AND status='pending'`, [attachmentId, attempts]);
       return 'blocked';
     }
-    await this.db.query('UPDATE attachments SET scan_attempts=$2, detail=$3 WHERE id=$1', [attachmentId, attempts, res.detail]);
+    await this.db.query(`UPDATE attachments SET scan_attempts=$2, detail=$3 WHERE id=$1 AND status='pending'`, [attachmentId, attempts, res.detail]);
     return 'pending';
   }
 
