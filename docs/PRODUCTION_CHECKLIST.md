@@ -23,7 +23,7 @@ Status legend: ✅ done in code/tests · 🔲 must be done by the operator · �
 - 🔲 Postgres port not published (compose does not publish it) ✔ verify with `ss -ltnp`
 - ⚖️ Independent penetration test (recommended before storing real customer data)
 - ✅ Attachments: content-based type allowlist, size limit (`MEDIA_MAX_MB`), random storage names, quarantine → ClamAV scan → clean, infected deleted + audited, never served unless clean, sandbox/nosniff headers, scan-before-send for staff uploads, fail-closed when scanner down/unset (tested incl. a real clamd daemon)
-- 🔲 Attachments in production: `--profile media` up and healthy; send EICAR test file (https://www.eicar.org/download-anti-malware-testfile/) inside an allowed container type is NOT needed – instead verify `docker compose exec clamav clamdscan` works and signatures are current (`freshclam` log)
+- 🔲 Attachments in production: `--profile media` is up and `clamav` is healthy; signatures are current (`docker compose logs clamav | grep -i database`); send a real photo and a PDF from a phone and confirm both arrive as `clean`
 - Known limitations: AV is signature-based (no zero-day guarantee); PDF/Office files are offered as downloads and can still be malicious to open on a workstation – train staff, keep endpoints protected; images are not re-encoded; files are stored unencrypted on the `media` volume (encrypt the disk/volume at rest); voice/video are not transcoded or previewed.
 - 🔲 Back up the `media` volume together with the database; retention deletes files together with messages
 - Known limitation: login rate limit is per IP (in-memory, single process); account lockout is per account (DB).
