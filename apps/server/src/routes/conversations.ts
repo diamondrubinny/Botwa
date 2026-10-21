@@ -24,7 +24,7 @@ export function conversationRoutes(app: FastifyInstance, db: Db, mgr: ChannelMan
     const u = req.user!;
     const { rows } = await db.query(
       `SELECT c.id, c.channel_id AS "channelId", c.status, c.assigned_to AS "assignedTo", c.unread_count AS "unreadCount",
-              c.last_message_at AS "lastMessageAt", ct.display_name AS "contactName", ct.external_id AS "contactId",
+              c.last_message_at AS "lastMessageAt", ct.display_name AS "contactName", ct.external_id AS "contactId", ct.id AS "contactRowId",
               ch.label AS "channelLabel", ch.type AS "channelType", au.name AS "assignedName",
               (SELECT COALESCE(NULLIF(m.body, ''), '[קובץ מצורף]') FROM messages m WHERE m.conversation_id = c.id ORDER BY created_at DESC LIMIT 1) AS "lastMessage"
          FROM conversations c JOIN contacts ct ON ct.id = c.contact_id

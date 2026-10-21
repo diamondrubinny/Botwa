@@ -22,7 +22,7 @@ export interface UserRow { id: string; email: string; name: string; role: Role; 
 export interface Channel { id: string; type: 'whatsapp' | 'telegram'; label: string; status: string }
 export interface Conversation {
   id: string; channelId: string; status: 'open' | 'closed'; assignedTo: string | null; assignedName: string | null;
-  unreadCount: number; lastMessageAt: string; contactName: string | null; contactId: string;
+  unreadCount: number; lastMessageAt: string; contactName: string | null; contactId: string; contactRowId: string;
   channelLabel: string; channelType: string; lastMessage: string | null;
 }
 export interface Attachment { id: string; kind: string; mime: string | null; size: number | null; fileName: string | null; status: 'pending' | 'clean' | 'infected' | 'blocked'; detail: string | null }

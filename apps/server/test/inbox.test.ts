@@ -226,3 +226,42 @@ describe('privacy & lifecycle', () => {
     expect((await call('POST', `/channels/${channelId}/start`, 'admin@t.io')).statusCode).toBe(404);
   });
 });
+
+describe('live events (SSE)', () => {
+  it('delivers content-free events only for conversations the user may access', async () => {
+    // earlier tests deleted the original channel; set up a fresh one
+    const ch = (await call('POST', '/channels', 'admin@t.io', { type: 'whatsapp', label: 'Live' })).json().id;
+    await call('POST', `/channels/${ch}/start`, 'admin@t.io');
+    await tick();
+    if (!app.server.listening) await app.listen({ port: 0, host: '127.0.0.1' });
+    const port = (app.server.address() as { port: number }).port;
+    const listen = (who?: string) => {
+      const got: string[] = [];
+      let status = 0;
+      const req = http.get({ port, path: '/events', headers: who ? { cookie: cookies[who]! } : {} }, (res) => {
+        status = res.statusCode!;
+        res.setEncoding('utf8');
+        res.on('data', (c: string) => got.push(c));
+      });
+      return { got, status: () => status, close: () => req.destroy() };
+    };
+    expect(await new Promise((r) => { const q = http.get({ port, path: '/events' }, (res) => r(res.statusCode)); q.on('error', () => r(0)); })).toBe(401);
+
+    // conversation assigned to a1: a1 and sup get the event, a2 must not
+    await FakeAdapter.last.ctx.events.onMessage({ externalContactId: 'live@s.whatsapp.net', externalMessageId: 'live0', text: 'x', timestamp: new Date() });
+    const live = (await db.query(`SELECT c.id FROM conversations c JOIN contacts ct ON ct.id=c.contact_id WHERE ct.external_id='live@s.whatsapp.net'`)).rows[0].id;
+    await call('POST', `/conversations/${live}/assign`, 'a1@t.io', { userId: ids['a1@t.io'] });
+    const [a1, a2, sup] = [listen('a1@t.io'), listen('a2@t.io'), listen('sup@t.io')];
+    await tick(); await tick();
+    await FakeAdapter.last.ctx.events.onMessage({ externalContactId: 'live@s.whatsapp.net', externalMessageId: 'live1', text: 'secret text', timestamp: new Date() });
+    await new Promise((r) => setTimeout(r, 300));
+    const text = (l: { got: string[] }) => l.got.join('');
+    expect(a1.status()).toBe(200);
+    expect(text(a1)).toContain(live);
+    expect(text(sup)).toContain(live);
+    expect(text(a2)).not.toContain(live);
+    expect(text(a1)).not.toContain('secret text'); // no content over the event stream
+    [a1, a2, sup].forEach((l) => l.close());
+    await db.query(`DELETE FROM contacts WHERE external_id='live@s.whatsapp.net'`);
+  });
+});

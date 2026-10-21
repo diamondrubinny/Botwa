@@ -105,7 +105,10 @@ await page.waitForSelector('text=אין שיחות להצגה');
 check('search filters list', true);
 await page.fill('#srch', '');
 await page.waitForSelector('.conv-list button');
-await page.fill('#reply', 'שלום, אני בודק'); await page.click('button:has-text("שליחה")');
+const [dl] = await Promise.all([page.waitForEvent('download'), page.click('button:has-text("ייצוא נתוני איש הקשר")')]);
+check('admin can export contact data', dl.suggestedFilename().startsWith('contact-'));
+await page.fill('#reply', 'שלום, אני בודק');
+await page.click('button:has-text("שליחה")');
 await page.waitForSelector('text=הערוץ אינו מחובר');
 check('send while disconnected shows friendly error', true);
 
@@ -159,6 +162,22 @@ check('no horizontal scroll at 375px', !overflow);
 await page.goto(BASE + '/#/accessibility'); await axe('a11y statement');
 await page.goto(BASE + '/#/privacy'); await axe('privacy page');
 await page.screenshot({ path: '/tmp/botwa-e2e-shot.png', fullPage: true });
+
+// data erasure by admin (privacy request)
+await page.setViewportSize({ width: 1200, height: 800 });
+await page.goto(BASE + '/#/inbox');
+await page.click('text=התנתקות');
+await page.waitForSelector('#email');
+await page.fill('#email', 'admin@e2e.io'); await page.fill('#pw', 'e2e-password-123'); await page.click('button[type=submit]');
+await page.waitForSelector('#totp');
+await page.fill('#totp', authenticator.generate(secret)); await page.click('button[type=submit]');
+await page.waitForSelector('.conv-list button');
+await page.click('.conv-list button');
+await page.click('button:has-text("מחיקת איש הקשר וכל הנתונים")');
+await axe('erase confirm dialog');
+await page.click('dialog[open] button:has-text("מחיקה לצמיתות")');
+await page.waitForSelector('text=אין שיחות להצגה', { timeout: 15000 });
+check('contact erased: conversation and files gone', psql('SELECT count(*) FROM conversations') === '0' && psql('SELECT count(*) FROM attachments') === '0');
 
 await browser.close();
 console.log(failures ? `FAILURES: ${failures}` : 'ALL OK');

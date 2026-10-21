@@ -2,7 +2,7 @@
 
 Self-hosted customer-support hub: staff log in to a web panel, link WhatsApp / Telegram accounts by **QR scan**, and handle customer conversations. No external AI APIs.
 
-Status: **feature-complete MVP** (API, Hebrew/RTL panel, WhatsApp + Telegram QR). Deployment guide: [docs/DEPLOY.md](docs/DEPLOY.md). Pre-production list: [docs/PRODUCTION_CHECKLIST.md](docs/PRODUCTION_CHECKLIST.md). Real WhatsApp/Telegram pairing must still be tested manually with phones. See [PLAN.md](PLAN.md) for scope and roadmap.
+Status: **feature-complete** (MVP + attachments, reports, live updates, privacy tooling) (API, Hebrew/RTL panel, WhatsApp + Telegram QR). Deployment guide: [docs/DEPLOY.md](docs/DEPLOY.md). Pre-production list: [docs/PRODUCTION_CHECKLIST.md](docs/PRODUCTION_CHECKLIST.md). Real WhatsApp/Telegram pairing must still be tested manually with phones. See [PLAN.md](PLAN.md) for scope and roadmap.
 
 ## Requirements
 Ubuntu server, Node 22+, PostgreSQL 16 (or Docker), HTTPS reverse proxy (Caddy/Nginx).
@@ -33,6 +33,13 @@ Automated checks do not replace manual screen-reader testing (NVDA/VoiceOver) an
 ## Docker (Ubuntu)
 See [docs/DEPLOY.md](docs/DEPLOY.md) (Compose: Postgres + app + Caddy with automatic HTTPS, backups, restore).
 
+## Documentation
+- [docs/DEPLOY.md](docs/DEPLOY.md) – install on Ubuntu (Compose + Caddy HTTPS), backup/restore
+- [docs/USER_GUIDE.he.md](docs/USER_GUIDE.he.md) – staff guide (Hebrew)
+- [docs/PRODUCTION_CHECKLIST.md](docs/PRODUCTION_CHECKLIST.md) – pre-production checks, personal-data table, cookies, risks
+- [docs/legal/](docs/legal/README.md) – DRAFT privacy policy, cookies, internal-use policy, accessibility statement (lawyer review required)
+- [docs/DATA_REQUESTS.he.md](docs/DATA_REQUESTS.he.md) – handling access/erasure requests
+
 ## Tests
 ```bash
 createdb botwa_test
@@ -48,6 +55,7 @@ Admin: `GET/POST /users`, `PATCH /users/:id`, `POST /users/:id/reset-mfa`, `GET 
 ## API (P2)
 Admin: `GET/POST /channels`, `POST /channels/:id/start|stop|logout|password` (password = Telegram 2FA during QR login), `DELETE /channels/:id`, `GET /channels/:id/events` (SSE: status + QR data-URL), `GET /contacts/:id/export`, `DELETE /contacts/:id`
 Staff (all roles): `GET /conversations`, `GET /conversations/:id/messages`, `POST /conversations/:id/messages|read|assign|status`
+Live updates: `GET /events` (SSE, content-free "conversation X changed" events, filtered by the user's access).
 Also: `GET /conversations?q=` (search name/number/message text), `GET/POST /conversations/:id/notes` (internal notes, never sent to customers), `GET /canned-replies` (all staff), `POST/DELETE /canned-replies` (supervisor/admin).
 Reports (supervisor/admin): `GET /reports/summary?days=` – volumes, response times per agent, daily series (no message content; `REPORT_TZ`, default Asia/Jerusalem).
 Agents see only conversations assigned to them or unassigned; supervisors/admins see all.

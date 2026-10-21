@@ -1,5 +1,6 @@
-import { useRef, useState, type FormEvent } from 'react';
+import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { api, ApiError, upload, type Attachment, type Canned, type Conversation, type Me, type Message, type Note, type UserRow } from '../api';
+import { ConfirmDialog } from '../components/ConfirmDialog';
 import { usePoll } from '../hooks';
 import { blockedReason, errText } from '../strings';
 
@@ -35,13 +36,31 @@ export function Inbox({ me }: { me: Me }) {
   const [err, setErr] = useState('');
   const [sending, setSending] = useState(false);
   const logRef = useRef<HTMLDivElement>(null);
+  const [eraseOpen, setEraseOpen] = useState(false);
+  const [live, setLive] = useState(0); // bumped by server events to refetch immediately
+  const [announce, setAnnounce] = useState('');
+
+  // Live updates: events carry no content, they only tell us to refetch via the normal API (polling remains as fallback).
+  useEffect(() => {
+    const es = new EventSource('/events');
+    es.onmessage = () => { setLive((n) => n + 1); setAnnounce('התקבלה הודעה חדשה'); setTimeout(() => setAnnounce(''), 1500); };
+    return () => es.close();
+  }, []);
+
+  // Unread count in the tab title so staff notice new work in other tabs.
+  const unreadTotal = convs.reduce((n, c) => n + c.unreadCount, 0);
+  useEffect(() => {
+    const base = 'Botwa – מערכת תמיכה';
+    document.title = unreadTotal > 0 ? `(${unreadTotal}) ${base}` : base;
+    return () => { document.title = base; };
+  }, [unreadTotal]);
 
   const sel = convs.find((c) => c.id === selId) ?? null;
 
   usePoll(async () => {
     const q = (filter === 'mine' ? 'mine=true&status=open' : `status=${filter}`) + (search.trim() ? `&q=${encodeURIComponent(search.trim())}` : '');
     setConvs(await api<Conversation[]>('GET', `/conversations?${q}`).catch(() => []));
-  }, 5000, [filter, search]);
+  }, 5000, [filter, search, live]);
 
   usePoll(async () => setCanned(await api<Canned[]>('GET', '/canned-replies').catch(() => [])), 60000);
 
@@ -59,7 +78,7 @@ export function Inbox({ me }: { me: Me }) {
         return m;
       });
     } catch { setSelId(null); }
-  }, 3000, [selId]);
+  }, 3000, [selId, live]);
 
   const act = async (fn: () => Promise<unknown>) => {
     setErr('');
@@ -99,11 +118,22 @@ export function Inbox({ me }: { me: Me }) {
     });
   }
 
+  async function exportContact(c: Conversation) {
+    await act(async () => {
+      const data = await api('GET', `/contacts/${c.contactRowId}/export`);
+      const url = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' }));
+      const a = document.createElement('a');
+      a.href = url; a.download = `contact-${c.contactRowId}.json`; a.click();
+      URL.revokeObjectURL(url);
+    });
+  }
+
   const assignTo = (userId: string | null) => act(() => api('POST', `/conversations/${selId}/assign`, { userId }));
 
   return (
     <>
       <h1 tabIndex={-1}>שיחות</h1>
+      <p className="sr-only" role="status" aria-live="polite">{announce}</p>
       <div className={`inbox${sel ? ' has-selection' : ''}`}>
         <section className="card list-pane" aria-label="רשימת שיחות">
           <div className="field">
@@ -199,6 +229,12 @@ export function Inbox({ me }: { me: Me }) {
                 <button className="primary" type="submit" disabled={sending || (!text.trim() && !file)}>{sending ? 'שולח…' : 'שליחה'}</button>
               </form>
 
+              {me.role === 'admin' && (
+                <div className="row" style={{ marginTop: '1rem' }}>
+                  <button onClick={() => exportContact(sel)}>ייצוא נתוני איש הקשר (JSON)</button>
+                  <button className="danger" onClick={() => setEraseOpen(true)}>מחיקת איש הקשר וכל הנתונים</button>
+                </div>
+              )}
               <section aria-labelledby="notes-h" style={{ marginTop: '1rem' }}>
                 <h3 id="notes-h" style={{ fontSize: '1rem' }}>הערות פנימיות (לא נשלחות ללקוח)</h3>
                 {notes.length === 0 ? <p className="hint">אין הערות.</p> : (
@@ -216,6 +252,13 @@ export function Inbox({ me }: { me: Me }) {
           )}
         </section>
       </div>
+      <ConfirmDialog open={eraseOpen} danger title="מחיקת איש קשר"
+        message="איש הקשר, כל ההודעות, ההערות והקבצים שלו יימחקו לצמיתות מהמערכת (גיבויים קיימים יישארו עד תום מחזור הגיבוי). לא ניתן לשחזר."
+        confirmLabel="מחיקה לצמיתות" onCancel={() => setEraseOpen(false)}
+        onConfirm={() => {
+          const c = sel; setEraseOpen(false);
+          if (c) void act(async () => { await api('DELETE', `/contacts/${c.contactRowId}`); setSelId(null); });
+        }} />
     </>
   );
 }
