@@ -49,6 +49,7 @@ Admin: `GET/POST /users`, `PATCH /users/:id`, `POST /users/:id/reset-mfa`, `GET 
 Admin: `GET/POST /channels`, `POST /channels/:id/start|stop|logout|password` (password = Telegram 2FA during QR login), `DELETE /channels/:id`, `GET /channels/:id/events` (SSE: status + QR data-URL), `GET /contacts/:id/export`, `DELETE /contacts/:id`
 Staff (all roles): `GET /conversations`, `GET /conversations/:id/messages`, `POST /conversations/:id/messages|read|assign|status`
 Also: `GET /conversations?q=` (search name/number/message text), `GET/POST /conversations/:id/notes` (internal notes, never sent to customers), `GET /canned-replies` (all staff), `POST/DELETE /canned-replies` (supervisor/admin).
+Reports (supervisor/admin): `GET /reports/summary?days=` – volumes, response times per agent, daily series (no message content; `REPORT_TZ`, default Asia/Jerusalem).
 Agents see only conversations assigned to them or unassigned; supervisors/admins see all.
 
 ## Attachments (images, PDF, Word/Excel, audio, MP4)

@@ -68,6 +68,11 @@ await page.click('button:has-text("יצירת משתמש")');
 await page.waitForSelector('td:has-text("dana@e2e.io")');
 await axe('team');
 
+// reports page
+await page.click('nav >> text=דוחות');
+await page.waitForSelector('text=זמן תגובה ממוצע');
+await axe('reports');
+
 // canned replies page
 await page.click('nav >> text=תשובות מוכנות');
 await page.fill('#c-title', 'ברכה'); await page.fill('#c-body', 'שלום, איך אפשר לעזור?');

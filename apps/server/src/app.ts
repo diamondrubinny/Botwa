@@ -11,6 +11,7 @@ import { userRoutes } from './routes/users.js';
 import { channelRoutes } from './routes/channels.js';
 import multipart from '@fastify/multipart';
 import { MediaService } from './media/store.js';
+import { reportRoutes } from './routes/reports.js';
 import { mediaRoutes } from './routes/media.js';
 import { conversationRoutes } from './routes/conversations.js';
 import type { ChannelManager } from './channels/manager.js';
@@ -66,5 +67,6 @@ export async function buildApp(cfg: Config, db: Db, mgr: ChannelManager, media: 
   channelRoutes(app, db, mgr);
   conversationRoutes(app, db, mgr, media);
   mediaRoutes(app, db, mgr, media);
+  reportRoutes(app, db, cfg);
   return app;
 }
