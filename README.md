@@ -51,6 +51,11 @@ Staff (all roles): `GET /conversations`, `GET /conversations/:id/messages`, `POS
 Also: `GET /conversations?q=` (search name/number/message text), `GET/POST /conversations/:id/notes` (internal notes, never sent to customers), `GET /canned-replies` (all staff), `POST/DELETE /canned-replies` (supervisor/admin).
 Agents see only conversations assigned to them or unassigned; supervisors/admins see all.
 
+## Attachments (images, PDF, Word/Excel, audio, MP4)
+Disabled unless an antivirus daemon is configured (`CLAMAV_HOST`; Docker: `docker compose --profile media up -d` and `CLAMAV_HOST=clamav`). Fail-closed pipeline: file type decided by **content** allowlist (not name/MIME; SVG/HTML/exe/archives blocked) -> stored under a random id in `MEDIA_DIR/quarantine` (0600, outside any web root) -> ClamAV INSTREAM scan -> moved to `clean/` only if OK; infected files are deleted and audited. Files are served only when `clean`, behind login + the conversation's access rules, with `nosniff`, `CSP: sandbox`, and `attachment` disposition for everything except images. Staff uploads are scanned *before* being sent to the customer. If the scanner is down, inbound files stay pending (retried every minute) and uploads return 503.
+API: `GET /attachments/:id`, `POST /conversations/:id/attachments` (multipart: `file`, optional `caption`).
+Retention/erasure/channel deletion also delete the files on disk.
+
 ## Linking WhatsApp (manual)
 1. Create a channel (`POST /channels {type:"whatsapp",label}`), 2. open `GET /channels/:id/events` (SSE) and `POST /channels/:id/start`, 3. render the `qr` data-URL, scan from WhatsApp → Linked devices. Session is stored encrypted in PostgreSQL; the channel auto-starts on server boot.
 **Risk:** uses the unofficial Baileys library (ToS violation, number may be banned). Back up the DB and `ENCRYPTION_KEY` – losing the key means re-scanning.

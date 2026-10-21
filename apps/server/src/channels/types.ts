@@ -1,12 +1,26 @@
 export type ChannelType = 'whatsapp' | 'telegram';
 export type ChannelStatus = 'stopped' | 'connecting' | 'qr' | 'connected' | 'logged_out' | 'password' | 'error';
 
+export interface InboundMedia {
+  fileName?: string;
+  size?: number;
+  download(): Promise<Buffer>;
+}
+
+export interface OutboundMedia {
+  buffer: Buffer;
+  mime: string;
+  fileName: string;
+  caption?: string;
+}
+
 export interface InboundMessage {
   externalContactId: string;
   contactName?: string;
   externalMessageId: string;
   text: string;
   timestamp: Date;
+  media?: InboundMedia;
 }
 
 export interface AdapterEvents {
@@ -32,6 +46,7 @@ export interface ChannelAdapter {
   /** Telegram only: supply the cloud (2FA) password when status is 'password'. Never stored. */
   submitPassword?(password: string): void;
   sendText(externalContactId: string, text: string): Promise<{ externalMessageId?: string }>;
+  sendMedia?(externalContactId: string, media: OutboundMedia): Promise<{ externalMessageId?: string }>;
 }
 
 export interface AdapterContext {

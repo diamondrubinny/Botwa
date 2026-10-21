@@ -25,6 +25,15 @@ export interface Conversation {
   unreadCount: number; lastMessageAt: string; contactName: string | null; contactId: string;
   channelLabel: string; channelType: string; lastMessage: string | null;
 }
-export interface Message { id: string; direction: 'in' | 'out'; body: string; senderName: string | null; createdAt: string }
+export interface Attachment { id: string; kind: string; mime: string | null; size: number | null; fileName: string | null; status: 'pending' | 'clean' | 'infected' | 'blocked'; detail: string | null }
+export interface Message { id: string; direction: 'in' | 'out'; body: string; senderName: string | null; createdAt: string; attachment?: Attachment | null }
+
+export async function upload(url: string, file: File, caption: string): Promise<void> {
+  const fd = new FormData();
+  if (caption.trim()) fd.append('caption', caption.trim());
+  fd.append('file', file);
+  const res = await fetch(url, { method: 'POST', credentials: 'same-origin', body: fd });
+  if (!res.ok) throw new ApiError(res.status, ((await res.json().catch(() => ({}))) as { error?: string }).error ?? 'error');
+}
 export interface Note { id: string; body: string; authorName: string | null; createdAt: string }
 export interface Canned { id: string; title: string; body: string }

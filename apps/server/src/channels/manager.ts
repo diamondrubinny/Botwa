@@ -3,8 +3,9 @@ import QRCode from 'qrcode';
 import type { Config } from '../config.js';
 import type { Db } from '../db.js';
 import { ingestInbound } from '../inbox.js';
+import { MediaService } from '../media/store.js';
 import { createAuthStore } from './auth-store.js';
-import type { AdapterFactory, ChannelAdapter, ChannelStatus, ChannelType } from './types.js';
+import type { AdapterFactory, ChannelAdapter, ChannelStatus, ChannelType, OutboundMedia } from './types.js';
 import { TelegramAdapter } from './telegram.js';
 import { WhatsAppAdapter } from './whatsapp.js';
 
@@ -33,6 +34,7 @@ export class ChannelManager {
     private readonly db: Db,
     private readonly cfg: Config,
     private readonly factory: AdapterFactory = createDefaultFactory(cfg),
+    private readonly media: MediaService = new MediaService(db, cfg),
   ) {
     this.bus.setMaxListeners(100);
   }
@@ -77,6 +79,7 @@ export class ChannelManager {
         },
         onMessage: async (m) => {
           const r = await ingestInbound(this.db, channelId, m);
+          if (r.messageId && m.media) await this.media.ingestInbound(r.messageId, m.media);
           if (r.messageId) this.emit({ channelId, type: 'message', conversationId: r.conversationId, messageId: r.messageId });
         },
       },
@@ -117,6 +120,7 @@ export class ChannelManager {
     this.adapters.delete(channelId);
     this.statuses.delete(channelId);
     this.lastQr.delete(channelId);
+    await this.media.purgeFiles('v.channel_id = $1', [channelId]);
     await this.db.query('DELETE FROM channels WHERE id=$1', [channelId]);
   }
 
@@ -131,6 +135,13 @@ export class ChannelManager {
     const a = this.adapters.get(channelId);
     if (!a || this.statuses.get(channelId) !== 'connected') throw new Error('channel_not_connected');
     return a.sendText(externalContactId, text);
+  }
+
+  async sendMedia(channelId: string, externalContactId: string, media: OutboundMedia) {
+    const a = this.adapters.get(channelId);
+    if (!a || this.statuses.get(channelId) !== 'connected') throw new Error('channel_not_connected');
+    if (!a.sendMedia) throw new Error('media_unsupported');
+    return a.sendMedia(externalContactId, media);
   }
 
   async startAll(): Promise<void> {

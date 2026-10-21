@@ -20,6 +20,23 @@ const base = {
 const cfg = loadConfig(base);
 const db = createDb(cfg.DATABASE_URL);
 
+describe('config', () => {
+  it('treats blank optional variables as unset (as in .env.example / compose)', () => {
+    const c = loadConfig({ ...base, TELEGRAM_API_ID: '', TELEGRAM_API_HASH: '', CLAMAV_HOST: '', WEB_DIST: '' });
+    expect(c.TELEGRAM_API_ID).toBeUndefined();
+    expect(c.CLAMAV_HOST).toBeUndefined();
+  });
+  it('the shipped .env.example (with required values filled) parses', async () => {
+    const { readFileSync } = await import('node:fs');
+    const lines = readFileSync(new URL('../../../.env.example', import.meta.url), 'utf8').split('\n');
+    const env: Record<string, string> = {};
+    for (const l of lines) { const m = /^([A-Z_]+)=(.*?)\s*(#.*)?$/.exec(l); if (m) env[m[1]!] = m[2]!; }
+    env.ENCRYPTION_KEY = base.ENCRYPTION_KEY;
+    env.DATABASE_URL = base.DATABASE_URL;
+    expect(() => loadConfig(env as NodeJS.ProcessEnv)).not.toThrow();
+  });
+});
+
 describe('telegram helpers', () => {
   it('round-trips contact ids and rejects junk', () => {
     const id = formatTgContactId('12345', '-987654321');

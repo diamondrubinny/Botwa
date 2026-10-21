@@ -1,6 +1,7 @@
 import makeWASocket, {
   BufferJSON,
   DisconnectReason,
+  downloadMediaMessage,
   initAuthCreds,
   makeCacheableSignalKeyStore,
   proto,
@@ -10,7 +11,7 @@ import makeWASocket, {
   type WASocket,
 } from '@whiskeysockets/baileys';
 import pino from 'pino';
-import type { AdapterContext, ChannelAdapter } from './types.js';
+import type { AdapterContext, ChannelAdapter, OutboundMedia } from './types.js';
 
 // NOTE: Baileys is an UNOFFICIAL WhatsApp Web client. Using it violates WhatsApp's ToS and the
 // number may be banned. Accepted by the product owner; keep outbound volume low and human-like.
@@ -106,7 +107,11 @@ export class WhatsAppAdapter implements ChannelAdapter {
         const jid = m.key.remoteJid;
         if (!jid || m.key.fromMe || !m.key.id) continue;
         if (jid.endsWith('@g.us') || jid === 'status@broadcast' || jid.endsWith('@broadcast') || jid.endsWith('@newsletter')) continue;
-        const text = m.message?.conversation ?? m.message?.extendedTextMessage?.text ?? '[unsupported message type]';
+        const msg = m.message;
+        const mediaMsg = msg?.imageMessage ?? msg?.documentMessage ?? msg?.audioMessage ?? msg?.videoMessage;
+        const caption = msg?.imageMessage?.caption ?? msg?.documentMessage?.caption ?? msg?.videoMessage?.caption ?? undefined;
+        const text = msg?.conversation ?? msg?.extendedTextMessage?.text ?? caption ?? (mediaMsg ? '' : '[unsupported message type]');
+        const size = Number(mediaMsg?.fileLength?.toString() ?? 0) || undefined;
         const ts = Number(m.messageTimestamp ?? Math.floor(Date.now() / 1000));
         void Promise.resolve(
           events.onMessage({
@@ -115,6 +120,13 @@ export class WhatsAppAdapter implements ChannelAdapter {
             externalMessageId: m.key.id,
             text,
             timestamp: new Date(ts * 1000),
+            media: mediaMsg
+              ? {
+                  fileName: msg?.documentMessage?.fileName ?? undefined,
+                  size,
+                  download: () => downloadMediaMessage(m, 'buffer', {}, { logger, reuploadRequest: sock.updateMediaMessage }),
+                }
+              : undefined,
           }),
         ).catch(() => undefined);
       }
@@ -171,6 +183,20 @@ export class WhatsAppAdapter implements ChannelAdapter {
   async sendText(externalContactId: string, text: string): Promise<{ externalMessageId?: string }> {
     if (!this.sock) throw new Error('channel_not_connected');
     const res = await this.sock.sendMessage(externalContactId, { text });
+    return { externalMessageId: res?.key.id ?? undefined };
+  }
+
+  async sendMedia(externalContactId: string, media: OutboundMedia): Promise<{ externalMessageId?: string }> {
+    if (!this.sock) throw new Error('channel_not_connected');
+    const { buffer, mime, fileName, caption } = media;
+    const content = mime.startsWith('image/')
+      ? { image: buffer, caption }
+      : mime === 'video/mp4'
+        ? { video: buffer, caption }
+        : mime.startsWith('audio/')
+          ? { audio: buffer, mimetype: mime }
+          : { document: buffer, mimetype: mime, fileName, caption };
+    const res = await this.sock.sendMessage(externalContactId, content);
     return { externalMessageId: res?.key.id ?? undefined };
   }
 }

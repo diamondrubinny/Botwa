@@ -1,9 +1,10 @@
 import bigInt from 'big-integer';
 import { Api, TelegramClient } from 'telegram';
+import { CustomFile } from 'telegram/client/uploads.js';
 import { NewMessage, type NewMessageEvent } from 'telegram/events/index.js';
 import { LogLevel } from 'telegram/extensions/Logger.js';
 import { StringSession } from 'telegram/sessions/index.js';
-import type { AdapterContext, ChannelAdapter, TelegramCredentials } from './types.js';
+import type { AdapterContext, ChannelAdapter, OutboundMedia, TelegramCredentials } from './types.js';
 
 // Telegram USER-account login by QR (MTProto via gramJS). Use your own api_id/api_hash.
 // Automated messaging from user accounts can get the account limited; keep volume human-like.
@@ -116,6 +117,7 @@ export class TelegramAdapter implements ChannelAdapter {
     if (!e.isPrivate || m.out || !m.id) return;
     const peer = await m.getInputSender();
     if (!(peer instanceof Api.InputPeerUser)) return;
+    const hasMedia = !!(m.photo || m.document);
     const sender = await m.getSender().catch(() => undefined);
     const name =
       sender instanceof Api.User
@@ -125,8 +127,19 @@ export class TelegramAdapter implements ChannelAdapter {
       externalContactId: formatTgContactId(peer.userId.toString(), peer.accessHash.toString()),
       contactName: name,
       externalMessageId: String(m.id),
-      text: m.message || '[unsupported message type]',
+      text: m.message || (hasMedia ? '' : '[unsupported message type]'),
       timestamp: new Date((m.date ?? Math.floor(Date.now() / 1000)) * 1000),
+      media: hasMedia
+        ? {
+            fileName: m.file?.name ?? undefined,
+            size: Number(m.file?.size?.toString() ?? 0) || undefined,
+            download: async () => {
+              const data = await this.client?.downloadMedia(m);
+              if (!Buffer.isBuffer(data)) throw new Error('download_failed');
+              return data;
+            },
+          }
+        : undefined,
     });
   }
 
@@ -164,6 +177,18 @@ export class TelegramAdapter implements ChannelAdapter {
     const { userId, accessHash } = parseTgContactId(externalContactId);
     const peer = new Api.InputPeerUser({ userId: bigInt(userId), accessHash: bigInt(accessHash) });
     const res = await this.client.sendMessage(peer, { message: text });
+    return { externalMessageId: String(res.id) };
+  }
+
+  async sendMedia(externalContactId: string, media: OutboundMedia): Promise<{ externalMessageId?: string }> {
+    if (!this.client) throw new Error('channel_not_connected');
+    const { userId, accessHash } = parseTgContactId(externalContactId);
+    const peer = new Api.InputPeerUser({ userId: bigInt(userId), accessHash: bigInt(accessHash) });
+    const res = await this.client.sendFile(peer, {
+      file: new CustomFile(media.fileName, media.buffer.length, '', media.buffer),
+      caption: media.caption,
+      forceDocument: !media.mime.startsWith('image/'),
+    });
     return { externalMessageId: String(res.id) };
   }
 }

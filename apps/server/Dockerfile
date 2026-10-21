@@ -19,6 +19,7 @@ COPY e2e/package.json e2e/
 RUN npm ci --omit=dev -w @botwa/server && npm cache clean --force
 COPY --from=build /app/apps/server/dist apps/server/dist
 COPY --from=build /app/apps/web/dist apps/web/dist
+RUN mkdir -p /data/media && chown -R node:node /data
 USER node
 WORKDIR /app/apps/server
 EXPOSE 3000

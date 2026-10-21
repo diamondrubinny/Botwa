@@ -21,12 +21,27 @@ services:
       HOST: 0.0.0.0
       NODE_ENV: production
       TRUST_PROXY: "true"      # safe: port 3000 is NOT published, only Caddy can reach it
+      MEDIA_DIR: /data/media
+      CLAMAV_HOST: ${CLAMAV_HOST:-}   # set to "clamav" (and run with --profile media) to enable attachments
+    volumes: [media:/data/media]     # quarantine/ + clean/ attachment storage (not web-accessible)
     depends_on: { db: { condition: service_healthy } }
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
       interval: 30s
       timeout: 5s
       retries: 3
+
+  # Antivirus for attachments. Optional: `docker compose --profile media up -d` (needs ~2-3GB RAM extra).
+  clamav:
+    image: clamav/clamav:stable
+    profiles: ["media"]
+    restart: unless-stopped
+    volumes: [clamdb:/var/lib/clamav]
+    healthcheck:
+      test: ["CMD", "clamdcheck.sh"]
+      interval: 60s
+      retries: 5
+      start_period: 300s   # first start downloads signatures
 
   caddy:
     image: caddy:2
@@ -41,6 +56,8 @@ services:
     depends_on: [server]
 
 volumes:
+  media:
+  clamdb:
   pgdata:
   caddy_data:
   caddy_config:

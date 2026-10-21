@@ -21,9 +21,22 @@ export const t = {
     unsupported_channel_type: 'הפלטפורמה אינה מוגדרת בשרת (לטלגרם נדרשים TELEGRAM_API_ID ו-TELEGRAM_API_HASH).',
     password_not_requested: 'כרגע לא נדרשת סיסמה.',
     channel_error: 'הפעולה בערוץ נכשלה. בדקו את חיבור השרת לרשת.',
+    file_type_not_allowed: 'סוג הקובץ אינו נתמך (מותרים: תמונות, PDF, Word, Excel, שמע ווידאו MP4).',
+    file_too_large: 'הקובץ גדול מדי.',
+    file_infected: 'הקובץ נחסם: זוהתה בו תוכנה זדונית.',
+    scanner_unavailable: 'סורק האבטחה אינו זמין כרגע. נסו שוב בעוד רגע.',
+    media_disabled: 'שליחת קבצים כבויה בשרת (לא הוגדר סורק אנטי-וירוס).',
     forbidden: 'אין הרשאה לפעולה זו.',
     generic: 'אירעה שגיאה. נסו שוב.',
   } as Record<string, string>,
+};
+
+export const blockedReason: Record<string, string> = {
+  type_not_allowed: 'סוג הקובץ אינו נתמך',
+  too_large: 'הקובץ גדול מדי',
+  media_disabled: 'קבצים מצורפים כבויים בשרת',
+  download_failed: 'הורדת הקובץ נכשלה',
+  scan_failed: 'סריקת האבטחה נכשלה',
 };
 
 export const errText = (code: string) => t.errors[code] ?? t.errors.generic!;

@@ -21,6 +21,12 @@ const schema = z.object({
   // Telegram user-account login (QR). Get both from https://my.telegram.org -> API development tools.
   TELEGRAM_API_ID: z.coerce.number().int().positive().optional(),
   TELEGRAM_API_HASH: z.string().min(8).optional(),
+  // Media (images/documents/voice). Enabled only when a ClamAV daemon is configured (fail closed).
+  MEDIA_DIR: z.string().default('./data/media'),
+  MEDIA_MAX_MB: z.coerce.number().int().min(1).max(100).default(16),
+  CLAMAV_HOST: z.string().min(1).optional(),
+  CLAMAV_PORT: z.coerce.number().int().default(3310),
+  MEDIA_ALLOW_UNSCANNED: bool('false'), // development only: accept files without antivirus
   WEB_DIST: z.string().optional(),
   MESSAGE_RETENTION_DAYS: z.coerce.number().int().min(0).default(365),
   REQUIRE_MFA_FOR_PRIVILEGED: bool('true'),
@@ -29,7 +35,9 @@ const schema = z.object({
 export type Config = z.infer<typeof schema>;
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
-  const parsed = schema.safeParse(env);
+  // `KEY=` in .env / compose means "unset" (optional settings left blank), not an empty value.
+  const cleaned = Object.fromEntries(Object.entries(env).filter(([, v]) => v !== ''));
+  const parsed = schema.safeParse(cleaned);
   if (!parsed.success) {
     const issues = parsed.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; ');
     throw new Error(`Invalid configuration: ${issues}`);

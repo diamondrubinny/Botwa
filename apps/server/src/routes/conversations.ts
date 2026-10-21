@@ -1,27 +1,14 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { audit } from '../audit.js';
-import { requireAuth, type AuthUser } from '../auth.js';
+import { isManager, loadAccessible } from '../access.js';
+import { requireAuth } from '../auth.js';
 import type { ChannelManager } from '../channels/manager.js';
 import type { Db } from '../db.js';
+import { MediaService } from '../media/store.js';
 
 const idParam = z.object({ id: z.string().uuid() });
-const isManager = (u: AuthUser) => u.role === 'admin' || u.role === 'supervisor';
-
-/** Agents may only touch conversations assigned to them or still unassigned. */
-async function loadAccessible(db: Db, user: AuthUser, id: string) {
-  const { rows } = await db.query(
-    `SELECT c.id, c.channel_id, c.assigned_to, c.status, ct.external_id
-       FROM conversations c JOIN contacts ct ON ct.id = c.contact_id WHERE c.id = $1`,
-    [id],
-  );
-  const c = rows[0];
-  if (!c) return null;
-  if (!isManager(user) && c.assigned_to !== null && c.assigned_to !== user.id) return null; // 404, not 403: don't leak existence
-  return c as { id: string; channel_id: string; assigned_to: string | null; status: string; external_id: string };
-}
-
-export function conversationRoutes(app: FastifyInstance, db: Db, mgr: ChannelManager) {
+export function conversationRoutes(app: FastifyInstance, db: Db, mgr: ChannelManager, media: MediaService) {
   const any = requireAuth(db);
 
   app.get('/conversations', { preHandler: any }, async (req) => {
@@ -39,7 +26,7 @@ export function conversationRoutes(app: FastifyInstance, db: Db, mgr: ChannelMan
       `SELECT c.id, c.channel_id AS "channelId", c.status, c.assigned_to AS "assignedTo", c.unread_count AS "unreadCount",
               c.last_message_at AS "lastMessageAt", ct.display_name AS "contactName", ct.external_id AS "contactId",
               ch.label AS "channelLabel", ch.type AS "channelType", au.name AS "assignedName",
-              (SELECT body FROM messages m WHERE m.conversation_id = c.id ORDER BY created_at DESC LIMIT 1) AS "lastMessage"
+              (SELECT COALESCE(NULLIF(m.body, ''), '[קובץ מצורף]') FROM messages m WHERE m.conversation_id = c.id ORDER BY created_at DESC LIMIT 1) AS "lastMessage"
          FROM conversations c JOIN contacts ct ON ct.id = c.contact_id
               JOIN channels ch ON ch.id = c.channel_id LEFT JOIN users au ON au.id = c.assigned_to
         WHERE ($1::text IS NULL OR c.status = $1)
@@ -59,8 +46,10 @@ export function conversationRoutes(app: FastifyInstance, db: Db, mgr: ChannelMan
     if (!p.success || !q.success) return reply.code(400).send({ error: 'bad_request' });
     if (!(await loadAccessible(db, req.user!, p.data.id))) return reply.code(404).send({ error: 'not_found' });
     const { rows } = await db.query(
-      `SELECT m.id, m.direction, m.body, m.sender_user_id AS "senderUserId", u.name AS "senderName", m.created_at AS "createdAt"
-         FROM messages m LEFT JOIN users u ON u.id = m.sender_user_id
+      `SELECT m.id, m.direction, m.body, m.sender_user_id AS "senderUserId", u.name AS "senderName", m.created_at AS "createdAt",
+              CASE WHEN a.id IS NULL THEN NULL ELSE json_build_object('id', a.id, 'kind', a.kind, 'mime', a.mime, 'size', a.size,
+                'fileName', a.file_name, 'status', a.status, 'detail', a.detail) END AS attachment
+         FROM messages m LEFT JOIN users u ON u.id = m.sender_user_id LEFT JOIN attachments a ON a.message_id = m.id
         WHERE m.conversation_id = $1 AND ($2::timestamptz IS NULL OR m.created_at < $2)
         ORDER BY m.created_at DESC LIMIT $3`,
       [p.data.id, q.data.before ?? null, q.data.limit],
@@ -190,7 +179,8 @@ export function conversationRoutes(app: FastifyInstance, db: Db, mgr: ChannelMan
     const c = await db.query('SELECT id, channel_id, external_id, display_name, created_at FROM contacts WHERE id=$1', [p.data.id]);
     if (!c.rows[0]) return reply.code(404).send({ error: 'not_found' });
     const m = await db.query(
-      `SELECT m.direction, m.body, m.created_at FROM messages m JOIN conversations v ON v.id = m.conversation_id
+      `SELECT m.direction, m.body, m.created_at, a.file_name AS "attachmentName", a.status AS "attachmentStatus"
+         FROM messages m JOIN conversations v ON v.id = m.conversation_id LEFT JOIN attachments a ON a.message_id = m.id
         WHERE v.contact_id = $1 ORDER BY m.created_at`,
       [p.data.id],
     );
@@ -201,6 +191,7 @@ export function conversationRoutes(app: FastifyInstance, db: Db, mgr: ChannelMan
   app.delete('/contacts/:id', { preHandler: adminOnly }, async (req, reply) => {
     const p = idParam.safeParse(req.params);
     if (!p.success) return reply.code(400).send({ error: 'bad_request' });
+    await media.purgeFiles('v.contact_id = $1', [p.data.id]);
     const r = await db.query('DELETE FROM contacts WHERE id=$1', [p.data.id]);
     if (!r.rowCount) return reply.code(404).send({ error: 'not_found' });
     await audit(db, { actorId: req.user!.id, action: 'contact.erase', target: p.data.id, ip: req.ip });

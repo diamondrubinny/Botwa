@@ -101,6 +101,7 @@ Messages/phone numbers = personal data → Israeli Privacy Law (Amendment 13) & 
 - Hosting: Ubuntu server (Docker Compose + Caddy/Nginx HTTPS) + admin panel.
 - Stack (my call): Node 22 + TS + Fastify + PostgreSQL (plain SQL migrations) + React. Redis deferred (not needed at this scale).
 - Scale: ~4000 customer contacts, 19 staff (roles: admin / supervisor / agent). Low concurrency → single server process is enough.
+- Done in P8: media (inbound+outbound) with quarantine + content allowlist + ClamAV scan, fail-closed, secure serving, disk cleanup on retention/erase/delete; UI bubbles + upload; compose `media` profile. 46 server tests (incl. a REAL clamd run with EICAR) + E2E. Also fixed: blank optional env vars (`KEY=`) used to crash startup.
 - Done in P7: internal notes, canned replies (manager-curated), conversation search (escaped ILIKE). 27 server tests; E2E extended. Fixed build script (stale dist/migrations nesting on rebuild).
 - Done in P5: Telegram user-account QR adapter (gramJS) incl. 2FA password step (in-memory, never stored), QR refresh, 3-minute scan window, revoked-session detection, contact id = userId:accessHash so replies work after restarts. Requires TELEGRAM_API_ID/HASH. **Could not be exercised against real Telegram servers from the dev sandbox (network blocked).**
 - Done in P6 (partial): docs/DEPLOY.md, docker-compose with Caddy auto-HTTPS, scripts/backup.sh, docs/PRODUCTION_CHECKLIST.md. Docker image build itself was not run (no daemon); production-dependency install + boot was simulated instead.

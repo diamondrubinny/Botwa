@@ -9,12 +9,15 @@ import Fastify, { type FastifyInstance } from 'fastify';
 import { authRoutes } from './routes/auth.js';
 import { userRoutes } from './routes/users.js';
 import { channelRoutes } from './routes/channels.js';
+import multipart from '@fastify/multipart';
+import { MediaService } from './media/store.js';
+import { mediaRoutes } from './routes/media.js';
 import { conversationRoutes } from './routes/conversations.js';
 import type { ChannelManager } from './channels/manager.js';
 import type { Config } from './config.js';
 import type { Db } from './db.js';
 
-export async function buildApp(cfg: Config, db: Db, mgr: ChannelManager): Promise<FastifyInstance> {
+export async function buildApp(cfg: Config, db: Db, mgr: ChannelManager, media: MediaService = new MediaService(db, cfg)): Promise<FastifyInstance> {
   const app = Fastify({
     logger: {
       level: cfg.NODE_ENV === 'test' ? 'silent' : 'info',
@@ -30,6 +33,7 @@ export async function buildApp(cfg: Config, db: Db, mgr: ChannelManager): Promis
     hsts: cfg.COOKIE_SECURE ? { maxAge: 31536000, includeSubDomains: true } : false,
   });
   await app.register(cookie);
+  await app.register(multipart, { limits: { fileSize: media.maxBytes, files: 1, fields: 4, parts: 6 } });
   await app.register(rateLimit, { max: 300, timeWindow: '1 minute' });
 
   // CSRF defence in depth (cookie is already SameSite=Strict): mutating requests must come from our origin.
@@ -60,6 +64,7 @@ export async function buildApp(cfg: Config, db: Db, mgr: ChannelManager): Promis
   authRoutes(app, db, cfg);
   userRoutes(app, db);
   channelRoutes(app, db, mgr);
-  conversationRoutes(app, db, mgr);
+  conversationRoutes(app, db, mgr, media);
+  mediaRoutes(app, db, mgr, media);
   return app;
 }

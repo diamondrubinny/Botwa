@@ -51,6 +51,14 @@ docker compose exec \
 
 **המלצה:** השתמשו במספר ייעודי ולא במספר אישי/ראשי. החיבור הלא רשמי עלול להוביל לחסימה.
 
+## 5א. קבצים מצורפים (אופציונלי)
+ברירת המחדל: כבוי (קבצים נחסמים). להפעלה: הוסיפו ל-`.env` את `CLAMAV_HOST=clamav` והריצו
+```bash
+docker compose --profile media up -d --build
+docker compose logs -f clamav     # בהפעלה ראשונה מורידים חתימות (כמה דקות) עד שה-healthcheck תקין
+```
+נדרש כ-2–3GB RAM נוספים. הקבצים נשמרים ב-volume `media` (יש לגבות אותו יחד עם המסד), והחתימות מתעדכנות אוטומטית בקונטיינר clamav. אם הסורק לא זמין – קבצים נכנסים נשארים "בסריקה" ושליחת קבצים מחזירה שגיאה (סגירה כברירת מחדל).
+
 ## 6. גיבוי ושחזור
 ```bash
 sudo mkdir -p /var/backups/botwa && sudo chmod 700 /var/backups/botwa
@@ -62,6 +70,7 @@ sudo crontab -e   # 03:15 daily:
 ```bash
 gunzip -c botwa-YYYYmmdd-HHMMSS.sql.gz | docker compose exec -T db psql -U botwa -d botwa
 ```
+גיבוי הקבצים: `docker run --rm -v botwa_media:/d -v /var/backups/botwa:/b alpine tar czf /b/media-$(date +%F).tgz -C /d .` (שם ה-volume תלוי בשם התיקייה).
 העתיקו גיבויים גם מחוץ לשרת (למשל rsync/rclone ליעד מוצפן).
 
 ## 7. בדיקת עשן אחרי פריסה

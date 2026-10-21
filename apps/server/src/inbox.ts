@@ -1,5 +1,6 @@
 import type { Db } from './db.js';
 import type { InboundMessage } from './channels/types.js';
+import type { MediaService } from './media/store.js';
 
 /** Store an inbound message; one conversation per contact, reopened on new inbound. Idempotent on external id. */
 export async function ingestInbound(db: Db, channelId: string, m: InboundMessage) {
@@ -40,8 +41,9 @@ export async function ingestInbound(db: Db, channelId: string, m: InboundMessage
 }
 
 /** Data-retention: delete old messages, then empty closed conversations. Returns deleted message count. */
-export async function purgeOldMessages(db: Db, retentionDays: number): Promise<number> {
+export async function purgeOldMessages(db: Db, retentionDays: number, media?: MediaService): Promise<number> {
   if (retentionDays <= 0) return 0;
+  await media?.purgeFiles('m.created_at < now() - make_interval(days => $1)', [retentionDays]);
   const del = await db.query(`DELETE FROM messages WHERE created_at < now() - make_interval(days => $1)`, [retentionDays]);
   await db.query(
     `DELETE FROM conversations c WHERE c.status='closed' AND NOT EXISTS (SELECT 1 FROM messages m WHERE m.conversation_id = c.id)`,

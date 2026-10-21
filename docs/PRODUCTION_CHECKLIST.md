@@ -22,7 +22,10 @@ Status legend: ✅ done in code/tests · 🔲 must be done by the operator · �
 - 🔲 SSH key-only, firewall (ufw) enabled, unattended-upgrades on
 - 🔲 Postgres port not published (compose does not publish it) ✔ verify with `ss -ltnp`
 - ⚖️ Independent penetration test (recommended before storing real customer data)
-- Known limitation: no file/media upload feature yet → no AV scanning needed now. If media is added: allowlist types, size limits, quarantine + ClamAV scan before exposure.
+- ✅ Attachments: content-based type allowlist, size limit (`MEDIA_MAX_MB`), random storage names, quarantine → ClamAV scan → clean, infected deleted + audited, never served unless clean, sandbox/nosniff headers, scan-before-send for staff uploads, fail-closed when scanner down/unset (tested incl. a real clamd daemon)
+- 🔲 Attachments in production: `--profile media` up and healthy; send EICAR test file (https://www.eicar.org/download-anti-malware-testfile/) inside an allowed container type is NOT needed – instead verify `docker compose exec clamav clamdscan` works and signatures are current (`freshclam` log)
+- Known limitations: AV is signature-based (no zero-day guarantee); PDF/Office files are offered as downloads and can still be malicious to open on a workstation – train staff, keep endpoints protected; images are not re-encoded; files are stored unencrypted on the `media` volume (encrypt the disk/volume at rest); voice/video are not transcoded or previewed.
+- 🔲 Back up the `media` volume together with the database; retention deletes files together with messages
 - Known limitation: login rate limit is per IP (in-memory, single process); account lockout is per account (DB).
 
 ## Backup & recovery
@@ -36,6 +39,7 @@ Status legend: ✅ done in code/tests · 🔲 must be done by the operator · �
 | Staff password hash, TOTP secret (encrypted) | Authentication | Legitimate interest (security) | PostgreSQL | While employed | None |
 | Audit log (actor, action, IP) | Security & accountability | Legitimate interest | PostgreSQL | Not auto-purged ⚠️ define policy | None |
 | Customer phone/Telegram id, display name | Customer support | Contract / legitimate interest | PostgreSQL | With conversation | WhatsApp (Meta), Telegram as transport |
+| Attachments (images, documents, voice, video) | Customer support | Contract / legitimate interest | `media` volume on server disk, unencrypted at file level | With the message (`MESSAGE_RETENTION_DAYS`), deleted on erase | ClamAV runs locally (no file leaves the server) |
 | Message text (in/out) | Customer support | Contract / legitimate interest | PostgreSQL (not field-encrypted) | `MESSAGE_RETENTION_DAYS` (default 365) | WhatsApp (Meta), Telegram |
 | WhatsApp/Telegram session keys | Operate channel | n/a (credentials) | PostgreSQL, AES-256-GCM | Until logout/delete | None |
 - Not sent to any AI, analytics or advertising service.

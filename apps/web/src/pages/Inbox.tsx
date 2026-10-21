@@ -1,7 +1,20 @@
 import { useRef, useState, type FormEvent } from 'react';
-import { api, ApiError, type Canned, type Conversation, type Me, type Message, type Note, type UserRow } from '../api';
+import { api, ApiError, upload, type Attachment, type Canned, type Conversation, type Me, type Message, type Note, type UserRow } from '../api';
 import { usePoll } from '../hooks';
-import { errText } from '../strings';
+import { blockedReason, errText } from '../strings';
+
+const fmtSize = (n: number | null) => (n == null ? '' : n < 1024 * 1024 ? `${Math.max(1, Math.round(n / 1024))} KB` : `${(n / 1024 / 1024).toFixed(1)} MB`);
+
+function AttachmentView({ a }: { a: Attachment }) {
+  const name = a.fileName ?? 'קובץ';
+  if (a.status === 'pending') return <p className="hint" role="status">הקובץ "{name}" בסריקת אבטחה…</p>;
+  if (a.status === 'infected') return <p className="error">הקובץ "{name}" נחסם: זוהתה בו תוכנה זדונית.</p>;
+  if (a.status === 'blocked') return <p className="error">הקובץ "{name}" לא זמין: {blockedReason[a.detail ?? ''] ?? 'נחסם'}.</p>;
+  if (a.kind === 'image') {
+    return <a href={`/attachments/${a.id}`} target="_blank" rel="noopener noreferrer"><img src={`/attachments/${a.id}`} alt={`תמונה מצורפת: ${name}`} loading="lazy" style={{ maxWidth: '100%', maxHeight: 280, display: 'block' }} /></a>;
+  }
+  return <a href={`/attachments/${a.id}`} download={name}>הורדת קובץ: {name} ({fmtSize(a.size)})</a>;
+}
 
 const fmt = (iso: string) => new Date(iso).toLocaleString('he-IL', { dateStyle: 'short', timeStyle: 'short' });
 
@@ -16,6 +29,8 @@ export function Inbox({ me }: { me: Me }) {
   const [search, setSearch] = useState('');
   const [notes, setNotes] = useState<Note[]>([]);
   const [noteText, setNoteText] = useState('');
+  const [file, setFile] = useState<File | null>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
   const [canned, setCanned] = useState<Canned[]>([]);
   const [err, setErr] = useState('');
   const [sending, setSending] = useState(false);
@@ -59,10 +74,16 @@ export function Inbox({ me }: { me: Me }) {
 
   async function send(e: FormEvent) {
     e.preventDefault();
-    if (!selId || !text.trim() || sending) return;
+    if (!selId || (!text.trim() && !file) || sending) return;
     setSending(true);
     await act(async () => {
-      await api('POST', `/conversations/${selId}/messages`, { text });
+      if (file) {
+        await upload(`/conversations/${selId}/attachments`, file, text);
+        setFile(null);
+        if (fileRef.current) fileRef.current.value = '';
+      } else {
+        await api('POST', `/conversations/${selId}/messages`, { text });
+      }
       setText('');
     });
     setSending(false);
@@ -144,6 +165,7 @@ export function Inbox({ me }: { me: Me }) {
               <div className="messages" ref={logRef} role="log" aria-live="polite" aria-label="הודעות בשיחה" tabIndex={0}>
                 {msgs.map((m) => (
                   <div key={m.id} className={`msg ${m.direction}`}>
+                    {m.attachment && <AttachmentView a={m.attachment} />}
                     {m.body}
                     <small>{m.direction === 'out' ? (m.senderName ?? 'צוות') : 'לקוח'} · {fmt(m.createdAt)}</small>
                   </div>
@@ -167,8 +189,14 @@ export function Inbox({ me }: { me: Me }) {
                 <label htmlFor="reply">תשובה</label>
                 <textarea id="reply" rows={3} maxLength={4000} value={text} onChange={(e) => setText(e.target.value)}
                   onKeyDown={(e) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) void send(e); }} aria-describedby="reply-h" />
-                <p id="reply-h" className="hint">Ctrl+Enter לשליחה.</p>
-                <button className="primary" type="submit" disabled={sending || !text.trim()}>שליחה</button>
+                <p id="reply-h" className="hint">Ctrl+Enter לשליחה. אם נבחר קובץ, הטקסט נשלח ככיתוב.</p>
+                <div className="field">
+                  <label htmlFor="attach">קובץ מצורף (אופציונלי)</label>
+                  <input id="attach" ref={fileRef} type="file" accept="image/jpeg,image/png,image/webp,image/gif,application/pdf,.docx,.xlsx,audio/*,video/mp4"
+                    onChange={(e) => setFile(e.target.files?.[0] ?? null)} aria-describedby="attach-h" />
+                  <p id="attach-h" className="hint">עד 16MB. הקובץ נסרק באנטי-וירוס לפני השליחה.</p>
+                </div>
+                <button className="primary" type="submit" disabled={sending || (!text.trim() && !file)}>{sending ? 'שולח…' : 'שליחה'}</button>
               </form>
 
               <section aria-labelledby="notes-h" style={{ marginTop: '1rem' }}>

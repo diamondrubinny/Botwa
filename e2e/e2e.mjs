@@ -3,6 +3,8 @@ import { authenticator } from 'otplib';
 import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { execSync } from 'node:child_process';
+import { mkdirSync, writeFileSync } from 'node:fs';
+import { randomUUID } from 'node:crypto';
 
 const BASE = 'http://localhost:3077';
 const axeSrc = readFileSync(createRequire(import.meta.url).resolve('axe-core/axe.min.js'), 'utf8');
@@ -101,6 +103,36 @@ await page.waitForSelector('.conv-list button');
 await page.fill('#reply', 'שלום, אני בודק'); await page.click('button:has-text("שליחה")');
 await page.waitForSelector('text=הערוץ אינו מחובר');
 check('send while disconnected shows friendly error', true);
+
+// attachments: seeded rows in each state + real upload path (multipart + validation + clamd, stops at "channel not connected")
+const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==', 'base64');
+const store = randomUUID();
+mkdirSync('/tmp/e2e-media/clean', { recursive: true });
+writeFileSync(`/tmp/e2e-media/clean/${store}`, PNG);
+const conv = psql("SELECT id FROM conversations LIMIT 1");
+const seed = (ext, body, kind, mime, status, detail, st) => {
+  psql(`INSERT INTO messages (conversation_id, direction, body, external_id) VALUES ('${conv}','in','${body}','${ext}')`);
+  psql(`INSERT INTO attachments (message_id, kind, mime, size, file_name, storage_name, status, detail) SELECT id,'${kind}',${mime},${PNG.length},'${ext}.png',${st},'${status}',${detail} FROM messages WHERE external_id='${ext}'`);
+};
+seed('ma', 'תמונה נקייה', 'image', "'image/png'", 'clean', 'NULL', `'${store}'`);
+seed('mb', 'ממתין', 'image', "'image/png'", 'pending', 'NULL', 'NULL');
+seed('mc', 'וירוס', 'image', 'NULL', 'infected', "'Eicar'", 'NULL');
+seed('md', 'חסום', 'document', 'NULL', 'blocked', "'type_not_allowed'", 'NULL');
+await page.waitForSelector('img[alt^="תמונה מצורפת"]', { timeout: 15000 });
+const loaded = await page.$eval('img[alt^="תמונה מצורפת"]', (i) => i.complete && i.naturalWidth > 0);
+check('authenticated image attachment renders', loaded);
+check('pending/infected/blocked states shown',
+  (await page.isVisible('text=בסריקת אבטחה')) && (await page.isVisible('text=זוהתה בו תוכנה זדונית')) && (await page.isVisible('text=סוג הקובץ אינו נתמך')));
+await axe('inbox with attachments');
+await page.setInputFiles('#attach', { name: 'pic.png', mimeType: 'image/png', buffer: PNG });
+await page.click('button:has-text("שליחה")');
+await page.waitForSelector('[role=alert]:has-text("הערוץ אינו מחובר")');
+check('upload passes validation+antivirus, stops at disconnected channel', true);
+await page.setInputFiles('#attach', { name: 'evil.png', mimeType: 'image/png', buffer: Buffer.from('X5O!P%@AP[4\\PZX54(P^)7CC)7}$EICAR-STANDARD-ANTIVIRUS-TEST-FILE!$H+H*') });
+await page.click('button:has-text("שליחה")');
+await page.waitForSelector('[role=alert]:has-text("סוג הקובץ אינו נתמך")');
+check('non-image content disguised as png is rejected', true);
+await page.setInputFiles('#attach', []);
 
 // logout, then agent login & authz
 await page.click('text=התנתקות');
