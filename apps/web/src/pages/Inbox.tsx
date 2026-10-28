@@ -1,10 +1,18 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
-import { api, ApiError, upload, type Attachment, type Canned, type Conversation, type Me, type Message, type Note, type UserRow } from '../api';
+import { api, ApiError, upload, type Attachment, type Canned, type Tag, type Conversation, type Me, type Message, type Note, type UserRow } from '../api';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { usePoll } from '../hooks';
 import { blockedReason, errText } from '../strings';
 
 const fmtSize = (n: number | null) => (n == null ? '' : n < 1024 * 1024 ? `${Math.max(1, Math.round(n / 1024))} KB` : `${(n / 1024 / 1024).toFixed(1)} MB`);
+
+const SLA_WARN_MIN = 15;
+function waitLabel(since: string | null): { text: string; late: boolean } | null {
+  if (!since) return null;
+  const min = Math.max(0, Math.floor((Date.now() - new Date(since).getTime()) / 60000));
+  const text = min < 1 ? 'ממתין עכשיו' : min < 60 ? `ממתין ${min} דק'` : `ממתין ${Math.floor(min / 60)} שע' ${min % 60} דק'`;
+  return { text, late: min >= SLA_WARN_MIN };
+}
 
 function AttachmentView({ a }: { a: Attachment }) {
   const name = a.fileName ?? 'קובץ';
@@ -33,6 +41,8 @@ export function Inbox({ me }: { me: Me }) {
   const [file, setFile] = useState<File | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const [canned, setCanned] = useState<Canned[]>([]);
+  const [allTags, setAllTags] = useState<Tag[]>([]);
+  const [tagFilter, setTagFilter] = useState('');
   const [err, setErr] = useState('');
   const [sending, setSending] = useState(false);
   const logRef = useRef<HTMLDivElement>(null);
@@ -58,9 +68,11 @@ export function Inbox({ me }: { me: Me }) {
   const sel = convs.find((c) => c.id === selId) ?? null;
 
   usePoll(async () => {
-    const q = (filter === 'mine' ? 'mine=true&status=open' : `status=${filter}`) + (search.trim() ? `&q=${encodeURIComponent(search.trim())}` : '');
+    const q = (filter === 'mine' ? 'mine=true&status=open' : `status=${filter}`) + (search.trim() ? `&q=${encodeURIComponent(search.trim())}` : '') + (tagFilter ? `&tag=${tagFilter}` : '');
     setConvs(await api<Conversation[]>('GET', `/conversations?${q}`).catch(() => []));
-  }, 5000, [filter, search, live]);
+  }, 5000, [filter, search, tagFilter, live]);
+
+  usePoll(async () => setAllTags(await api<Tag[]>('GET', '/tags').catch(() => [])), 60000);
 
   usePoll(async () => setCanned(await api<Canned[]>('GET', '/canned-replies').catch(() => [])), 60000);
 
@@ -149,6 +161,15 @@ export function Inbox({ me }: { me: Me }) {
               <option value="closed">סגורות</option>
             </select>
           </div>
+          {allTags.length > 0 && (
+            <div className="field">
+              <label htmlFor="tgf">תגית</label>
+              <select id="tgf" value={tagFilter} onChange={(e) => setTagFilter(e.target.value)}>
+                <option value="">כל התגיות</option>
+                {allTags.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+              </select>
+            </div>
+          )}
           {convs.length === 0 ? <p>אין שיחות להצגה.</p> : (
             <ul className="conv-list">
               {convs.map((c) => (
@@ -160,6 +181,8 @@ export function Inbox({ me }: { me: Me }) {
                     </span>
                     <span className="conv-last">{c.lastMessage}</span>
                     <small>{c.channelLabel} · {c.assignedName ?? 'לא משויך'}</small>
+                    {c.tags.length > 0 && <small className="hint"> · {c.tags.map((t) => t.name).join(', ')}</small>}
+                    {(() => { const w = waitLabel(c.waitingSince); return w && <small className={w.late ? 'error' : 'hint'} style={{ display: 'block' }}>{w.late ? '⚠ ' : ''}{w.text}</small>; })()}
                   </button>
                 </li>
               ))}
@@ -192,12 +215,33 @@ export function Inbox({ me }: { me: Me }) {
                 </button>
               </div>
 
+              <div className="row" style={{ marginBottom: '.5rem' }} aria-label="תגיות השיחה" role="group">
+                {sel.tags.map((t) => (
+                  <span key={t.id} className="badge" style={{ display: 'inline-flex', gap: '.35rem', alignItems: 'center' }}>
+                    {t.name}
+                    <button style={{ minHeight: 28, padding: '0 .4rem' }} aria-label={`הסרת התגית ${t.name}`}
+                      onClick={() => act(async () => { await api('DELETE', `/conversations/${sel.id}/tags/${t.id}`); setLive((n) => n + 1); })}>✕</button>
+                  </span>
+                ))}
+                {allTags.some((t) => !sel.tags.some((x) => x.id === t.id)) && (
+                  <>
+                    <label htmlFor="addtag" className="sr-only">הוספת תגית לשיחה</label>
+                    <select id="addtag" style={{ width: 'auto' }} value="" onChange={(e) => {
+                      const id = e.target.value;
+                      if (id) void act(async () => { await api('POST', `/conversations/${sel.id}/tags`, { tagId: id }); setLive((n) => n + 1); });
+                    }}>
+                      <option value="">+ הוספת תגית</option>
+                      {allTags.filter((t) => !sel.tags.some((x) => x.id === t.id)).map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+                    </select>
+                  </>
+                )}
+              </div>
               <div className="messages" ref={logRef} role="log" aria-live="polite" aria-label="הודעות בשיחה" tabIndex={0}>
                 {msgs.map((m) => (
                   <div key={m.id} className={`msg ${m.direction}`}>
                     {m.attachment && <AttachmentView a={m.attachment} />}
                     {m.body}
-                    <small>{m.direction === 'out' ? (m.senderName ?? 'צוות') : 'לקוח'} · {fmt(m.createdAt)}</small>
+                    <small>{m.direction === 'out' ? (m.auto ? 'מענה אוטומטי' : (m.senderName ?? 'צוות')) : 'לקוח'} · {fmt(m.createdAt)}</small>
                   </div>
                 ))}
               </div>

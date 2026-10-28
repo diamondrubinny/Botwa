@@ -3,7 +3,9 @@ import QRCode from 'qrcode';
 import type { Config } from '../config.js';
 import type { Db } from '../db.js';
 import { ingestInbound } from '../inbox.js';
+import { isOpen } from '../business-hours.js';
 import { MediaService } from '../media/store.js';
+import { loadBusinessHours } from '../routes/settings.js';
 import { createAuthStore } from './auth-store.js';
 import type { AdapterFactory, ChannelAdapter, ChannelStatus, ChannelType, OutboundMedia } from './types.js';
 import { TelegramAdapter } from './telegram.js';
@@ -80,6 +82,7 @@ export class ChannelManager {
         onMessage: async (m) => {
           const r = await ingestInbound(this.db, channelId, m);
           if (r.messageId && m.media) await this.media.ingestInbound(r.messageId, m.media);
+          if (r.messageId) await this.maybeAway(channelId, r.conversationId, m.externalContactId).catch(() => undefined);
           if (r.messageId) this.emit({ channelId, type: 'message', conversationId: r.conversationId, messageId: r.messageId });
         },
       },
@@ -135,6 +138,32 @@ export class ChannelManager {
     const a = this.adapters.get(channelId);
     if (!a || this.statuses.get(channelId) !== 'connected') throw new Error('channel_not_connected');
     return a.sendText(externalContactId, text);
+  }
+
+  /**
+   * Out-of-hours auto reply. Guards against loops/spam: only for a customer's message (never for our own sends),
+   * at most once per conversation per 12h, stored as an `auto` message so reports don't count it as a human reply.
+   */
+  private async maybeAway(channelId: string, conversationId: string, externalContactId: string): Promise<void> {
+    const hours = await loadBusinessHours(this.db);
+    if (!hours.enabled || isOpen(hours, new Date())) return;
+    const claim = await this.db.query(
+      `UPDATE conversations SET last_away_at = now()
+        WHERE id = $1 AND (last_away_at IS NULL OR last_away_at < now() - interval '12 hours') RETURNING id`,
+      [conversationId],
+    );
+    if (!claim.rowCount) return;
+    try {
+      const sent = await this.sendText(channelId, externalContactId, hours.awayMessage);
+      const ins = await this.db.query(
+        `INSERT INTO messages (conversation_id, direction, body, external_id, auto) VALUES ($1,'out',$2,$3,true) RETURNING id`,
+        [conversationId, hours.awayMessage, sent.externalMessageId ?? null],
+      );
+      this.emit({ channelId, type: 'message', conversationId, messageId: ins.rows[0].id });
+    } catch {
+      // channel went away: release the claim so the next customer message can retry
+      await this.db.query('UPDATE conversations SET last_away_at = NULL WHERE id = $1', [conversationId]);
+    }
   }
 
   async sendMedia(channelId: string, externalContactId: string, media: OutboundMedia) {

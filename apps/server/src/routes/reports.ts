@@ -26,14 +26,14 @@ export function reportRoutes(app: FastifyInstance, db: Db, cfg: Config) {
         `WITH m AS (
            SELECT conversation_id, direction, created_at,
                   LAG(direction) OVER (PARTITION BY conversation_id ORDER BY created_at) AS prev_dir
-             FROM messages WHERE created_at >= now() - make_interval(days => $1)
+             FROM messages WHERE NOT auto AND created_at >= now() - make_interval(days => $1)
          ), w AS (
            SELECT conversation_id, created_at AS asked_at FROM m WHERE direction = 'in' AND (prev_dir IS NULL OR prev_dir = 'out')
          ), r AS (
            SELECT w.asked_at, o.created_at AS answered_at, o.sender_user_id
              FROM w LEFT JOIN LATERAL (
                SELECT created_at, sender_user_id FROM messages o
-                WHERE o.conversation_id = w.conversation_id AND o.direction = 'out' AND o.created_at > w.asked_at
+                WHERE o.conversation_id = w.conversation_id AND o.direction = 'out' AND NOT o.auto AND o.created_at > w.asked_at
                 ORDER BY o.created_at LIMIT 1) o ON true
          )
          SELECT sender_user_id AS "userId", GROUPING(sender_user_id)::int AS "isTotal",

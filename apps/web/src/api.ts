@@ -23,10 +23,13 @@ export interface Channel { id: string; type: 'whatsapp' | 'telegram'; label: str
 export interface Conversation {
   id: string; channelId: string; status: 'open' | 'closed'; assignedTo: string | null; assignedName: string | null;
   unreadCount: number; lastMessageAt: string; contactName: string | null; contactId: string; contactRowId: string;
-  channelLabel: string; channelType: string; lastMessage: string | null;
+  channelLabel: string; channelType: string; lastMessage: string | null; waitingSince: string | null; tags: Tag[];
 }
 export interface Attachment { id: string; kind: string; mime: string | null; size: number | null; fileName: string | null; status: 'pending' | 'clean' | 'infected' | 'blocked'; detail: string | null }
-export interface Message { id: string; direction: 'in' | 'out'; body: string; senderName: string | null; createdAt: string; attachment?: Attachment | null }
+export interface Tag { id: string; name: string }
+export interface AuditRow { id: string; actorName: string | null; action: string; target: string | null; ip: string | null; createdAt: string }
+export interface BusinessHours { enabled: boolean; timezone: string; days: ({ open: string; close: string } | null)[]; awayMessage: string }
+export interface Message { id: string; auto?: boolean; direction: 'in' | 'out'; body: string; senderName: string | null; createdAt: string; attachment?: Attachment | null }
 
 export async function upload(url: string, file: File, caption: string): Promise<void> {
   const fd = new FormData();

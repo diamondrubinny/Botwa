@@ -76,11 +76,21 @@ export function userRoutes(app: FastifyInstance, db: Db) {
     return { ok: true };
   });
 
-  app.get('/audit', { preHandler: adminOnly }, async (req) => {
-    const q = z.object({ limit: z.coerce.number().int().min(1).max(200).default(50) }).parse(req.query);
+  app.get('/audit', { preHandler: adminOnly }, async (req, reply) => {
+    const q = z
+      .object({
+        limit: z.coerce.number().int().min(1).max(200).default(50),
+        before: z.coerce.number().int().positive().optional(), // keyset pagination: rows with id < before
+        action: z.string().max(60).regex(/^[a-z_.]*$/).optional(), // prefix filter, e.g. "login" or "user."
+      })
+      .safeParse(req.query);
+    if (!q.success) return reply.code(400).send({ error: 'bad_request' });
     const { rows } = await db.query(
-      'SELECT id, actor_id AS "actorId", action, target, ip, created_at AS "createdAt" FROM audit_log ORDER BY id DESC LIMIT $1',
-      [q.limit],
+      `SELECT a.id, a.actor_id AS "actorId", u.name AS "actorName", a.action, a.target, a.ip, a.created_at AS "createdAt"
+         FROM audit_log a LEFT JOIN users u ON u.id = a.actor_id
+        WHERE ($2::bigint IS NULL OR a.id < $2) AND ($3::text IS NULL OR a.action LIKE $3 || '%')
+        ORDER BY a.id DESC LIMIT $1`,
+      [q.data.limit, q.data.before ?? null, q.data.action ?? null],
     );
     return rows;
   });

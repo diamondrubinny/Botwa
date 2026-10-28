@@ -101,6 +101,7 @@ Messages/phone numbers = personal data → Israeli Privacy Law (Amendment 13) & 
 - Hosting: Ubuntu server (Docker Compose + Caddy/Nginx HTTPS) + admin panel.
 - Stack (my call): Node 22 + TS + Fastify + PostgreSQL (plain SQL migrations) + React. Redis deferred (not needed at this scale).
 - Scale: ~4000 customer contacts, 19 staff (roles: admin / supervisor / agent). Low concurrency → single server process is enough.
+- Done in P11: audit-log UI (filters, pagination), conversation tags (+filter), business hours + out-of-hours auto reply (loop-safe, excluded from response-time reports), waiting-time/SLA highlight in inbox, settings page. 60 server tests + full E2E.
 - Done in P10: live inbox updates (SSE, no content, access-filtered), tab-title unread count, admin export/erase buttons (found gap: erase was API-only), DRAFT legal pack (docs/legal), data-request procedure, staff guide. 54 server tests + full E2E.
 - Done in P9: supervisor reports (volumes, response time per agent, daily table) + independent security review and fixes (see PRODUCTION_CHECKLIST). 53 server tests (incl. real clamd) + E2E incl. MFA enforcement.
 - Done in P8: media (inbound+outbound) with quarantine + content allowlist + ClamAV scan, fail-closed, secure serving, disk cleanup on retention/erase/delete; UI bubbles + upload; compose `media` profile. 46 server tests (incl. a REAL clamd run with EICAR) + E2E. Also fixed: blank optional env vars (`KEY=`) used to crash startup.

@@ -55,6 +55,7 @@ Admin: `GET/POST /users`, `PATCH /users/:id`, `POST /users/:id/reset-mfa`, `GET 
 ## API (P2)
 Admin: `GET/POST /channels`, `POST /channels/:id/start|stop|logout|password` (password = Telegram 2FA during QR login), `DELETE /channels/:id`, `GET /channels/:id/events` (SSE: status + QR data-URL), `GET /contacts/:id/export`, `DELETE /contacts/:id`
 Staff (all roles): `GET /conversations`, `GET /conversations/:id/messages`, `POST /conversations/:id/messages|read|assign|status`
+Tags: `GET /tags`, `POST/DELETE /tags` (supervisor/admin), `POST/DELETE /conversations/:id/tags[/:tagId]`, filter `GET /conversations?tag=`. Settings: `GET/PUT /settings/business-hours` (admin writes; out-of-hours auto reply, max once per 12h per conversation, marked `auto`). Audit: `GET /audit?action=<prefix>&before=<id>&limit=` (admin). Conversation list also returns `tags` and `waitingSince`.
 Live updates: `GET /events` (SSE, content-free "conversation X changed" events, filtered by the user's access).
 Also: `GET /conversations?q=` (search name/number/message text), `GET/POST /conversations/:id/notes` (internal notes, never sent to customers), `GET /canned-replies` (all staff), `POST/DELETE /canned-replies` (supervisor/admin).
 Reports (supervisor/admin): `GET /reports/summary?days=` – volumes, response times per agent, daily series (no message content; `REPORT_TZ`, default Asia/Jerusalem).

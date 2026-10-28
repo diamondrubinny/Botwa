@@ -30,6 +30,11 @@ Status legend: ✅ done in code/tests · 🔲 must be done by the operator · �
 - Known limitation: login rate limit is per IP (in-memory, single process); account lockout is per account (DB). A known email can still be locked out for 15 minutes by an attacker (the response no longer reveals it, but the legitimate user is affected; admin can see `login.lockout` in the audit log).
 - Known limitation: inbound media is fully buffered in memory during download (bounded by `MEDIA_MAX_MB` and max 4 concurrent).
 
+## Auto reply (out of hours)
+- ✅ Loop-safe: only triggered by a customer message, max once per conversation per 12h, stored as `auto` (not counted as a human response in reports)
+- ⚖️ Confirm wording with counsel (it is an automatic message to a customer); keep it informational, not promotional
+- 🔲 Test with a real number outside hours; note that any outbound automation raises the WhatsApp/Telegram ban risk slightly
+
 ## Backup & recovery
 - 🔲 Daily `scripts/backup.sh` cron + off-server copy + GPG encryption
 - 🔲 Restore rehearsal on a scratch database (documented in DEPLOY.md)

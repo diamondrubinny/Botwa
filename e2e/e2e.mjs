@@ -73,12 +73,32 @@ await page.click('nav >> text=דוחות');
 await page.waitForSelector('text=זמן תגובה ממוצע');
 await axe('reports');
 
+// settings + audit pages (admin)
+await page.click('nav >> text=הגדרות');
+await page.waitForSelector('#away');
+await page.check('text=הפעלת מענה אוטומטי מחוץ לשעות');
+await page.click('button:has-text("שמירה")');
+await page.waitForSelector('text=ההגדרות נשמרו');
+await axe('settings');
+await page.uncheck('text=הפעלת מענה אוטומטי מחוץ לשעות');
+await page.click('button:has-text("שמירה")');
+await page.waitForSelector('text=ההגדרות נשמרו');
+await page.click('nav >> text=יומן ביקורת');
+await page.waitForSelector('td:has-text("כניסה למערכת")');
+await page.selectOption('#af', { label: 'ערוצים' });
+await page.waitForSelector('td:has-text("יצירת ערוץ")');
+await axe('audit log');
+await page.selectOption('#af', { label: 'הכול' });
+await page.waitForSelector('td:has-text("הפעלת אימות דו-שלבי")');
+
 // canned replies page
-await page.click('nav >> text=תשובות מוכנות');
+await page.click('nav >> text=תשובות ותגיות');
 await page.fill('#c-title', 'ברכה'); await page.fill('#c-body', 'שלום, איך אפשר לעזור?');
 await page.click('button:has-text("הוספה")');
 await page.waitForSelector('li.card:has-text("ברכה")');
-await axe('canned replies');
+await page.fill('#tag-name', 'VIP'); await page.click('button:has-text("הוספת תגית")');
+await page.waitForSelector('li.badge:has-text("VIP")');
+await axe('canned replies + tags');
 
 // seed an inbound conversation directly (adapter can't reach WhatsApp here)
 const ch = psql("SELECT id FROM channels LIMIT 1");
@@ -98,6 +118,13 @@ await page.fill('#note', 'לקוח חשוב'); await page.click('button:has-text
 await page.waitForSelector('#notes-h ~ ul li:has-text("לקוח חשוב")');
 check('internal note added', true);
 await axe('inbox with notes + canned');
+check('waiting time shown in list', await page.isVisible('.conv-list >> text=ממתין'));
+await page.selectOption('#addtag', { label: 'VIP' });
+await page.waitForSelector('.chat-pane .badge:has-text("VIP")');
+await page.selectOption('#tgf', { label: 'VIP' });
+await page.waitForSelector('.conv-list button');
+check('tag filter keeps the tagged conversation', true);
+await page.selectOption('#tgf', { value: '' });
 await page.fill('#srch', 'הזמנה');
 await page.waitForSelector('.conv-list button');
 await page.fill('#srch', 'zzzz-none');
