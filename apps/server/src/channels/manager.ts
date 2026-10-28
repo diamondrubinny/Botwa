@@ -4,6 +4,8 @@ import type { Config } from '../config.js';
 import type { Db } from '../db.js';
 import { ingestInbound } from '../inbox.js';
 import { isOpen } from '../business-hours.js';
+import { autoAssign } from '../routing.js';
+import { audit } from '../audit.js';
 import { MediaService } from '../media/store.js';
 import { loadBusinessHours } from '../routes/settings.js';
 import { createAuthStore } from './auth-store.js';
@@ -82,6 +84,10 @@ export class ChannelManager {
         onMessage: async (m) => {
           const r = await ingestInbound(this.db, channelId, m);
           if (r.messageId && m.media) await this.media.ingestInbound(r.messageId, m.media);
+          if (r.messageId && r.needsRouting) {
+            const to = await autoAssign(this.db, r.conversationId).catch(() => null);
+            if (to) await audit(this.db, { action: 'conversation.auto_assign', target: r.conversationId, meta: { to } }).catch(() => undefined);
+          }
           if (r.messageId) await this.maybeAway(channelId, r.conversationId, m.externalContactId).catch(() => undefined);
           if (r.messageId) this.emit({ channelId, type: 'message', conversationId: r.conversationId, messageId: r.messageId });
         },

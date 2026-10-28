@@ -7,7 +7,7 @@ import { hashPassword, PASSWORD_MIN } from '../password.js';
 
 const role = z.enum(['admin', 'supervisor', 'agent']);
 const idParam = z.object({ id: z.string().uuid() });
-const publicCols = 'id, email, name, role, active, totp_enabled AS "mfaEnabled", created_at AS "createdAt"';
+const publicCols = 'id, email, name, role, active, available, totp_enabled AS "mfaEnabled", created_at AS "createdAt"';
 
 export function userRoutes(app: FastifyInstance, db: Db) {
   const adminOnly = requireAuth(db, ['admin']);

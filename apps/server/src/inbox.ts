@@ -15,10 +15,11 @@ export async function ingestInbound(db: Db, channelId: string, m: InboundMessage
     );
     const conv = await client.query(
       `INSERT INTO conversations (channel_id, contact_id) VALUES ($1,$2)
-       ON CONFLICT (contact_id) DO UPDATE SET contact_id = EXCLUDED.contact_id RETURNING id`,
+       ON CONFLICT (contact_id) DO UPDATE SET contact_id = EXCLUDED.contact_id RETURNING id, assigned_to, status`,
       [channelId, contact.rows[0].id],
     );
     const convId: string = conv.rows[0].id;
+    const needsRouting = conv.rows[0].assigned_to === null;
     const ins = await client.query(
       `INSERT INTO messages (conversation_id, direction, body, external_id, created_at)
        VALUES ($1,'in',$2,$3,$4) ON CONFLICT DO NOTHING RETURNING id`,
@@ -31,7 +32,7 @@ export async function ingestInbound(db: Db, channelId: string, m: InboundMessage
       );
     }
     await client.query('COMMIT');
-    return { conversationId: convId, messageId: ins.rows[0]?.id as string | undefined, duplicate: !ins.rowCount };
+    return { conversationId: convId, messageId: ins.rows[0]?.id as string | undefined, duplicate: !ins.rowCount, needsRouting };
   } catch (e) {
     await client.query('ROLLBACK');
     throw e;

@@ -34,6 +34,7 @@ main { flex: 1; padding: 1rem; max-width: 1200px; width: 100%; margin-inline: au
 footer { padding: 1rem; border-top: 1px solid var(--border); background: var(--surface); display: flex; gap: 1rem; flex-wrap: wrap; }
 
 button, .btn { font: inherit; min-height: 44px; padding: .4rem 1rem; border-radius: 6px; border: 1px solid var(--border); background: var(--surface); color: var(--text); cursor: pointer; }
+a.btn { display: inline-block; text-decoration: none; line-height: 34px; }
 button.primary { background: var(--primary); color: var(--primary-text); border-color: var(--primary); }
 button.danger { color: var(--danger); border-color: var(--danger); }
 button:disabled { opacity: .55; cursor: not-allowed; }

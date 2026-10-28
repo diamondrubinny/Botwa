@@ -71,6 +71,9 @@ await axe('team');
 // reports page
 await page.click('nav >> text=דוחות');
 await page.waitForSelector('text=זמן תגובה ממוצע');
+const csvHref = await page.getAttribute('a[href*="export.csv?kind=agents"]', 'href');
+const csvRes = await page.request.get(BASE + csvHref);
+check('reports CSV export downloads', csvRes.ok() && (csvRes.headers()['content-type'] ?? '').includes('text/csv') && (await csvRes.text()).includes('messages_sent'));
 await axe('reports');
 
 // settings + audit pages (admin)
@@ -80,6 +83,20 @@ await page.check('text=הפעלת מענה אוטומטי מחוץ לשעות');
 await page.click('button:has-text("שמירה")');
 await page.waitForSelector('text=ההגדרות נשמרו');
 await axe('settings');
+await page.selectOption('#route', 'round_robin');
+await page.waitForSelector('text=נשמר.');
+await page.click('button:has-text("יצירת גיבוי עכשיו")');
+await page.waitForSelector('text=הגיבוי נוצר.', { timeout: 60000 });
+await page.waitForSelector('a:has-text("הורדה")');
+await axe('settings with routing + backups');
+const bkHref = await page.getAttribute('a:has-text("הורדה")', 'href');
+const bk = await page.request.get(BASE + bkHref);
+check('backup download is encrypted', bk.ok() && (await bk.body()).subarray(0, 8).toString() === 'BOTWABK1');
+await page.click('button:has-text("מחיקה")');
+await page.click('dialog[open] button:has-text("אישור")');
+await page.waitForSelector('text=אין גיבויים.');
+await page.selectOption('#route', 'off');
+await page.waitForSelector('text=נשמר.');
 await page.uncheck('text=הפעלת מענה אוטומטי מחוץ לשעות');
 await page.click('button:has-text("שמירה")');
 await page.waitForSelector('text=ההגדרות נשמרו');
@@ -106,12 +123,32 @@ psql(`INSERT INTO contacts (channel_id, external_id, display_name) VALUES ('${ch
 psql(`INSERT INTO conversations (channel_id, contact_id, unread_count) SELECT '${ch}', id, 2 FROM contacts`);
 psql(`INSERT INTO messages (conversation_id, direction, body, external_id) SELECT id, 'in', 'היי, צריך עזרה בהזמנה', 'x1' FROM conversations`);
 
+// same customer (same phone) also writing on a second WhatsApp channel
+psql(`INSERT INTO channels (type, label) VALUES ('whatsapp', 'ערוץ שני')`);
+psql(`INSERT INTO contacts (channel_id, external_id, display_name) SELECT id, '972501234567@s.whatsapp.net', 'לקוח משני' FROM channels WHERE label='ערוץ שני'`);
+psql(`INSERT INTO conversations (channel_id, contact_id) SELECT channel_id, id FROM contacts WHERE display_name='לקוח משני'`);
+psql(`INSERT INTO messages (conversation_id, direction, body, external_id) SELECT id, 'in', 'הודעה בערוץ שני', 'sec1' FROM conversations WHERE contact_id=(SELECT id FROM contacts WHERE display_name='לקוח משני')`);
+
 await page.click('nav >> text=שיחות');
 await page.waitForSelector('.conv-list button');
 check('conversation listed with unread', (await page.textContent('.unread')).includes('2'));
-await page.click('.conv-list button');
+await page.click('.conv-list button:has-text("יוסי לקוח")');
 await page.waitForSelector('.msg.in');
 await axe('inbox open conversation');
+await page.fill('#msgq', 'zzzz-none');
+await page.waitForFunction(() => document.querySelectorAll('.msg').length === 0, null, { timeout: 15000 });
+await page.fill('#msgq', 'עזרה');
+await page.waitForSelector('.msg:has-text("צריך עזרה")');
+check('in-conversation search narrows messages', true);
+await page.fill('#msgq', '');
+await page.waitForSelector('.msg:has-text("היי, צריך עזרה")');
+await page.waitForSelector('#rel-h');
+check('related conversation (same phone, other channel) listed', await page.isVisible('#rel-h ~ ul >> text=ערוץ שני'));
+await page.click('#rel-h ~ ul button');
+await page.waitForSelector('.chat-pane h2:has-text("לקוח משני")');
+check('opening related conversation works', true);
+await page.click('.conv-list button:has-text("יוסי לקוח")');
+await page.waitForSelector('.chat-pane h2:has-text("יוסי לקוח")');
 await page.selectOption('#canned', { label: 'ברכה' });
 check('canned reply inserted', (await page.inputValue('#reply')).includes('איך אפשר לעזור'));
 await page.fill('#note', 'לקוח חשוב'); await page.click('button:has-text("הוספת הערה")');
@@ -144,7 +181,7 @@ const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR
 const store = randomUUID();
 mkdirSync('/tmp/e2e-media/clean', { recursive: true });
 writeFileSync(`/tmp/e2e-media/clean/${store}`, PNG);
-const conv = psql("SELECT id FROM conversations LIMIT 1");
+const conv = psql("SELECT c.id FROM conversations c JOIN contacts ct ON ct.id=c.contact_id WHERE ct.display_name='יוסי לקוח'");
 const seed = (ext, body, kind, mime, status, detail, st) => {
   psql(`INSERT INTO messages (conversation_id, direction, body, external_id) VALUES ('${conv}','in','${body}','${ext}')`);
   psql(`INSERT INTO attachments (message_id, kind, mime, size, file_name, storage_name, status, detail) SELECT id,'${kind}',${mime},${PNG.length},'${ext}.png',${st},'${status}',${detail} FROM messages WHERE external_id='${ext}'`);
@@ -174,8 +211,9 @@ await page.click('text=התנתקות');
 await page.waitForSelector('#email');
 await page.fill('#email', 'dana@e2e.io'); await page.fill('#pw', 'agent-password-123'); await page.click('button[type=submit]');
 await page.waitForSelector('nav >> text=שיחות');
+check('agent sees availability toggle', await page.isVisible('label:has-text("זמין לקבלת פניות חדשות")'));
 check('agent has no Channels/Team nav', (await page.locator('nav >> text=ערוצים').count()) === 0 && (await page.locator('nav >> text=צוות').count()) === 0);
-await page.click('.conv-list button');
+await page.click('.conv-list button:has-text("יוסי לקוח")');
 await page.click('text=קח שיחה'); await page.waitForSelector('text=שחרור שיחה');
 check('agent claimed conversation', true);
 
@@ -199,12 +237,12 @@ await page.fill('#email', 'admin@e2e.io'); await page.fill('#pw', 'e2e-password-
 await page.waitForSelector('#totp');
 await page.fill('#totp', authenticator.generate(secret)); await page.click('button[type=submit]');
 await page.waitForSelector('.conv-list button');
-await page.click('.conv-list button');
+await page.click('.conv-list button:has-text("יוסי לקוח")');
 await page.click('button:has-text("מחיקת איש הקשר וכל הנתונים")');
 await axe('erase confirm dialog');
 await page.click('dialog[open] button:has-text("מחיקה לצמיתות")');
-await page.waitForSelector('text=אין שיחות להצגה', { timeout: 15000 });
-check('contact erased: conversation and files gone', psql('SELECT count(*) FROM conversations') === '0' && psql('SELECT count(*) FROM attachments') === '0');
+await page.waitForFunction(() => !document.body.innerText.includes('יוסי לקוח'), null, { timeout: 15000 });
+check('contact erased: its conversation and files gone, other customer untouched', psql('SELECT count(*) FROM conversations') === '1' && psql('SELECT count(*) FROM attachments') === '0');
 
 await browser.close();
 console.log(failures ? `FAILURES: ${failures}` : 'ALL OK');

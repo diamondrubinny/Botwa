@@ -35,6 +35,13 @@ Status legend: ✅ done in code/tests · 🔲 must be done by the operator · �
 - ⚖️ Confirm wording with counsel (it is an automatic message to a customer); keep it informational, not promotional
 - 🔲 Test with a real number outside hours; note that any outbound automation raises the WhatsApp/Telegram ban risk slightly
 
+## Routing, exports, backups (added later)
+- ✅ Auto-routing serialised with an advisory lock (tested with concurrent burst), only on-duty `agent` role; CSV export guards spreadsheet-formula injection; encrypted backups (tamper + wrong-key detection tested against real pg_dump)
+- 🔲 Docker image: confirm `pg_dump --version` inside the server container matches the DB major version (16) and that "create backup" works from the panel
+- 🔲 Restore rehearsal from a panel-made backup into an empty database (CLI only) – see DEPLOY.md
+- Known limitation: backups are not incremental and do not include the `media` volume; the encryption key is derived from `ENCRYPTION_KEY` (lose the key = lose the backups)
+- Known limitation: related-conversation matching only works for WhatsApp phone-number ids (not WhatsApp LID or Telegram ids)
+
 ## Backup & recovery
 - 🔲 Daily `scripts/backup.sh` cron + off-server copy + GPG encryption
 - 🔲 Restore rehearsal on a scratch database (documented in DEPLOY.md)

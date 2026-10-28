@@ -17,6 +17,7 @@ export function conversationRoutes(app: FastifyInstance, db: Db, mgr: ChannelMan
         status: z.enum(['open', 'closed']).optional(),
         q: z.string().trim().min(1).max(100).optional(),
         tag: z.string().uuid().optional(),
+        id: z.string().uuid().optional(),
         mine: z.enum(['true', 'false']).optional(),
         limit: z.coerce.number().int().min(1).max(100).default(50),
         offset: z.coerce.number().int().min(0).default(0),
@@ -35,18 +36,19 @@ export function conversationRoutes(app: FastifyInstance, db: Db, mgr: ChannelMan
         WHERE ($1::text IS NULL OR c.status = $1)
           AND ($2::boolean IS NOT TRUE OR c.assigned_to = $3)
           AND ($4::boolean OR c.assigned_to IS NULL OR c.assigned_to = $3)
+          AND ($9::uuid IS NULL OR c.id = $9)
           AND ($8::uuid IS NULL OR EXISTS (SELECT 1 FROM conversation_tags xt WHERE xt.conversation_id = c.id AND xt.tag_id = $8))
           AND ($7::text IS NULL OR ct.display_name ILIKE $7 OR ct.external_id ILIKE $7
                OR EXISTS (SELECT 1 FROM messages sm WHERE sm.conversation_id = c.id AND sm.body ILIKE $7))
         ORDER BY c.last_message_at DESC LIMIT $5 OFFSET $6`,
-      [q.status ?? null, q.mine === 'true', u.id, isManager(u), q.limit, q.offset, q.q ? `%${q.q.replace(/[\\%_]/g, '\\$&')}%` : null, q.tag ?? null],
+      [q.status ?? null, q.mine === 'true', u.id, isManager(u), q.limit, q.offset, q.q ? `%${q.q.replace(/[\\%_]/g, '\\$&')}%` : null, q.tag ?? null, q.id ?? null],
     );
     return rows;
   });
 
   app.get('/conversations/:id/messages', { preHandler: any }, async (req, reply) => {
     const p = idParam.safeParse(req.params);
-    const q = z.object({ limit: z.coerce.number().int().min(1).max(200).default(50), before: z.string().datetime().optional() }).safeParse(req.query);
+    const q = z.object({ limit: z.coerce.number().int().min(1).max(200).default(50), before: z.string().datetime().optional(), q: z.string().trim().min(1).max(100).optional() }).safeParse(req.query);
     if (!p.success || !q.success) return reply.code(400).send({ error: 'bad_request' });
     if (!(await loadAccessible(db, req.user!, p.data.id))) return reply.code(404).send({ error: 'not_found' });
     const { rows } = await db.query(
@@ -55,10 +57,38 @@ export function conversationRoutes(app: FastifyInstance, db: Db, mgr: ChannelMan
                 'fileName', a.file_name, 'status', a.status, 'detail', a.detail) END AS attachment
          FROM messages m LEFT JOIN users u ON u.id = m.sender_user_id LEFT JOIN attachments a ON a.message_id = m.id
         WHERE m.conversation_id = $1 AND ($2::timestamptz IS NULL OR m.created_at < $2)
+          AND ($4::text IS NULL OR m.body ILIKE $4 OR a.file_name ILIKE $4)
         ORDER BY m.created_at DESC LIMIT $3`,
-      [p.data.id, q.data.before ?? null, q.data.limit],
+      [p.data.id, q.data.before ?? null, q.data.limit, q.data.q ? `%${q.data.q.replace(/[\\%_]/g, '\\$&')}%` : null],
     );
     return rows.reverse();
+  });
+
+  // Same customer on other channels: contacts sharing a phone number (WhatsApp ids look like <digits>@s.whatsapp.net).
+  // Only conversations the caller may access are returned.
+  app.get('/conversations/:id/related', { preHandler: any }, async (req, reply) => {
+    const p = idParam.safeParse(req.params);
+    if (!p.success) return reply.code(400).send({ error: 'bad_request' });
+    const u = req.user!;
+    if (!(await loadAccessible(db, u, p.data.id))) return reply.code(404).send({ error: 'not_found' });
+    const { rows } = await db.query(
+      `WITH me AS (
+         SELECT regexp_replace(split_part(ct.external_id, '@', 1), '\D', '', 'g') AS phone
+           FROM conversations c JOIN contacts ct ON ct.id = c.contact_id
+          WHERE c.id = $1 AND ct.external_id LIKE '%@s.whatsapp.net'
+       )
+       SELECT c.id, c.status, c.last_message_at AS "lastMessageAt", ch.label AS "channelLabel", ch.type AS "channelType",
+              ct.display_name AS "contactName", au.name AS "assignedName",
+              (SELECT COALESCE(NULLIF(m.body, ''), '[קובץ מצורף]') FROM messages m WHERE m.conversation_id = c.id ORDER BY m.created_at DESC LIMIT 1) AS "lastMessage"
+         FROM me, conversations c
+         JOIN contacts ct ON ct.id = c.contact_id JOIN channels ch ON ch.id = c.channel_id LEFT JOIN users au ON au.id = c.assigned_to
+        WHERE c.id <> $1 AND ct.external_id LIKE '%@s.whatsapp.net' AND me.phone <> ''
+          AND regexp_replace(split_part(ct.external_id, '@', 1), '\D', '', 'g') = me.phone
+          AND ($2::boolean OR c.assigned_to IS NULL OR c.assigned_to = $3)
+        ORDER BY c.last_message_at DESC LIMIT 20`,
+      [p.data.id, isManager(u), u.id],
+    );
+    return rows;
   });
 
   app.post('/conversations/:id/read', { preHandler: any }, async (req, reply) => {

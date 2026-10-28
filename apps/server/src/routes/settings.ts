@@ -3,6 +3,7 @@ import { audit } from '../audit.js';
 import { requireAuth } from '../auth.js';
 import { businessHoursSchema, DEFAULT_HOURS, type BusinessHours } from '../business-hours.js';
 import type { Db } from '../db.js';
+import { loadRouting, routingSchema } from '../routing.js';
 
 export async function loadBusinessHours(db: Db): Promise<BusinessHours> {
   const { rows } = await db.query(`SELECT value FROM settings WHERE key = 'business_hours'`);
@@ -24,6 +25,19 @@ export function settingsRoutes(app: FastifyInstance, db: Db) {
       [JSON.stringify(b.data)],
     );
     await audit(db, { actorId: req.user!.id, action: 'settings.business_hours', ip: req.ip, meta: { enabled: b.data.enabled } });
+    return b.data;
+  });
+
+  app.get('/settings/routing', { preHandler: requireAuth(db, ['admin', 'supervisor']) }, async () => loadRouting(db));
+
+  app.put('/settings/routing', { preHandler: adminOnly }, async (req, reply) => {
+    const b = routingSchema.safeParse(req.body);
+    if (!b.success) return reply.code(400).send({ error: 'bad_request' });
+    await db.query(
+      `INSERT INTO settings (key, value) VALUES ('routing', $1) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()`,
+      [JSON.stringify(b.data)],
+    );
+    await audit(db, { actorId: req.user!.id, action: 'settings.routing', ip: req.ip, meta: b.data });
     return b.data;
   });
 }

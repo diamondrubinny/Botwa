@@ -28,6 +28,7 @@ export function App() {
   if (me === null) return <><Login onDone={loadMe} /><A11yWidget /></>;
 
   const isAdmin = me.role === 'admin';
+  const toggleAvailable = async (v: boolean) => { await api('POST', '/auth/availability', { available: v }).catch(() => undefined); await loadMe(); };
   const isManager = me.role !== 'agent';
   const page = me.mfaEnrollmentRequired ? 'account' : route;
 
@@ -54,6 +55,12 @@ export function App() {
           </ul>
         </nav>
         <span className="spacer" />
+        {me.role === 'agent' && (
+          <label style={{ margin: 0, fontWeight: 400 }}>
+            <input type="checkbox" style={{ width: 'auto', minHeight: 0, marginInlineEnd: '.4rem' }} checked={me.available !== false} onChange={(e) => toggleAvailable(e.target.checked)} />
+            זמין לקבלת פניות חדשות
+          </label>
+        )}
         <span>{me.name} ({t.roles[me.role]})</span>
         <button onClick={logout}>{t.nav.logout}</button>
       </header>

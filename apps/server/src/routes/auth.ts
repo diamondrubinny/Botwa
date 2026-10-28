@@ -81,7 +81,9 @@ export function authRoutes(app: FastifyInstance, db: Db, cfg: Config) {
 
   app.get('/auth/me', { preHandler: auth }, async (req) => {
     const u = req.user!;
+    const av = await db.query('SELECT available FROM users WHERE id = $1', [u.id]);
     return {
+      available: av.rows[0]?.available ?? true,
       id: u.id,
       email: u.email,
       name: u.name,
@@ -89,6 +91,14 @@ export function authRoutes(app: FastifyInstance, db: Db, cfg: Config) {
       mfaEnabled: u.totpEnabled,
       mfaEnrollmentRequired: cfg.REQUIRE_MFA_FOR_PRIVILEGED && isPrivileged(u.role) && !u.totpEnabled,
     };
+  });
+
+  // Agents mark themselves on/off duty (affects automatic routing only).
+  app.post('/auth/availability', { preHandler: requireAuth(db) }, async (req, reply) => {
+    const b = z.object({ available: z.boolean() }).safeParse(req.body);
+    if (!b.success) return reply.code(400).send({ error: 'bad_request' });
+    await db.query('UPDATE users SET available = $2 WHERE id = $1', [req.user!.id, b.data.available]);
+    return { available: b.data.available };
   });
 
   app.post('/auth/password', { preHandler: auth, config: { rateLimit: { max: 5, timeWindow: '1 minute' } } }, async (req, reply) => {

@@ -71,6 +71,15 @@ sudo crontab -e   # 03:15 daily:
 gunzip -c botwa-YYYYmmdd-HHMMSS.sql.gz | docker compose exec -T db psql -U botwa -d botwa
 ```
 גיבוי הקבצים: `docker run --rm -v botwa_media:/d -v /var/backups/botwa:/b alpine tar czf /b/media-$(date +%F).tgz -C /d .` (שם ה-volume תלוי בשם התיקייה).
+### גיבוי מתוך הפאנל (מומלץ בנוסף ל-cron)
+הגדרות ← גיבויים ← "יצירת גיבוי עכשיו" (או אוטומטי יומי עם `BACKUP_AUTO_HOUR`). הקבצים מוצפנים (AES-256-GCM, מפתח נגזר מ-`ENCRYPTION_KEY`) ונשמרים ב-volume `backups` (נשמרים `BACKUP_KEEP` אחרונים). הורדה נרשמת ביומן הביקורת. **שחזור מתבצע ידנית בלבד (בכוונה):**
+```bash
+docker compose cp server:/data/backups/<file>.sql.gz.enc ./            # או הורדה מהפאנל
+docker compose exec -T server node dist/scripts/decrypt-backup.js /data/backups/<file>.sql.gz.enc /tmp/out.sql.gz
+docker compose exec -T server cat /tmp/out.sql.gz | gunzip | docker compose exec -T db psql -U botwa -d <EMPTY_DB>
+```
+שחזרו למסד **ריק** (למשל `createdb botwa_restore`), בדקו, ורק אז החליפו. הקבצים המצורפים נגבים בנפרד (volume `media`). ה-Dockerfile מתקין `pg_dump` מ-PGDG – שלב זה לא נבדק בסביבת הפיתוח.
+
 העתיקו גיבויים גם מחוץ לשרת (למשל rsync/rclone ליעד מוצפן).
 
 ## 7. בדיקת עשן אחרי פריסה

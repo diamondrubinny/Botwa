@@ -31,6 +31,10 @@ const schema = z.object({
   CLAMAV_PORT: z.coerce.number().int().default(3310),
   MEDIA_ALLOW_UNSCANNED: bool('false'), // development only: accept files without antivirus
   REPORT_TZ: z.string().default('Asia/Jerusalem'),
+  BACKUP_DIR: z.string().default('./data/backups'),
+  BACKUP_KEEP: z.coerce.number().int().min(1).max(365).default(14),
+  // Hour of day (0-23, server local time) for the automatic daily backup. Unset = manual backups only.
+  BACKUP_AUTO_HOUR: z.coerce.number().int().min(0).max(23).optional(),
   WEB_DIST: z.string().optional(),
   MESSAGE_RETENTION_DAYS: z.coerce.number().int().min(0).default(365),
   REQUIRE_MFA_FOR_PRIVILEGED: bool('true'),

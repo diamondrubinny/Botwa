@@ -1,6 +1,7 @@
 import { buildApp } from './app.js';
 import { ChannelManager } from './channels/manager.js';
 import { purgeOldMessages } from './inbox.js';
+import { createBackup } from './backup.js';
 import { MediaService } from './media/store.js';
 import { loadConfig } from './config.js';
 import { createDb } from './db.js';
@@ -18,6 +19,18 @@ await mgr.startAll();
 const purge = () => purgeOldMessages(db, cfg.MESSAGE_RETENTION_DAYS, media).catch((err) => app.log.error({ err }, 'retention purge failed'));
 void purge();
 setInterval(purge, 24 * 3600 * 1000).unref();
+// Optional automatic daily encrypted backup.
+if (cfg.BACKUP_AUTO_HOUR !== undefined) {
+  let lastDay = '';
+  setInterval(() => {
+    const now = new Date();
+    const day = now.toDateString();
+    if (now.getHours() === cfg.BACKUP_AUTO_HOUR && day !== lastDay) {
+      lastDay = day;
+      createBackup(cfg).then((b) => app.log.info({ backup: b.name }, 'automatic backup done')).catch((err) => app.log.error({ err }, 'automatic backup failed'));
+    }
+  }, 60_000).unref();
+}
 // Retry attachments whose antivirus scan could not complete (scanner down/updating).
 setInterval(() => void media.scanPending().catch((err) => app.log.error({ err }, 'scan retry failed')), 60_000).unref();
 

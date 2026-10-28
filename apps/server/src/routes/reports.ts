@@ -1,15 +1,49 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
+import { audit } from '../audit.js';
 import { requireAuth } from '../auth.js';
 import type { Config } from '../config.js';
 import type { Db } from '../db.js';
 
 /** Aggregate support metrics (no message content). Supervisors/admins only. */
+/** Spreadsheet formula injection guard: cells starting with = + - @ (or tab/CR) are prefixed with an apostrophe. */
+export function csvCell(v: unknown): string {
+  let s = v == null ? '' : String(v);
+  if (/^[=+\-@\t\r]/.test(s)) s = `'${s}`;
+  return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+}
+export const toCsv = (rows: unknown[][]) => '\uFEFF' + rows.map((r) => r.map(csvCell).join(',')).join('\r\n') + '\r\n';
+
 export function reportRoutes(app: FastifyInstance, db: Db, cfg: Config) {
-  app.get('/reports/summary', { preHandler: requireAuth(db, ['admin', 'supervisor']) }, async (req, reply) => {
+  const managers = requireAuth(db, ['admin', 'supervisor']);
+
+  app.get('/reports/export.csv', { preHandler: managers }, async (req, reply) => {
+    const q = z.object({ days: z.coerce.number().int().min(1).max(365).default(30), kind: z.enum(['agents', 'daily']).default('agents') }).safeParse(req.query);
+    if (!q.success) return reply.code(400).send({ error: 'bad_request' });
+    const r = await computeSummary(db, cfg, q.data.days);
+    const rows: unknown[][] = q.data.kind === 'agents'
+      ? [['agent', 'messages_sent', 'conversations', 'avg_first_response_seconds', 'median_first_response_seconds'],
+         ...r.agents.map((a: Agent) => [a.name, a.messagesSent, a.conversations, a.avgFirstResponseSeconds, a.medianFirstResponseSeconds])]
+      : [['day', 'inbound', 'outbound'], ...r.daily.map((d: { day: string; inbound: number; outbound: number }) => [d.day, d.inbound, d.outbound])];
+    await audit(db, { actorId: req.user!.id, action: 'report.export', ip: req.ip, meta: { kind: q.data.kind, days: q.data.days } });
+    return reply
+      .header('content-type', 'text/csv; charset=utf-8')
+      .header('content-disposition', `attachment; filename="botwa-${q.data.kind}-${q.data.days}d.csv"`)
+      .header('cache-control', 'private, no-store')
+      .send(toCsv(rows));
+  });
+
+  app.get('/reports/summary', { preHandler: managers }, async (req, reply) => {
     const q = z.object({ days: z.coerce.number().int().min(1).max(365).default(30) }).safeParse(req.query);
     if (!q.success) return reply.code(400).send({ error: 'bad_request' });
-    const days = q.data.days;
+    return computeSummary(db, cfg, q.data.days);
+  });
+}
+
+interface Agent { name: string; messagesSent: number; conversations: number; avgFirstResponseSeconds: number | null; medianFirstResponseSeconds: number | null }
+
+async function computeSummary(db: Db, cfg: Config, days: number) {
+  {
 
     const [totals, waits, perAgent, daily] = await Promise.all([
       db.query(
@@ -73,5 +107,5 @@ export function reportRoutes(app: FastifyInstance, db: Db, cfg: Config) {
       agents: perAgent.rows.map((a) => ({ ...a, avgFirstResponseSeconds: respByUser.get(a.userId)?.avgSeconds ?? null, medianFirstResponseSeconds: respByUser.get(a.userId)?.medianSeconds ?? null })),
       daily: daily.rows,
     };
-  });
+  }
 }

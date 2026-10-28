@@ -36,6 +36,10 @@ export function Reports() {
           <option value={90}>90 ימים אחרונים</option>
         </select>
       </div>
+      <p className="row">
+        <a className="btn" href={`/reports/export.csv?kind=agents&days=${days}`} download>ייצוא נציגים ל-CSV</a>
+        <a className="btn" href={`/reports/export.csv?kind=daily&days=${days}`} download>ייצוא נפח יומי ל-CSV</a>
+      </p>
       {failed && <p role="alert" className="error">טעינת הדוח נכשלה.</p>}
       {!data ? <p role="status">טוען…</p> : (
         <>

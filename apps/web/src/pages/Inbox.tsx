@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
-import { api, ApiError, upload, type Attachment, type Canned, type Tag, type Conversation, type Me, type Message, type Note, type UserRow } from '../api';
+import { api, ApiError, upload, type RelatedConv, type Attachment, type Canned, type Tag, type Conversation, type Me, type Message, type Note, type UserRow } from '../api';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { usePoll } from '../hooks';
 import { blockedReason, errText } from '../strings';
@@ -47,6 +47,9 @@ export function Inbox({ me }: { me: Me }) {
   const [sending, setSending] = useState(false);
   const logRef = useRef<HTMLDivElement>(null);
   const [eraseOpen, setEraseOpen] = useState(false);
+  const [msgQuery, setMsgQuery] = useState('');
+  const [related, setRelated] = useState<RelatedConv[]>([]);
+  const [pinned, setPinned] = useState<Conversation | null>(null);
   const [live, setLive] = useState(0); // bumped by server events to refetch immediately
   const [announce, setAnnounce] = useState('');
 
@@ -65,7 +68,7 @@ export function Inbox({ me }: { me: Me }) {
     return () => { document.title = base; };
   }, [unreadTotal]);
 
-  const sel = convs.find((c) => c.id === selId) ?? null;
+  const sel = convs.find((c) => c.id === selId) ?? (pinned && pinned.id === selId ? pinned : null);
 
   usePoll(async () => {
     const q = (filter === 'mine' ? 'mine=true&status=open' : `status=${filter}`) + (search.trim() ? `&q=${encodeURIComponent(search.trim())}` : '') + (tagFilter ? `&tag=${tagFilter}` : '');
@@ -84,13 +87,18 @@ export function Inbox({ me }: { me: Me }) {
     if (!selId) return setMsgs([]);
     api<Note[]>('GET', `/conversations/${selId}/notes`).then(setNotes).catch(() => undefined);
     try {
-      const m = await api<Message[]>('GET', `/conversations/${selId}/messages?limit=100`);
+      const m = await api<Message[]>('GET', `/conversations/${selId}/messages?limit=100${msgQuery.trim() ? `&q=${encodeURIComponent(msgQuery.trim())}` : ''}`);
       setMsgs((prev) => {
         if (prev.length !== m.length) requestAnimationFrame(() => logRef.current?.scrollTo({ top: logRef.current.scrollHeight }));
         return m;
       });
     } catch { setSelId(null); }
-  }, 3000, [selId, live]);
+  }, 3000, [selId, live, msgQuery]);
+
+  usePoll(async () => {
+    if (!selId) return setRelated([]);
+    setRelated(await api<RelatedConv[]>('GET', `/conversations/${selId}/related`).catch(() => []));
+  }, 30000, [selId, live]);
 
   const act = async (fn: () => Promise<unknown>) => {
     setErr('');
@@ -99,6 +107,7 @@ export function Inbox({ me }: { me: Me }) {
 
   function open(c: Conversation) {
     setSelId(c.id);
+    setMsgQuery('');
     setErr('');
     if (c.unreadCount) void api('POST', `/conversations/${c.id}/read`).catch(() => undefined);
   }
@@ -138,6 +147,12 @@ export function Inbox({ me }: { me: Me }) {
       a.href = url; a.download = `contact-${c.contactRowId}.json`; a.click();
       URL.revokeObjectURL(url);
     });
+  }
+
+  async function openRelated(id: string) {
+    const [c] = await api<Conversation[]>('GET', `/conversations?id=${id}&status=open`).catch(() => []);
+    const [c2] = c ? [c] : await api<Conversation[]>('GET', `/conversations?id=${id}&status=closed`).catch(() => []);
+    if (c2) { setPinned(c2); setSelId(c2.id); setMsgQuery(''); }
   }
 
   const assignTo = (userId: string | null) => act(() => api('POST', `/conversations/${selId}/assign`, { userId }));
@@ -236,6 +251,11 @@ export function Inbox({ me }: { me: Me }) {
                   </>
                 )}
               </div>
+              <div className="field">
+                <label htmlFor="msgq">חיפוש בשיחה</label>
+                <input id="msgq" type="search" maxLength={100} value={msgQuery} onChange={(e) => setMsgQuery(e.target.value)} />
+                {msgQuery.trim() && <p className="hint" role="status">מוצגות רק הודעות שמתאימות לחיפוש ({msgs.length}).</p>}
+              </div>
               <div className="messages" ref={logRef} role="log" aria-live="polite" aria-label="הודעות בשיחה" tabIndex={0}>
                 {msgs.map((m) => (
                   <div key={m.id} className={`msg ${m.direction}`}>
@@ -273,6 +293,19 @@ export function Inbox({ me }: { me: Me }) {
                 <button className="primary" type="submit" disabled={sending || (!text.trim() && !file)}>{sending ? 'שולח…' : 'שליחה'}</button>
               </form>
 
+              {related.length > 0 && (
+                <section aria-labelledby="rel-h" style={{ marginTop: '1rem' }}>
+                  <h3 id="rel-h" style={{ fontSize: '1rem' }}>שיחות נוספות של אותו לקוח (אותו מספר בערוצים אחרים)</h3>
+                  <ul style={{ paddingInlineStart: '1.2rem' }}>
+                    {related.map((r) => (
+                      <li key={r.id}>
+                        <button style={{ minHeight: 36 }} onClick={() => openRelated(r.id)}>{r.channelLabel}{r.contactName ? ` · ${r.contactName}` : ''}</button>{' '}
+                        <small className="hint">{r.status === 'open' ? 'פתוחה' : 'סגורה'} · {r.lastMessage ?? ''}</small>
+                      </li>
+                    ))}
+                  </ul>
+                </section>
+              )}
               {me.role === 'admin' && (
                 <div className="row" style={{ marginTop: '1rem' }}>
                   <button onClick={() => exportContact(sel)}>ייצוא נתוני איש הקשר (JSON)</button>

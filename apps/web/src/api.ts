@@ -17,8 +17,8 @@ export async function api<T = unknown>(method: string, url: string, body?: unkno
 }
 
 export type Role = 'admin' | 'supervisor' | 'agent';
-export interface Me { id: string; email: string; name: string; role: Role; mfaEnabled: boolean; mfaEnrollmentRequired: boolean }
-export interface UserRow { id: string; email: string; name: string; role: Role; active: boolean; mfaEnabled: boolean }
+export interface Me { available?: boolean; id: string; email: string; name: string; role: Role; mfaEnabled: boolean; mfaEnrollmentRequired: boolean }
+export interface UserRow { available?: boolean; id: string; email: string; name: string; role: Role; active: boolean; mfaEnabled: boolean }
 export interface Channel { id: string; type: 'whatsapp' | 'telegram'; label: string; status: string }
 export interface Conversation {
   id: string; channelId: string; status: 'open' | 'closed'; assignedTo: string | null; assignedName: string | null;
@@ -40,3 +40,5 @@ export async function upload(url: string, file: File, caption: string): Promise<
 }
 export interface Note { id: string; body: string; authorName: string | null; createdAt: string }
 export interface Canned { id: string; title: string; body: string }
+export interface RelatedConv { id: string; status: string; lastMessageAt: string; channelLabel: string; channelType: string; contactName: string | null; assignedName: string | null; lastMessage: string | null }
+export interface BackupFile { name: string; size: number; createdAt: string }
