@@ -14,6 +14,7 @@ has_tty() { [ -r /dev/tty ] && (: </dev/tty) 2>/dev/null; }
 
 auth=()
 if [ -n "${GITHUB_TOKEN:-}" ]; then auth=(-H "Authorization: Bearer $GITHUB_TOKEN")
+elif [ -n "${BOTWA_PUBLIC:-}" ]; then :   # public repo: no token, no prompt
 elif has_tty; then
   read -rsp "GitHub read-only token (leave empty if the repo is public): " T </dev/tty; echo >/dev/tty
   [ -n "$T" ] && auth=(-H "Authorization: Bearer $T"); unset T
