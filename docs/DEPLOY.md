@@ -2,6 +2,16 @@
 
 > הפקודות באנגלית, ההסברים בעברית. מדריך זה לא נבדק על שרת אמיתי (אין Docker daemon בסביבת הפיתוח) – בצעו את שלב 7 (בדיקת עשן) לפני שימוש.
 
+## דרך מהירה (סקריפטים)
+```bash
+git clone -b <branch> git@github.com:diamondrubinny/Botwa.git /opt/botwa && cd /opt/botwa
+DOMAIN=support.example.com ./scripts/install.sh          # Docker, חומת אש, .env עם סודות חדשים, הרצה
+./scripts/create-admin.sh you@example.com "השם שלך"      # הסיסמה נקראת בלי הד ובלי היסטוריה
+DOMAIN=support.example.com ./scripts/smoke.sh            # בדיקות עשן (HTTPS, HSTS, CSP, פורטים, הרשאות .env)
+./scripts/update.sh                                       # עדכון בעתיד: גיבוי ← pull ← build
+```
+הסקריפטים אידמפוטנטיים (`install.sh` לא דורס `.env` קיים). הם נבדקו רק חלקית: יצירת `.env` ותחביר – לא פריסה אמיתית. המדריך המפורט להלן נשאר תקף.
+
 ## דרישות
 - Ubuntu 22.04/24.04, 2 vCPU, 2GB RAM ומעלה, 20GB דיסק.
 - דומיין (רשומת A לכתובת השרת) ופורטים 80/443 פתוחים. פורט 22 מוגבל ל-IP מוכרים/מפתחות SSH.
