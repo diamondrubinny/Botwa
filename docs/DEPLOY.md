@@ -2,6 +2,9 @@
 
 > הפקודות באנגלית, ההסברים בעברית. מדריך זה לא נבדק על שרת אמיתי (אין Docker daemon בסביבת הפיתוח) – בצעו את שלב 7 (בדיקת עשן) לפני שימוש.
 
+## אשף התקנה (הכי פשוט)
+`sudo ./setup.sh` – ראו [INSTALL.he.md](../INSTALL.he.md): בדיקת שרת, שאלות, יצירת `.env`, Docker, הרצה, מנהל ראשון ובדיקות עשן. ניתן להרכיב ארכיון להעתקה עם `scripts/make-package.sh`.
+
 ## דרך מהירה (סקריפטים)
 ```bash
 git clone -b <branch> git@github.com:diamondrubinny/Botwa.git /opt/botwa && cd /opt/botwa

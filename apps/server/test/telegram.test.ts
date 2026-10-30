@@ -26,11 +26,12 @@ describe('config', () => {
     expect(c.TELEGRAM_API_ID).toBeUndefined();
     expect(c.CLAMAV_HOST).toBeUndefined();
   });
-  it('the shipped .env.example (with required values filled) parses', async () => {
+  it('the shipped .env.example (with required values filled, NO comment stripping) parses', async () => {
     const { readFileSync } = await import('node:fs');
     const lines = readFileSync(new URL('../../../.env.example', import.meta.url), 'utf8').split('\n');
     const env: Record<string, string> = {};
-    for (const l of lines) { const m = /^([A-Z_]+)=(.*?)\s*(#.*)?$/.exec(l); if (m) env[m[1]!] = m[2]!; }
+    // deliberately NO inline-comment stripping: `docker run --env-file` does not strip them either
+    for (const l of lines) { const m = /^([A-Z_]+)=(.*)$/.exec(l); if (m) env[m[1]!] = m[2]!; }
     env.ENCRYPTION_KEY = base.ENCRYPTION_KEY;
     env.DATABASE_URL = base.DATABASE_URL;
     expect(() => loadConfig(env as NodeJS.ProcessEnv)).not.toThrow();
