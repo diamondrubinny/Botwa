@@ -6,7 +6,24 @@
 - פורטים 80 ו-443 פנויים.
 - (אופציונלי) לטלגרם: `api_id` ו-`api_hash` מ-https://my.telegram.org ← API development tools.
 
-## העתקה והרצה
+## התקנה מהטלפון בלבד (בלי מחשב)
+1. **אפליקציית SSH** בטלפון (למשל Termius, Blink, JuiceSSH, או מסוף אינטרנטי של ספק השרת). התחברו לשרת.
+2. **טוקן קריאה ל-GitHub** (הריפו פרטי): GitHub ← Settings ← Developer settings ← Personal access tokens ← *Fine-grained tokens* ← Generate: Repository access = רק Botwa, Permissions ← **Contents: Read-only**, תוקף 7 ימים. העתיקו את הטוקן. את הטוקן מוחקים בסוף ההתקנה.
+3. הדביקו בשרת (פקודה אחת; הטוקן נקלט בהסתרה, לא נשמר בקובץ ולא בהיסטוריה):
+```bash
+read -rsp "GitHub token: " T; echo
+sudo mkdir -p /opt/botwa
+curl -fsSL -H "Authorization: Bearer $T" https://api.github.com/repos/diamondrubinny/Botwa/tarball/claude/stoic-faraday-i0ave8 | sudo tar xz --strip-components=1 -C /opt/botwa; unset T
+cd /opt/botwa && sudo bash setup.sh
+```
+4. ענו על שאלות האשף (ראו להלן). בסיום מחקו את הטוקן ב-GitHub.
+
+> אם הריפו ציבורי אין צורך בטוקן: `curl -fsSL https://raw.githubusercontent.com/diamondrubinny/Botwa/claude/stoic-faraday-i0ave8/scripts/bootstrap.sh | bash`
+
+### חיבור ווצאפ כשיש רק מכשיר אחד
+אי אפשר לסרוק QR שמוצג על אותו טלפון. בפאנל: **ערוצים ← "קישור עם מספר טלפון (בלי QR)"** ← הקלידו את מספר הווצאפ (עם קידומת מדינה, למשל 972501234567) ← יוצג קוד בן 8 תווים ← בווצאפ: מכשירים מקושרים ← קישור מכשיר ← **"קישור באמצעות מספר טלפון במקום זאת"** והקלידו את הקוד. (טלגרם דורש סריקת QR ממכשיר אחר; קוד טלפון לטלגרם אינו נתמך.)
+
+## העתקה והרצה (אם יש מחשב)
 ממחשב שלכם:
 ```bash
 scp botwa-install.tar.gz <user>@<SERVER_IP>:~
@@ -31,7 +48,7 @@ sudo ./setup.sh
 ## אחרי ההתקנה
 1. **שמרו את `ENCRYPTION_KEY`** במנהל סיסמאות. בלעדיו אי אפשר לפענח סשנים של ווצאפ/טלגרם וגיבויים.
 2. היכנסו ל-`https://<הדומיין>` ← הפעילו אימות דו-שלבי (חובה למנהל).
-3. **ערוצים ← ערוץ חדש ← "קישור / הפעלה"** וסרקו QR מהטלפון (ווצאפ: מכשירים מקושרים; טלגרם: מכשירים ← קישור מכשיר שולחן עבודה). מומלץ מספר ייעודי.
+3. **ערוצים ← ערוץ חדש ← "קישור / הפעלה"** וסרקו QR מהטלפון (או "קישור עם מספר טלפון" אם אין מכשיר נוסף) (ווצאפ: מכשירים מקושרים; טלגרם: מכשירים ← קישור מכשיר שולחן עבודה). מומלץ מספר ייעודי.
 4. שלחו הודעת ניסיון מטלפון אחר וודאו שהיא מופיעה בשיחות, ושהתשובה מתקבלת.
 5. עברו על `docs/PRODUCTION_CHECKLIST.md` (גיבוי ושחזור, נגישות, משפטי) לפני שימוש עם לקוחות.
 

@@ -25,6 +25,8 @@ export interface InboundMessage {
 
 export interface AdapterEvents {
   onQr(qr: string): void;
+  /** WhatsApp "link with phone number" (8-char code typed on the phone instead of scanning a QR). */
+  onPairingCode?(code: string): void;
   onStatus(status: ChannelStatus): void;
   onMessage(msg: InboundMessage): void | Promise<void>;
 }
@@ -37,8 +39,13 @@ export interface AuthStore {
   clear(): Promise<void>;
 }
 
+export interface StartOptions {
+  /** WhatsApp only: digits with country code (no +). Use phone-number pairing instead of a QR. */
+  pairingPhone?: string;
+}
+
 export interface ChannelAdapter {
-  start(): Promise<void>;
+  start(opts?: StartOptions): Promise<void>;
   /** Disconnect but keep the session (can be started again without re-scanning). */
   stop(): Promise<void>;
   /** Unlink the device on the platform side if possible and wipe local session. */

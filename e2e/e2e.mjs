@@ -51,6 +51,10 @@ await page.click('nav >> text=ערוצים');
 await page.fill('#ch-label', 'תמיכה ראשית'); await page.click('button:has-text("יצירה")');
 await page.waitForSelector('text=תמיכה ראשית');
 await axe('channels');
+await page.click('text=קישור עם מספר טלפון (בלי QR)');
+await page.waitForSelector('input[placeholder="972501234567"]');
+await axe('phone-number pairing form');
+await page.click('text=קישור עם מספר טלפון (בלי QR)');
 await page.click('text=קישור / הפעלה');
 // no phone: expect connecting/qr status, never a crash. Real WhatsApp servers unreachable in sandbox.
 await page.waitForSelector('[role=status] .badge', { timeout: 10000 });

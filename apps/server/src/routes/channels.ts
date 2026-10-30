@@ -35,8 +35,12 @@ export function channelRoutes(app: FastifyInstance, db: Db, mgr: ChannelManager)
       const p = idParam.safeParse(req.params);
       if (!p.success) return reply.code(400).send({ error: 'bad_request' });
       if (!(await exists(p.data.id))) return reply.code(404).send({ error: 'not_found' });
+      // Optional WhatsApp phone-number pairing: POST /channels/:id/start {"phone":"9725XXXXXXXX"}
+      const body = action === 'start' ? z.object({ phone: z.string().regex(/^\d{8,15}$/).optional() }).safeParse(req.body ?? {}) : null;
+      if (body && !body.success) return reply.code(400).send({ error: 'bad_request' });
       try {
-        await mgr[action](p.data.id);
+        if (action === 'start') await mgr.start(p.data.id, { pairingPhone: body?.success ? body.data.phone : undefined });
+        else await mgr[action](p.data.id);
       } catch (e) {
         req.log.error({ err: e }, `channel ${action} failed`);
         return reply.code(502).send({ error: 'channel_error' });
@@ -88,6 +92,7 @@ export function channelRoutes(app: FastifyInstance, db: Db, mgr: ChannelManager)
     const snap = mgr.snapshot(id);
     send({ type: 'status', status: snap.status });
     if (snap.qr) send({ type: 'qr', qr: snap.qr });
+    if (snap.code) send({ type: 'pairing_code', code: snap.code });
 
     const onEvent = (e: BusEvent) => {
       if (e.channelId !== id || e.type === 'message') return;

@@ -13,6 +13,8 @@ export function Channels({ isAdmin }: { isAdmin: boolean }) {
   const [msg, setMsg] = useState('');
   const [linking, setLinking] = useState<string | null>(null);
   const [pending, setPending] = useState<Pending>(null);
+  const [pairFor, setPairFor] = useState<string | null>(null);
+  const [phone, setPhone] = useState('');
 
   const reload = async () => setList(await api<Channel[]>('GET', '/channels').catch(() => []));
   usePoll(reload, 5000);
@@ -45,10 +47,23 @@ export function Channels({ isAdmin }: { isAdmin: boolean }) {
                 <button className="primary" onClick={() => { setLinking(ch.id); void run(() => api('POST', `/channels/${ch.id}/start`)); }}>
                   קישור / הפעלה
                 </button>
+                {ch.type === 'whatsapp' && (
+                  <button onClick={() => { setPairFor(pairFor === ch.id ? null : ch.id); setPhone(''); }} aria-expanded={pairFor === ch.id}>קישור עם מספר טלפון (בלי QR)</button>
+                )}
                 <button onClick={() => run(() => api('POST', `/channels/${ch.id}/stop`))}>עצירה</button>
                 <button className="danger" onClick={() => setPending({ kind: 'logout', ch })}>ניתוק החשבון</button>
                 <button className="danger" onClick={() => setPending({ kind: 'delete', ch })}>מחיקת ערוץ</button>
               </div>
+            )}
+            {pairFor === ch.id && (
+              <form className="card" onSubmit={(e) => { e.preventDefault(); setLinking(ch.id); setPairFor(null); void run(() => api('POST', `/channels/${ch.id}/start`, { phone })); }}>
+                <p className="hint">מתאים כשיש לכם רק מכשיר אחד (אי אפשר לסרוק QR מאותו מסך). נקבל קוד בן 8 תווים שמקלידים בווצאפ.</p>
+                <div className="field">
+                  <label htmlFor={`ph-${ch.id}`}>מספר הטלפון של חשבון הווצאפ (עם קידומת מדינה, ספרות בלבד, בלי +)</label>
+                  <input id={`ph-${ch.id}`} inputMode="numeric" pattern="\d{8,15}" required dir="ltr" placeholder="972501234567" value={phone} onChange={(e) => setPhone(e.target.value.replace(/\D/g, ''))} />
+                </div>
+                <button className="primary" type="submit">קבלת קוד קישור</button>
+              </form>
             )}
             {linking === ch.id && <LinkPanel channel={ch} onClose={() => setLinking(null)} />}
           </li>
@@ -98,6 +113,7 @@ export function Channels({ isAdmin }: { isAdmin: boolean }) {
 function LinkPanel({ channel, onClose }: { channel: Channel; onClose: () => void }) {
   const [status, setStatus] = useState('connecting');
   const [qr, setQr] = useState<string | null>(null);
+  const [code, setCode] = useState<string | null>(null);
   const [lost, setLost] = useState(false);
   const [pw, setPw] = useState('');
   const [pwErr, setPwErr] = useState('');
@@ -111,9 +127,10 @@ function LinkPanel({ channel, onClose }: { channel: Channel; onClose: () => void
       const d = JSON.parse(ev.data) as { type: string; status?: string; qr?: string };
       setLost(false);
       if (d.type === 'qr' && d.qr) setQr(d.qr);
+      if (d.type === 'pairing_code' && (d as { code?: string }).code) setCode((d as { code?: string }).code!);
       if (d.type === 'status' && d.status) {
         setStatus(d.status);
-        if (d.status !== 'qr') setQr(null);
+        if (d.status !== 'qr') { setQr(null); setCode(null); }
         if (d.status !== 'password') setPw('');
       }
     };
@@ -127,6 +144,17 @@ function LinkPanel({ channel, onClose }: { channel: Channel; onClose: () => void
         <span className={`badge ${status}`}>{t.status[status] ?? status}</span>
         {lost && <span className="error"> החיבור לשרת אבד, מנסה שוב…</span>}
       </p>
+      {code && (
+        <div role="status" aria-live="polite">
+          <p>הקלידו בווצאפ את הקוד:</p>
+          <p dir="ltr" style={{ fontSize: '2rem', fontWeight: 700, letterSpacing: '.15em', fontFamily: 'monospace' }}>{code}</p>
+          <ol>
+            <li>בטלפון: ווצאפ ← הגדרות ← מכשירים מקושרים ← קישור מכשיר.</li>
+            <li>בחרו "קישור באמצעות מספר טלפון במקום זאת" והקלידו את הקוד.</li>
+            <li>הקוד פג תוך כדקה; אם פג, ייווצר קוד חדש אוטומטית.</li>
+          </ol>
+        </div>
+      )}
       {qr && (
         <>
           <img className="qr" src={qr} alt={`קוד QR לקישור ${platform}`} width={320} height={320} />

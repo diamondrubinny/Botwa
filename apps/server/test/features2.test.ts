@@ -42,13 +42,18 @@ describe('routing, csv, search, related, backups', () => {
   const ids: Record<string, string> = {};
   let ip = 0;
   const chIds: string[] = [];
+  let lastStartOpts: { pairingPhone?: string } | undefined;
   let backupDir = '';
   const db = createDb(DB_URL);
 
   class Fake implements ChannelAdapter {
     constructor(private ctx: AdapterContext) { ctxs[ctx.channelId] = ctx; }
-    async start() { this.ctx.events.onStatus('connected'); }
-    async stop() {}
+    async start(opts?: { pairingPhone?: string }) {
+      lastStartOpts = opts;
+      if (opts?.pairingPhone) { this.ctx.events.onStatus('qr'); this.ctx.events.onPairingCode?.('ABCD-1234'); }
+      else this.ctx.events.onStatus('connected');
+    }
+    async stop() { this.ctx.events.onStatus('stopped'); }
     async logout() {}
     async sendText() { return {}; }
   }
@@ -86,6 +91,24 @@ describe('routing, csv, search, related, backups', () => {
     await db.query(`UPDATE users SET available = false WHERE email IN ('a3@t.io', 'xcmd@t.io')`);
   });
   afterAll(async () => { await mgr.stopAll(); await app.close(); await db.end(); });
+
+  it('WhatsApp phone-number pairing: validated, passed to the adapter, code exposed to admin only, cleared when connected', async () => {
+    const ch = (await call('POST', '/channels', 'admin@t.io', { type: 'whatsapp', label: 'Pair' })).json().id;
+    expect((await call('POST', `/channels/${ch}/start`, 'admin@t.io', { phone: '+972 50-123' })).statusCode).toBe(400); // digits only
+    expect((await call('POST', `/channels/${ch}/start`, 'admin@t.io', { phone: '12' })).statusCode).toBe(400);
+    expect((await call('POST', `/channels/${ch}/start`, 'sup@t.io', { phone: '972501234567' })).statusCode).toBe(403);
+    expect((await call('POST', `/channels/${ch}/start`, 'admin@t.io', { phone: '972501234567' })).statusCode).toBe(200);
+    expect(lastStartOpts).toEqual({ pairingPhone: '972501234567' });
+    expect(mgr.snapshot(ch)).toMatchObject({ status: 'qr', code: 'ABCD-1234' });
+    ctxs[ch]!.events.onStatus('connected');
+    await new Promise((r) => setTimeout(r, 30));
+    expect(mgr.snapshot(ch).code).toBeUndefined();
+    // plain start (QR flow) carries no phone
+    await call('POST', `/channels/${ch}/stop`, 'admin@t.io');
+    await call('POST', `/channels/${ch}/start`, 'admin@t.io');
+    expect(lastStartOpts).toEqual({ pairingPhone: undefined });
+    await call('DELETE', `/channels/${ch}`, 'admin@t.io');
+  });
 
   it('routing settings: admin writes, supervisor reads, validated', async () => {
     expect((await call('PUT', '/settings/routing', 'sup@t.io', { mode: 'round_robin' })).statusCode).toBe(403);

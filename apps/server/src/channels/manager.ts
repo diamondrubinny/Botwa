@@ -9,13 +9,14 @@ import { audit } from '../audit.js';
 import { MediaService } from '../media/store.js';
 import { loadBusinessHours } from '../routes/settings.js';
 import { createAuthStore } from './auth-store.js';
-import type { AdapterFactory, ChannelAdapter, ChannelStatus, ChannelType, OutboundMedia } from './types.js';
+import type { AdapterFactory, ChannelAdapter, ChannelStatus, ChannelType, OutboundMedia, StartOptions } from './types.js';
 import { TelegramAdapter } from './telegram.js';
 import { WhatsAppAdapter } from './whatsapp.js';
 
 export type BusEvent =
   | { channelId: string; type: 'status'; status: ChannelStatus }
   | { channelId: string; type: 'qr'; qr: string } // PNG data URL
+  | { channelId: string; type: 'pairing_code'; code: string }
   | { channelId: string; type: 'message'; conversationId: string; messageId: string };
 
 export function createDefaultFactory(cfg: Config): AdapterFactory {
@@ -32,6 +33,7 @@ export class ChannelManager {
   readonly bus = new EventEmitter();
   private adapters = new Map<string, ChannelAdapter>();
   private lastQr = new Map<string, string>();
+  private lastCode = new Map<string, string>();
   private statuses = new Map<string, ChannelStatus>();
 
   constructor(
@@ -50,8 +52,8 @@ export class ChannelManager {
     return probe !== null;
   }
 
-  snapshot(channelId: string): { status: ChannelStatus; qr?: string } {
-    return { status: this.statuses.get(channelId) ?? 'stopped', qr: this.lastQr.get(channelId) };
+  snapshot(channelId: string): { status: ChannelStatus; qr?: string; code?: string } {
+    return { status: this.statuses.get(channelId) ?? 'stopped', qr: this.lastQr.get(channelId), code: this.lastCode.get(channelId) };
   }
 
   private emit(e: BusEvent) {
@@ -60,13 +62,13 @@ export class ChannelManager {
 
   private async setStatus(channelId: string, status: ChannelStatus) {
     this.statuses.set(channelId, status);
-    if (status !== 'qr') this.lastQr.delete(channelId);
+    if (status !== 'qr') { this.lastQr.delete(channelId); this.lastCode.delete(channelId); }
     if (status === 'stopped' || status === 'logged_out' || status === 'error') this.adapters.delete(channelId);
     await this.db.query('UPDATE channels SET status=$2 WHERE id=$1', [channelId, status]).catch(() => undefined);
     this.emit({ channelId, type: 'status', status });
   }
 
-  async start(channelId: string): Promise<void> {
+  async start(channelId: string, opts?: StartOptions): Promise<void> {
     if (this.adapters.has(channelId)) return;
     const { rows } = await this.db.query('SELECT type FROM channels WHERE id=$1', [channelId]);
     if (!rows[0]) throw new Error('not_found');
@@ -75,6 +77,10 @@ export class ChannelManager {
       store: createAuthStore(this.db, channelId, this.cfg.ENCRYPTION_KEY),
       events: {
         onStatus: (s) => void this.setStatus(channelId, s),
+        onPairingCode: (code) => {
+          this.lastCode.set(channelId, code);
+          this.emit({ channelId, type: 'pairing_code', code });
+        },
         onQr: (qr) => {
           void QRCode.toDataURL(qr, { margin: 2, width: 320 }).then((url) => {
             this.lastQr.set(channelId, url);
@@ -97,7 +103,7 @@ export class ChannelManager {
     this.adapters.set(channelId, adapter);
     await this.db.query('UPDATE channels SET auto_start=true WHERE id=$1', [channelId]);
     try {
-      await adapter.start();
+      await adapter.start(opts);
     } catch (e) {
       this.adapters.delete(channelId);
       await this.setStatus(channelId, 'error');

@@ -11,7 +11,7 @@ import makeWASocket, {
   type WASocket,
 } from '@whiskeysockets/baileys';
 import pino from 'pino';
-import type { AdapterContext, ChannelAdapter, OutboundMedia } from './types.js';
+import type { AdapterContext, ChannelAdapter, OutboundMedia, StartOptions } from './types.js';
 
 // NOTE: Baileys is an UNOFFICIAL WhatsApp Web client. Using it violates WhatsApp's ToS and the
 // number may be banned. Accepted by the product owner; keep outbound volume low and human-like.
@@ -58,10 +58,13 @@ export class WhatsAppAdapter implements ChannelAdapter {
   private attempts = 0;
   private reconnectTimer?: NodeJS.Timeout;
   private creds?: AuthenticationCreds;
+  private pairingPhone?: string;
+  private lastPairingAt = 0;
 
   constructor(private readonly ctx: AdapterContext) {}
 
-  async start(): Promise<void> {
+  async start(opts?: StartOptions): Promise<void> {
+    this.pairingPhone = opts?.pairingPhone;
     this.stopped = false;
     this.attempts = 0;
     await this.connect();
@@ -91,7 +94,17 @@ export class WhatsAppAdapter implements ChannelAdapter {
     sock.ev.on('connection.update', (u) => {
       if (sock !== this.sock) return; // stale socket
       if (u.qr) {
-        events.onQr(u.qr);
+        if (this.pairingPhone && !creds.registered) {
+          // Phone-number linking: ask WhatsApp for an 8-char code (refreshed at most every ~50s) instead of showing the QR.
+          if (Date.now() - this.lastPairingAt > 50_000) {
+            this.lastPairingAt = Date.now();
+            sock.requestPairingCode(this.pairingPhone)
+              .then((code) => events.onPairingCode?.(code))
+              .catch(() => events.onStatus('error'));
+          }
+        } else {
+          events.onQr(u.qr);
+        }
         events.onStatus('qr');
       }
       if (u.connection === 'open') {
