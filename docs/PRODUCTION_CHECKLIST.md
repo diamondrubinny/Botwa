@@ -123,3 +123,10 @@ Lawyer (privacy, ToS risk, employee monitoring/notice) · Privacy officer (if re
 - [ ] Only add sites you may copy (terms of use / copyright). The crawler does not read robots.txt.
 - [ ] Test the bot answers with real phrasing from your customers; tune the confidence threshold and synonyms.
 - [ ] Outbound HTTPS from the server must be allowed for links (private addresses are blocked on purpose).
+
+## Meaning search and flow chart (P24)
+- [ ] If enabled (WITH_SEMANTIC=1, SEMANTIC_SEARCH=local): the Docker build with the optional runtime was NOT run in this environment. Build once and check `docker compose logs server`, `/kb/semantic` status (ready), RAM (~400MB extra) and disk (~0.5GB).
+- [ ] The server needs outbound HTTPS to huggingface.co once to download the model (or pre-populate the `models` volume). Verify the model licence for your use.
+- [ ] Test with real customer phrasings in "בדיקת חיפוש": tune the bot's confidence threshold. The model separates topics well but cannot tell "unanswerable" by itself; keep the threshold conservative.
+- [ ] Flow chart: run the "בדיקה בשיחה" for every branch (open/closed hours, each channel, unknown input, files) before switching the bot mode.
+- [ ] Flow questions collect personal data (name, phone, email): state the purpose in the privacy policy draft; the answers are stored as an internal note on the conversation (retention follows message retention).

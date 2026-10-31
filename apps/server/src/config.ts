@@ -37,6 +37,10 @@ const schema = z.object({
   CLAMAV_PORT: z.coerce.number().int().default(3310),
   MEDIA_ALLOW_UNSCANNED: bool('false'), // development only: accept files without antivirus
   REPORT_TZ: z.string().default('Asia/Jerusalem'),
+  /** "Meaning" search with a local model (needs the optional runtime: build with WITH_SEMANTIC=1). off = keyword search only. */
+  SEMANTIC_SEARCH: z.enum(['off', 'local']).default('off'),
+  SEMANTIC_MODEL: z.string().regex(/^[\w.-]+\/[\w.-]+$/).default('Xenova/multilingual-e5-small'),
+  MODEL_DIR: z.string().default('./data/models'),
   /** knowledge-base question log (customer text) is deleted after this many days */
   KB_QUERY_RETENTION_DAYS: z.coerce.number().int().min(1).max(365).default(30),
   BACKUP_DIR: z.string().default('./data/backups'),

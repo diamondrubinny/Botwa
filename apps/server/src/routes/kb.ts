@@ -7,7 +7,7 @@ import { loadBot } from '../bot.js';
 import type { Db } from '../db.js';
 import { kindFor } from '../kb/extract.js';
 import { FetchError } from '../kb/fetch.js';
-import { KnowledgeBase } from '../kb/service.js';
+import { isConfident, KnowledgeBase } from '../kb/service.js';
 import { sanitizeFileName } from '../media/validate.js';
 
 const idParam = z.object({ id: z.string().uuid() });
@@ -21,6 +21,12 @@ export function kbRoutes(app: FastifyInstance, db: Db, kb: KnowledgeBase) {
   const manage = requireAuth(db, 'kb.manage');
   const any = requireAuth(db);
   const limit = { rateLimit: { max: 30, timeWindow: '1 minute' } };
+
+  // Meaning-search status: model state and how many sources already have vectors.
+  app.get('/kb/semantic', { preHandler: manage }, async () => {
+    const c = (await db.query(`SELECT count(*)::int AS total, count(*) FILTER (WHERE embedded_model IS NOT NULL)::int AS embedded FROM kb_sources WHERE status = 'ready'`)).rows[0];
+    return { ...kb.semanticStatus(), ...c };
+  });
 
   app.get('/kb/sources', { preHandler: manage }, async () => (await db.query(`SELECT ${SELECT} FROM kb_sources s ORDER BY s.parent_id NULLS FIRST, s.created_at DESC LIMIT 1000`)).rows);
 
@@ -192,8 +198,8 @@ export function kbRoutes(app: FastifyInstance, db: Db, kb: KnowledgeBase) {
     const bot = await loadBot(db);
     const hits = await kb.search(b.data.q, { audience: b.data.audience, limit: 6 });
     const top = hits[0];
-    const wouldAnswer = !!top && top.score >= bot.kb.minScore && (top.exact || top.matched >= 2 || (top.tokens === 1 && top.score >= 0.9));
-    return { minScore: bot.kb.minScore, wouldAnswer, hits: hits.map((h) => ({ ...h, snippet: h.snippet.slice(0, 400) })) };
+    const wouldAnswer = isConfident(top, hits[1], bot.kb.minScore);
+    return { minScore: bot.kb.minScore, wouldAnswer, semantic: kb.semanticStatus(), hits: hits.map((h) => ({ ...h, snippet: h.snippet.slice(0, 400) })) };
   });
 
   // Questions customers asked that the base could not answer (grouped), so staff know which answers to write.

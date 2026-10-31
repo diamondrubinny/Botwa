@@ -19,6 +19,8 @@ import { webhookRoutes } from './routes/webhooks.js';
 import { PushService } from './push.js';
 import { KnowledgeBase } from './kb/service.js';
 import { kbRoutes } from './routes/kb.js';
+import { flowRoutes } from './routes/flow.js';
+import { LocalEmbedder } from './semantic/embedder.js';
 import { contactRoutes } from './routes/contacts.js';
 import { tagRoutes } from './routes/tags.js';
 import { settingsRoutes } from './routes/settings.js';
@@ -96,6 +98,8 @@ export async function buildApp(cfg: Config, db: Db, mgr: ChannelManager, media: 
   webhookRoutes(app, db, mgr);
   const kb = new KnowledgeBase(db, cfg, media);
   mgr.kb = kb;
+  kb.setEmbedder(new LocalEmbedder(cfg, () => void kb.embedMissing().catch(() => undefined)));
   kbRoutes(app, db, kb);
+  flowRoutes(app, db, kb);
   return app;
 }

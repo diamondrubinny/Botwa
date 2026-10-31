@@ -8,6 +8,7 @@ import type { AdapterContext, AdapterFactory, ChannelAdapter } from '../src/chan
 import { loadConfig } from '../src/config.js';
 import { createDb } from '../src/db.js';
 import { checkUrl, isPublicIp } from '../src/kb/fetch.js';
+import type { Embedder } from '../src/semantic/embedder.js';
 import { bestSnippet, chunkText, indexTerms, queryTokens, variants } from '../src/kb/text.js';
 import { migrate } from '../src/migrate.js';
 import { hashPassword } from '../src/password.js';
@@ -264,5 +265,73 @@ describe('knowledge base', () => {
     expect(decide(bot, { state: 'menu', invalid: 0 }, '1', 'התשובה').replies[0]).toContain('9:00');
     expect(decide(bot, { state: 'menu', invalid: 0 }, 'תפריט', 'התשובה').replies[0]).toContain('1. שעות פעילות');
     expect(decide(bot, { state: 'menu', invalid: 0 }, 'נציג בבקשה', 'התשובה').handoff).toBe('requested');
+  });
+});
+
+describe('meaning search (fake embedder, deterministic)', () => {
+  const ORIGIN = 'https://panel.test';
+  const PW = 'correct-horse-battery';
+  const cfg = loadConfig({
+    NODE_ENV: 'test', DATABASE_URL: process.env.TEST_DATABASE_URL ?? 'postgres://postgres@localhost:5432/botwa_test',
+    ENCRYPTION_KEY: randomBytes(32).toString('base64'), APP_ORIGIN: ORIGIN, COOKIE_SECURE: 'false', REQUIRE_MFA_FOR_PRIVILEGED: 'false',
+  });
+  const db = createDb(cfg.DATABASE_URL);
+  let app: Awaited<ReturnType<typeof buildApp>>;
+  let mgr: ChannelManager;
+  let cookie = '';
+  let ip = 0;
+  // concepts instead of a real model: words of one concept point the same way
+  const CONCEPTS = [['שעות', 'פתוחים', 'סוגרים', 'עובדים', 'פעילות', 'נפתחים'], ['החזרה', 'מחזירים', 'להחזיר', 'החזר', 'סחורה', 'זיכוי'], ['משלוח', 'שליח', 'הביתה', 'הובלה'], ['חופשה', 'נופש', 'חופש', 'הנופש']];
+  const fake: Embedder = {
+    status: () => ({ state: 'ready', model: 'fake/concepts' }),
+    embed: async (texts) => texts.map((t) => {
+      const v = new Float32Array(CONCEPTS.length + 1);
+      for (const w of t.split(/[\s.,?!]+/)) { const c = CONCEPTS.findIndex((g) => g.includes(w)); v[c === -1 ? CONCEPTS.length : c]! += 1; }
+      v[CONCEPTS.length]! *= 0.05;
+      const n = Math.hypot(...v) || 1;
+      return v.map((x) => x / n);
+    }),
+  };
+  const call = (method: 'GET' | 'POST' | 'PATCH', url: string, payload?: object) =>
+    app.inject({ method, url, payload, remoteAddress: `10.61.${Math.floor(++ip / 250)}.${ip % 250}`, headers: { origin: ORIGIN, cookie } });
+
+  beforeAll(async () => {
+    await db.query('DROP SCHEMA public CASCADE; CREATE SCHEMA public;');
+    await migrate(db);
+    mgr = new ChannelManager(db, cfg);
+    app = await buildApp(cfg, db, mgr);
+    await db.query(`INSERT INTO users (email,name,role,password_hash) VALUES ('a@t.io','a','admin',$1)`, [await hashPassword(PW)]);
+    cookie = `botwa_sid=${(await app.inject({ method: 'POST', url: '/auth/login', headers: { origin: ORIGIN }, payload: { email: 'a@t.io', password: PW } })).cookies[0]!.value}`;
+  });
+  afterAll(async () => { await app.close(); await db.end(); });
+
+  it('finds an answer with no shared words, once vectors exist; backfills older sources; never answers unrelated questions', async () => {
+    await call('POST', '/kb/sources/faq', { title: 'מהן שעות הפעילות', body: 'פתוחים א׳–ה׳ 9:00–17:00.' });
+    await call('POST', '/kb/sources/faq', { title: 'איך מחזירים מוצר', body: 'תוך 14 ימים עם קבלה.' });
+    const ask = async (q: string) => (await call('POST', '/kb/search', { q, audience: 'any' })).json();
+    expect((await ask('מתי אתם נפתחים')).hits.length).toBeGreaterThanOrEqual(0);
+    expect((await call('GET', '/kb/semantic')).json()).toMatchObject({ state: 'off' });
+
+    mgr.kb!.setEmbedder(fake);
+    expect(await mgr.kb!.embedMissing()).toBe(2); // sources created before the model was ready get their vectors now
+    expect((await call('GET', '/kb/semantic')).json()).toMatchObject({ state: 'ready', embedded: 2, total: 2 });
+
+    const r = await ask('מתי אתם נפתחים');            // shares no word with "שעות הפעילות"
+    expect(r.hits[0].title).toBe('מהן שעות הפעילות');
+    expect(r.hits[0].sem).toBeGreaterThan(0.6);
+    expect(r.wouldAnswer).toBe(true);
+    expect((await ask('אפשר זיכוי על סחורה')).hits[0].title).toBe('איך מחזירים מוצר');
+    const none = await ask('איזה מזג אוויר צפוי מחר');
+    expect(none.wouldAnswer).toBe(false);
+    expect(none.hits[0]?.sem ?? 0).toBeLessThan(0.3);
+
+    // a new source is embedded as soon as it is indexed; editing re-embeds; deleting removes its vectors
+    const id = (await call('POST', '/kb/sources/faq', { title: 'כמה עולה משלוח', body: 'משלוח עד הבית עולה 29 ש״ח בכל הארץ.' })).json().id as string;
+    expect((await ask('כמה עולה שליח הביתה')).hits[0].title).toBe('כמה עולה משלוח');
+    await call('PATCH', `/kb/sources/${id}`, { title: 'האם יש חופשה' });
+    expect((await ask('מתי הנופש')).hits[0].title).toBe('האם יש חופשה');
+    await app.inject({ method: 'DELETE', url: `/kb/sources/${id}`, headers: { origin: ORIGIN, cookie } });
+    expect((await db.query('SELECT count(*)::int AS n FROM kb_vectors WHERE source_id = $1', [id])).rows[0].n).toBe(0);
+    mgr.kb!.setEmbedder({ status: () => ({ state: 'off' }), embed: async () => { throw new Error('x'); } });
   });
 });

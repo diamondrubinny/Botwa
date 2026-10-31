@@ -22,7 +22,7 @@ page.on('console', (m) => { if (m.type() === 'error') console.log('CONSOLE', m.t
 async function axe(label) {
   await page.evaluate(axeSrc);
   const r = await page.evaluate(() => axe.run(document, { runOnly: ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'] }));
-  check(`axe: ${label}`, r.violations.length === 0, r.violations.map((v) => `${v.id}(${v.nodes.length}): ${v.nodes[0].html.slice(0, 90)}`).join(' | '));
+  check(`axe: ${label}`, r.violations.length === 0, r.violations.map((v) => `${v.id}(${v.nodes.length}): ${v.nodes.slice(0, 3).map((x) => `${x.html.slice(0, 90)} @ ${x.target.join(' ')} :: ${(x.any[0]?.message ?? '').slice(0, 140)}`).join(' || ')}`).join(' | '));
 }
 
 await page.goto(BASE);
@@ -176,6 +176,35 @@ for (const tab of ['שאלות ללא מענה', 'מילים נרדפות', 'ס�
 await page.click('aside.sidebar nav >> text=בוט');
 await page.waitForSelector('legend:has-text("מענה ממאגר הידע")');
 await axe('bot page with knowledge base settings');
+// flow chart editor: create from the menu, edit, save, simulate, accessibility
+await page.click('aside.sidebar nav >> text=תרשים זרימה');
+await page.waitForSelector('h1:has-text("תרשים זרימה של הבוט")');
+page.once('dialog', (d) => d.accept());
+await page.click('button:has-text("יצירה מהתפריט הממוספר הקיים")');
+await page.waitForSelector('svg.flow-svg');
+check('flow editor: flow created from the numbered menu', (await page.locator('svg.flow-svg g.flow-node').count()) >= 3);
+await axe('flow editor: diagram');
+await page.focus('svg.flow-svg g.flow-node');
+await page.keyboard.press('Enter');
+await page.waitForSelector('details.flow-form[open] fieldset');
+check('flow editor: a node opens from the keyboard', true);
+await axe('flow editor: node form');
+await page.selectOption('#fl-add', 'question'); await page.click('button:has-text("הוספה")');
+await page.waitForSelector('details.flow-form[open] select[id^="sv-"]');
+await page.click('button:has-text("שמירה")');
+await page.waitForSelector('text=התרשים נשמר.');
+check('flow editor: saved', true);
+await page.click('.chips >> text=בדיקה בשיחה');
+await page.fill('#sim-in', 'שלום'); await page.click('button:has-text("שליחה")');
+await page.waitForSelector('.sim-msg.bot:has-text("1.")');
+check('flow editor: simulator shows the menu', true);
+await axe('flow editor: simulator');
+await page.click('.chips >> text=תרשים ועריכה');
+await page.click('button:has-text("הפעלת התרשים כמצב הבוט")');
+await page.waitForSelector('text=הבוט עובד כעת לפי התרשים.');
+await page.click('button:has-text("חזרה לתפריט הממוספר")');
+await page.waitForSelector('text=הבוט עובד כעת לפי התפריט הממוספר.');
+
 // canned replies page
 await page.click('aside.sidebar nav >> text=תשובות ותגיות');
 await page.fill('#c-title', 'ברכה'); await page.fill('#c-body', 'שלום, איך אפשר לעזור?');
@@ -339,6 +368,7 @@ check('agent claimed conversation', true);
 // keyboard & widget & mobile
 await page.click('.a11y-widget button.primary'); await page.click('button:has-text("ניגודיות גבוהה")');
 check('high contrast toggles', (await page.getAttribute('html', 'data-contrast')) === 'high');
+await page.waitForTimeout(500); // let colour transitions finish before measuring contrast
 await axe('high contrast + inbox');
 await page.setViewportSize({ width: 375, height: 700 });
 const overflow = await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth);
@@ -473,7 +503,7 @@ await page.click('button[aria-label="חזרה לרשימה"]');
 await page.waitForSelector('.list-pane');
 const small = await page.evaluate(() => [...document.querySelectorAll('.chip, .bn-item, .conv-item')].filter((e) => { const r = e.getBoundingClientRect(); return r.width > 0 && Math.min(r.width, r.height) < 44; }).map((e) => e.className));
 check('phone: chips, tabs and list rows are all >= 44px touch targets', small.length === 0, JSON.stringify(small));
-for (const route of ['settings', 'team', 'channels', 'reports', 'roles', 'bot', 'kb']) {
+for (const route of ['settings', 'team', 'channels', 'reports', 'roles', 'bot', 'kb', 'flow']) {
   await page.goto(BASE + '/#/' + route);
   await page.waitForSelector('main h1');
   await page.waitForLoadState('networkidle').catch(() => {});

@@ -13,7 +13,7 @@ services:
       retries: 10
 
   server:
-    build: { context: ., dockerfile: apps/server/Dockerfile }
+    build: { context: ., dockerfile: apps/server/Dockerfile, args: { WITH_SEMANTIC: "${WITH_SEMANTIC:-0}" } }
     restart: unless-stopped
     env_file: .env
     environment:
@@ -23,8 +23,9 @@ services:
       TRUST_PROXY: "true"      # safe: port 3000 is NOT published, only Caddy can reach it
       MEDIA_DIR: /data/media
       BACKUP_DIR: /data/backups
+      MODEL_DIR: /data/models
       CLAMAV_HOST: ${CLAMAV_HOST:-}   # set to "clamav" (and run with --profile media) to enable attachments
-    volumes: [media:/data/media, backups:/data/backups]     # quarantine/ + clean/ attachment storage (not web-accessible)
+    volumes: [media:/data/media, backups:/data/backups, models:/data/models]     # quarantine/ + clean/ attachment storage (not web-accessible)
     depends_on: { db: { condition: service_healthy } }
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
@@ -62,6 +63,7 @@ services:
 volumes:
   backups:
   media:
+  models:
   clamdb:
   pgdata:
   caddy_data:

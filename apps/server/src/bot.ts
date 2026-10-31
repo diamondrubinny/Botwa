@@ -3,6 +3,8 @@ import type { Db } from './db.js';
 
 export const botSchema = z.object({
   enabled: z.boolean(),
+  /** menu = the numbered menu below; flow = the flow chart (Bot > Flow chart) */
+  mode: z.enum(['menu', 'flow']).default('menu'),
   welcome: z.string().trim().min(1).max(1000),
   /** menu entries; numbered 1..N in order */
   items: z.array(z.object({
@@ -43,6 +45,7 @@ export type BotConfig = z.infer<typeof botSchema>;
 
 export const DEFAULT_BOT: BotConfig = {
   enabled: false,
+  mode: 'menu',
   welcome: 'שלום! אני הבוט של השירות. במה אפשר לעזור? השיבו במספר:',
   items: [
     { title: 'שעות פעילות', answer: 'אנחנו פעילים בימים א׳–ה׳ בין 9:00 ל-17:00.' },

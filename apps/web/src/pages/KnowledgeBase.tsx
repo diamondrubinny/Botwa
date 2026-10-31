@@ -10,7 +10,7 @@ interface Source {
   crawlPages: number; lastFetchedAt: string | null; parentId: string | null; version: number; uses: number; helpful: number; unhelpful: number; chunks: number; body?: string;
 }
 interface Category { id: string; name: string; sources: number }
-interface Hit { sourceId: string; title: string; kind: string; url: string | null; snippet: string; score: number; matched: number; tokens: number; exact: boolean; heading: string | null }
+interface Hit { sem?: number; cos?: number | null; sourceId: string; title: string; kind: string; url: string | null; snippet: string; score: number; matched: number; tokens: number; exact: boolean; heading: string | null }
 interface Stats { botQuestions: number; botAnswered: number; staffLookups: number; staffAnswered: number; sources: number; errors: number; chunks: number; top: { id: string; title: string; uses: number; helpful: number; unhelpful: number }[] }
 
 const KIND = { faq: 'שאלה ותשובה', text: 'טקסט', file: 'קובץ', link: 'קישור' } as const;
@@ -252,6 +252,20 @@ function Categories({ cats, reload }: { cats: Category[]; reload: () => Promise<
   );
 }
 
+const SEM_TEXT: Record<string, string> = { off: 'כבוי (חיפוש לפי מילים בלבד)', loading: 'המודל נטען…', ready: 'פעיל', error: 'שגיאה' };
+function SemanticBanner() {
+  const [s, setS] = useState<{ state: string; detail?: string; embedded: number; total: number } | null>(null);
+  usePoll(async () => setS(await api<NonNullable<typeof s>>('GET', '/kb/semantic').catch(() => null)), 10000);
+  if (!s) return null;
+  return (
+    <p className="hint" role="status">
+      חיפוש לפי משמעות: <strong>{SEM_TEXT[s.state] ?? s.state}</strong>{s.state === 'error' && s.detail ? ` (${s.detail === 'not_installed' ? 'רכיב ההרצה לא מותקן: בנו עם WITH_SEMANTIC=1' : s.detail})` : ''}
+      {s.state === 'ready' ? ` · ${s.embedded}/${s.total} מקורות מוכנים` : ''}
+      {s.state === 'off' ? ' · להפעלה: SEMANTIC_SEARCH=local ו-WITH_SEMANTIC=1 בקובץ .env, ובנייה מחדש.' : ''}
+    </p>
+  );
+}
+
 function Playground() {
   const [q, setQ] = useState('');
   const [aud, setAud] = useState<'bot' | 'staff' | 'any'>('bot');
@@ -261,6 +275,7 @@ function Playground() {
     <section className="card" aria-labelledby="pg-h">
       <h2 id="pg-h">בדיקת חיפוש</h2>
       <p className="hint">כתבו שאלה כמו שלקוח היה כותב, וראו מה הבוט היה עונה ולמה. הבדיקה לא נספרת בסטטיסטיקה.</p>
+      <SemanticBanner />
       <form onSubmit={async (e) => { e.preventDefault(); setErr(''); try { setRes(await api('POST', '/kb/search', { q, audience: aud })); } catch (er) { setErr(errText(er instanceof ApiError ? er.code : 'generic')); } }}>
         <div className="field"><label htmlFor="pg-q">שאלה</label><input id="pg-q" required minLength={2} maxLength={300} value={q} onChange={(e) => setQ(e.target.value)} /></div>
         <div className="field"><label htmlFor="pg-a">מנקודת מבט של</label>
@@ -274,7 +289,7 @@ function Playground() {
           {res.hits.length === 0 && <p>לא נמצאו תוצאות.</p>}
           <ol>{res.hits.map((h) => (
             <li key={h.sourceId}>
-              <strong>{h.title}</strong> · {Math.round(h.score * 100)}% · {h.matched}/{h.tokens} מילים{h.exact ? ' · התאמה מדויקת' : ''}
+              <strong>{h.title}</strong> · {Math.round(h.score * 100)}% · {h.matched}/{h.tokens} מילים{h.exact ? ' · התאמה מדויקת' : ''}{h.cos ? ` · משמעות ${Math.round((h.sem ?? 0) * 100)}%` : ''}
               {h.heading && <div className="hint">{h.heading}</div>}
               <div style={{ whiteSpace: 'pre-wrap' }}>{h.snippet}</div>
             </li>

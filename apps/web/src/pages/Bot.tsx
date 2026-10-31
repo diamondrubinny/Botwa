@@ -4,7 +4,7 @@ import { usePoll } from '../hooks';
 
 interface BotCfg {
   enabled: boolean; welcome: string; items: { title: string; answer: string; contact?: { name: string; phone: string; message: string }; route?: { userId: string } }[]; humanOption: boolean; humanLabel: string;
-  humanKeywords: string[]; humanMessage: string; invalidMessage: string; invalidRetries: number; footer: string; preview?: string;
+  humanKeywords: string[]; humanMessage: string; invalidMessage: string; invalidRetries: number; footer: string; preview?: string; mode?: 'menu' | 'flow';
   kb: { enabled: boolean; minScore: number; maxChars: number; showSource: boolean; intro: string };
 }
 
@@ -134,6 +134,8 @@ export function Bot({ me }: { me: Me }) {
             <input id="b-ft" maxLength={300} value={b.footer} onChange={(e) => set({ footer: e.target.value })} />
           </div>
         </fieldset>
+
+        <p className="card">מצב הבוט כעת: <strong>{b.mode === 'flow' ? 'תרשים זרימה' : 'תפריט ממוספר (העמוד הזה)'}</strong>. לבניית שיחה מתקדמת עם שאלות, תנאים והפניות: <a href="#/flow">תרשים זרימה</a>.</p>
 
         <fieldset className="card" disabled={!canEdit}>
           <legend>מענה ממאגר הידע</legend>

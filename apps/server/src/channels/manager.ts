@@ -10,6 +10,8 @@ import { autoAssign } from '../routing.js';
 import { audit } from '../audit.js';
 import { MediaService } from '../media/store.js';
 import type { KnowledgeBase } from '../kb/service.js';
+import { runFlow, type Effect, type FlowContext, type FlowState } from '../flow/engine.js';
+import { loadFlow } from '../flow/store.js';
 import { loadBusinessHours } from '../routes/settings.js';
 import { sendAlert } from '../alerts.js';
 import { createAuthStore } from './auth-store.js';
@@ -303,8 +305,8 @@ export class ChannelManager {
 
   /** Menu bot: answer, or hand over to a person (assign via routing, leave a note, away notice outside hours). */
   /** A confident knowledge-base answer for a free-text message, formatted for the customer; null when unsure (then the normal menu flow applies). */
-  private async kbAnswer(bot: BotConfig, state: string | null, text: string | null): Promise<string | null> {
-    if (!this.kb || !bot.kb.enabled || state === 'human' || !text) return null;
+  private async kbAnswer(bot: BotConfig, state: string | null, text: string | null, inFlow = false): Promise<string | null> {
+    if (!this.kb || (!bot.kb.enabled && !inFlow) || state === 'human' || !text) return null;
     const t = text.trim();
     if (/^\d{1,2}$/.test(t) || t.length < 3) return null;
     try {
@@ -329,26 +331,62 @@ export class ChannelManager {
       return;
     }
 
+    if (bot.mode === 'flow') {
+      const flow = await loadFlow(this.db);
+      if (flow) { await this.runFlowStep(channelId, convId, ext, bot, flow, text); return; }
+    }
+
     const d = decide(bot, { state: c.bot_state, invalid: c.bot_invalid }, text, await this.kbAnswer(bot, c.bot_state, text));
     for (const reply of d.replies) await this.botSay(channelId, convId, ext, reply);
     await this.db.query('UPDATE conversations SET bot_state = $2, bot_invalid = $3 WHERE id = $1', [convId, d.next.state, d.next.invalid]);
 
     if (d.handoff) {
       const why = { requested: 'הלקוח ביקש נציג', unrecognized: 'הלקוח שלח הודעה שהבוט לא זיהה', media: 'הלקוח שלח קובץ או תוכן שאינו טקסט', topic: `הלקוח בחר בנושא "${d.topic?.title ?? ''}"` }[d.handoff];
-      await this.db.query(`INSERT INTO conversation_notes (conversation_id, body) VALUES ($1, $2)`, [convId, `מועבר מהבוט לנציג: ${why}.`]);
-      let to: string | null = null;
-      if (d.topic) {
-        // the person responsible for the chosen topic gets the conversation (if they are still active); otherwise normal routing
-        const r = await this.db.query(`UPDATE conversations SET assigned_to = u.id FROM users u WHERE conversations.id = $1 AND u.id = $2 AND u.active RETURNING u.id`, [convId, d.topic.userId]).catch(() => ({ rows: [] as { id: string }[] }));
-        to = (r.rows[0]?.id as string | undefined) ?? null;
-        if (to) await audit(this.db, { action: 'conversation.topic_assign', target: convId, meta: { to, topic: d.topic.title } }).catch(() => undefined);
-      }
-      if (!to) to = await autoAssign(this.db, convId).catch(() => null);
-      if (to && !d.topic) await audit(this.db, { action: 'conversation.auto_assign', target: convId, meta: { to, via: 'bot' } }).catch(() => undefined);
-      const hours = await loadBusinessHours(this.db);
-      const closed = hours.enabled && !isOpen(hours, new Date());
-      await this.botSay(channelId, convId, ext, closed ? hours.awayMessage : bot.humanMessage);
-      if (closed) await this.db.query('UPDATE conversations SET last_away_at = now() WHERE id = $1', [convId]);
+      await this.handoffNow(channelId, convId, ext, bot, why, d.topic ? { userId: d.topic.userId, topic: d.topic.title } : undefined);
+    }
+  }
+
+  /** Hand a bot conversation to a person: note, assignment (the named person if active, else normal routing), then the hand-over or away notice. */
+  private async handoffNow(channelId: string, convId: string, ext: string, bot: BotConfig, why: string, topic?: { userId: string; topic: string }, customText?: string): Promise<void> {
+    await this.db.query(`INSERT INTO conversation_notes (conversation_id, body) VALUES ($1, $2)`, [convId, `מועבר מהבוט לנציג: ${why}.`]);
+    let to: string | null = null;
+    if (topic) {
+      // the person responsible for the chosen topic gets the conversation (if they are still active); otherwise normal routing
+      const r = await this.db.query(`UPDATE conversations SET assigned_to = u.id FROM users u WHERE conversations.id = $1 AND u.id = $2 AND u.active RETURNING u.id`, [convId, topic.userId]).catch(() => ({ rows: [] as { id: string }[] }));
+      to = (r.rows[0]?.id as string | undefined) ?? null;
+      if (to) await audit(this.db, { action: 'conversation.topic_assign', target: convId, meta: { to, topic: topic.topic } }).catch(() => undefined);
+    }
+    if (!to) to = await autoAssign(this.db, convId).catch(() => null);
+    if (to && !topic) await audit(this.db, { action: 'conversation.auto_assign', target: convId, meta: { to, via: 'bot' } }).catch(() => undefined);
+    const hours = await loadBusinessHours(this.db);
+    const closed = hours.enabled && !isOpen(hours, new Date());
+    await this.botSay(channelId, convId, ext, closed ? hours.awayMessage : customText || bot.humanMessage);
+    if (closed) await this.db.query('UPDATE conversations SET last_away_at = now() WHERE id = $1', [convId]);
+  }
+
+  /** The flow chart bot: one customer message in, replies + side effects out (see flow/engine.ts). */
+  private async runFlowStep(channelId: string, convId: string, ext: string, bot: BotConfig, flow: NonNullable<Awaited<ReturnType<typeof loadFlow>>>, text: string | null): Promise<void> {
+    const st = (await this.db.query('SELECT flow_state FROM conversations WHERE id = $1', [convId])).rows[0]?.flow_state as FlowState | null;
+    const hours = await loadBusinessHours(this.db);
+    const ctx: FlowContext = {
+      isOpen: !hours.enabled || isOpen(hours, new Date()),
+      channelType: this.types.get(channelId) ?? 'whatsapp',
+      humanKeywords: bot.humanKeywords, humanOption: bot.humanOption, invalidRetries: bot.invalidRetries, invalidMessage: bot.invalidMessage,
+      kbAnswer: (t) => this.kbAnswer(bot, null, t, true),
+      matchOption: async (t, options) => this.kb?.matchOption(t, options) ?? null,
+    };
+    const r = await runFlow(flow, st, text, ctx, bot.humanLabel);
+    for (const reply of r.replies) await this.botSay(channelId, convId, ext, reply);
+    const handoff = r.effects.find((e): e is Extract<Effect, { kind: 'handoff' }> => e.kind === 'handoff');
+    await this.db.query('UPDATE conversations SET flow_state = $2, bot_state = $3 WHERE id = $1', [convId, JSON.stringify(r.state), handoff ? 'human' : 'menu']);
+    for (const e of r.effects) {
+      if (e.kind === 'note') await this.db.query('INSERT INTO conversation_notes (conversation_id, body) VALUES ($1, $2)', [convId, e.text]).catch(() => undefined);
+      else if (e.kind === 'tag') await this.db.query('INSERT INTO conversation_tags (conversation_id, tag_id) SELECT $1, id FROM tags WHERE id = $2 ON CONFLICT DO NOTHING', [convId, e.tagId]).catch(() => undefined);
+      else if (e.kind === 'name') await this.db.query(`UPDATE contacts SET display_name = $2 WHERE id = (SELECT contact_id FROM conversations WHERE id = $1) AND display_name IS NULL`, [convId, e.value]).catch(() => undefined);
+    }
+    if (handoff) {
+      const why = { requested: 'הלקוח ביקש נציג', unrecognized: 'הלקוח שלח הודעה שהבוט לא זיהה', media: 'הלקוח שלח קובץ או תוכן שאינו טקסט', flow: 'לפי תרשים הזרימה' }[handoff.reason];
+      await this.handoffNow(channelId, convId, ext, bot, why, handoff.userId ? { userId: handoff.userId, topic: 'תרשים זרימה' } : undefined, handoff.text);
     }
   }
 
