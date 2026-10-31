@@ -1,7 +1,7 @@
 import cookie from '@fastify/cookie';
 import helmet from '@fastify/helmet';
 import rateLimit from '@fastify/rate-limit';
-import fastifyStatic from '@fastify/static';
+import { registerStatic } from './static.js';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -66,7 +66,7 @@ export async function buildApp(cfg: Config, db: Db, mgr: ChannelManager, media: 
   // Serve the built admin panel (hash-routed SPA) from the same origin, if present.
   const webDist = cfg.WEB_DIST ?? path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../web/dist');
   if (existsSync(path.join(webDist, 'index.html'))) {
-    await app.register(fastifyStatic, { root: webDist, wildcard: false, index: ['index.html'] });
+    registerStatic(app, webDist);
   }
 
   authRoutes(app, db, cfg);
