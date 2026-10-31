@@ -202,7 +202,7 @@ LOC
   if ! $SUDO nginx -t >/dev/null 2>&1; then $SUDO rm -f "$conf"; warn "nginx config test failed - removed $conf, nothing changed. Add the proxy rule manually (see docs/DEPLOY.md)"; return; fi
   $SUDO systemctl reload nginx && ok "nginx: HTTP proxy for $dom added ($conf)"
   if command -v certbot >/dev/null 2>&1; then
-    email="${ADMIN_EMAIL:-$(grep -m1 '^ADMIN_EMAIL=' .env 2>/dev/null | cut -d= -f2-)}"
+    email="${ADMIN_EMAIL:-}"; [ -n "$email" ] || email="$(grep -m1 '^CERTBOT_EMAIL=' .env 2>/dev/null | cut -d= -f2- || true)"
     local cb=(certbot certonly --webroot -w /var/www/letsencrypt --expand --agree-tos --non-interactive); local n
     for n in $names; do cb+=(-d "$n"); done
     if [ -n "$email" ]; then cb+=(-m "$email"); else cb+=(--register-unsafely-without-email); fi
