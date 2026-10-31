@@ -186,6 +186,16 @@ await page.click('.conv-list button:has-text("יוסי לקוח")');
 await page.waitForSelector('.chat-pane h2:has-text("יוסי לקוח")');
 await page.selectOption('#canned', { label: 'ברכה' });
 check('canned reply inserted', (await page.inputValue('#reply')).includes('איך אפשר לעזור'));
+await page.click('.conv-list button:has-text("לקוח משני")');
+await page.waitForSelector('.chat-pane h2:has-text("לקוח משני")');
+check('draft does not leak into another conversation', (await page.inputValue('#reply')) === '');
+await page.click('.conv-list button:has-text("יוסי לקוח")');
+await page.waitForSelector('.chat-pane h2:has-text("יוסי לקוח")');
+check('draft is restored when returning to the conversation', (await page.inputValue('#reply')).includes('איך אפשר לעזור'));
+await page.fill('#reply', '/ברכ');
+await page.waitForSelector('.slash button:has-text("ברכה")');
+await page.click('.slash button:has-text("ברכה")');
+check('slash menu inserts the canned reply', (await page.inputValue('#reply')).includes('איך אפשר לעזור') && !(await page.inputValue('#reply')).startsWith('/'));
 await openMore();
 await page.fill('#note', 'לקוח חשוב'); await page.click('button:has-text("הוספת הערה")');
 await page.waitForSelector('#notes-h ~ ul li:has-text("לקוח חשוב")');
@@ -351,14 +361,14 @@ await page.waitForSelector('#email');
 await page.fill('#email', 'ana@e2e.io'); await page.fill('#pw', 'analyst-password-1'); await page.click('button[type=submit]');
 await page.waitForSelector('aside.sidebar nav');
 await page.click('aside.sidebar nav >> text=החשבון שלי');
-for (const mode of ['כהה', 'בהיר']) {
+for (const mode of ['כהה', 'בהיר', 'רך']) {
   for (const [accent, key] of [['אינדיגו', 'indigo'], ['טורקיז', 'teal'], ['ורוד', 'rose'], ['ענבר', 'amber'], ['אפור-כחול', 'slate']]) {
     await page.click('aside.sidebar button[aria-label="מראה המערכת"]');
     await page.click(`#theme-pop button[role=radio]:has-text("${mode}")`);
     await page.click(`#theme-pop button[aria-label="${accent}"]`);
     await page.keyboard.press('Escape');
     const attrs = await page.evaluate(() => [document.documentElement.dataset.theme, document.documentElement.dataset.accent]);
-    if (attrs[0] !== (mode === 'כהה' ? 'dark' : 'light') || attrs[1] !== key) { check(`theme applied ${mode}/${key}`, false, JSON.stringify(attrs)); }
+    if (attrs[0] !== (mode === 'כהה' ? 'dark' : mode === 'רך' ? 'soft' : 'light') || attrs[1] !== key) { check(`theme applied ${mode}/${key}`, false, JSON.stringify(attrs)); }
     await axe(`theme ${mode}/${key}`);
   }
 }

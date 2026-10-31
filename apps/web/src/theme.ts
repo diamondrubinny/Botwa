@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 
-export type ThemeMode = 'system' | 'light' | 'dark';
+export type ThemeMode = 'system' | 'soft' | 'light' | 'dark';
 export const ACCENTS = [
   { key: 'indigo', label: 'אינדיגו' },
   { key: 'teal', label: 'טורקיז' },
@@ -16,13 +16,13 @@ const ACCENT_KEY = 'botwa_theme_accent';
 const read = (k: string): string | null => { try { return localStorage.getItem(k); } catch { return null; } };
 const write = (k: string, v: string) => { try { localStorage.setItem(k, v); } catch { /* storage unavailable */ } };
 
-export const getMode = (): ThemeMode => (['system', 'light', 'dark'] as const).find((m) => m === read(MODE_KEY)) ?? 'system';
+export const getMode = (): ThemeMode => (['system', 'soft', 'light', 'dark'] as const).find((m) => m === read(MODE_KEY)) ?? 'system';
 export const getAccent = (): Accent => ACCENTS.find((a) => a.key === read(ACCENT_KEY))?.key ?? 'indigo';
 
 export function applyTheme(mode: ThemeMode, accent: Accent): void {
   const dark = mode === 'dark' || (mode === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
   const r = document.documentElement;
-  r.dataset.theme = dark ? 'dark' : 'light';
+  r.dataset.theme = dark ? 'dark' : mode === 'light' ? 'light' : 'soft';
   r.dataset.accent = accent;
   // keep the browser chrome (address bar / PWA title bar) in tune with the theme
   const meta = document.querySelector('meta[name="theme-color"]');

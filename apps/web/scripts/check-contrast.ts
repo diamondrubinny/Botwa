@@ -28,7 +28,7 @@ const ratio = (a: number[], b: number[]) => { const [x, y] = [lum(a), lum(b)].so
 
 let failures = 0;
 let checks = 0;
-for (const theme of ['light', 'dark']) {
+for (const theme of ['light', 'soft', 'dark']) {
   for (const accent of ['indigo', 'teal', 'rose', 'amber', 'slate']) {
     const v = { ...vars(`[data-theme='${theme}']`), ...vars(`[data-theme='${theme}'][data-accent='${accent}']`) };
     const col = (k: string, on?: number[]) => { const p = parse(v[k]!, k); return on ? over(p, [...on, 1] as never) : p.slice(0, 3); };

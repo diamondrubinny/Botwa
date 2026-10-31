@@ -1,5 +1,20 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
 
+const NOTIFY_KEY = 'botwa_notify';
+export const notifyEnabled = (): boolean => { try { return localStorage.getItem(NOTIFY_KEY) === '1'; } catch { return false; } };
+export async function setNotifyEnabled(on: boolean): Promise<boolean> {
+  if (on && 'Notification' in window && Notification.permission !== 'granted') {
+    if ((await Notification.requestPermission()) !== 'granted') return false;
+  }
+  try { localStorage.setItem(NOTIFY_KEY, on ? '1' : '0'); } catch { /* storage unavailable */ }
+  return on;
+}
+/** Generic alert only (no sender, no message text): shown when the tab is in the background. */
+function alertNewMessage() {
+  if (!notifyEnabled() || !document.hidden || !('Notification' in window) || Notification.permission !== 'granted') return;
+  try { new Notification('הודעה חדשה בתיבת התמיכה', { tag: 'botwa-new', icon: '/icons/icon-192.png' }); } catch { /* not supported in this context */ }
+}
+
 interface Live { tick: number; announce: string }
 const Ctx = createContext<Live>({ tick: 0, announce: '' });
 export const useLive = () => useContext(Ctx);
@@ -16,6 +31,7 @@ export function LiveProvider({ children }: { children: ReactNode }) {
     let t: ReturnType<typeof setTimeout>;
     es.onmessage = () => {
       setTick((n) => n + 1);
+      alertNewMessage();
       setAnnounce('התקבלה הודעה חדשה');
       clearTimeout(t);
       t = setTimeout(() => setAnnounce(''), 1500);

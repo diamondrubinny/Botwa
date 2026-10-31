@@ -1,14 +1,17 @@
 import { useEffect, useRef, useState } from 'react';
 import { Icon } from './Icon';
 import { ACCENTS, useTheme, type ThemeMode } from '../theme';
+import { notifyEnabled, setNotifyEnabled } from '../live';
 
-const MODES: [ThemeMode, string][] = [['system', 'לפי המכשיר'], ['light', 'בהיר'], ['dark', 'כהה']];
-const SWATCH: Record<string, string> = { indigo: '#4338ca', teal: '#0f766e', rose: '#be123c', amber: '#a24a06', slate: '#334155' };
+const MODES: [ThemeMode, string][] = [['system', 'לפי המכשיר'], ['soft', 'רך'], ['light', 'בהיר'], ['dark', 'כהה']];
+const SWATCH: Record<string, string> = { indigo: '#4a4a9e', teal: '#1b6860', rose: '#a02548', amber: '#8a4107', slate: '#3a4659' };
 
 /** Appearance picker: light / dark / follow device, and the accent colour. Choices are kept in this browser only. */
 export function ThemeMenu({ align = 'end' }: { align?: 'start' | 'end' }) {
   const { mode, accent, setMode, setAccent } = useTheme();
   const [open, setOpen] = useState(false);
+  const [notify, setNotify] = useState(notifyEnabled);
+  const [notifyMsg, setNotifyMsg] = useState('');
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (!open) return;
@@ -40,6 +43,20 @@ export function ThemeMenu({ align = 'end' }: { align?: 'start' | 'end' }) {
               </button>
             ))}
           </div>
+          {'Notification' in window && (
+            <>
+              <p className="pop-title">התראות</p>
+              <label className="row" style={{ fontWeight: 400, marginBottom: 0 }}>
+                <input type="checkbox" style={{ width: 'auto', minHeight: 'auto' }} checked={notify} onChange={async (e) => {
+                  const on = await setNotifyEnabled(e.target.checked);
+                  setNotify(on);
+                  setNotifyMsg(e.target.checked && !on ? 'הדפדפן חסם התראות' : '');
+                }} />
+                התראה על הודעה חדשה כשהלשונית ברקע
+              </label>
+              <p className="hint" role="status">{notifyMsg || 'ההתראה כללית בלבד, בלי תוכן ההודעה. פועלת כשהמערכת פתוחה.'}</p>
+            </>
+          )}
         </div>
       )}
     </div>

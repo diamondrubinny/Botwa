@@ -108,11 +108,18 @@ export function Inbox({ me }: { me: Me }) {
     if (c.unreadCount) void api('POST', `/conversations/${c.id}/read`).catch(() => undefined);
   }
 
+  // Drafts live in sessionStorage (this tab only, gone when it closes) so switching chats never loses or leaks a half-written reply.
+  const draftKey = (id: string | null) => `botwa_draft_${id}`;
+  const readDraft = (id: string | null) => { try { return (id && sessionStorage.getItem(draftKey(id))) || ''; } catch { return ''; } };
+  const saveDraft = (id: string | null, v: string) => { try { if (id) { if (v) sessionStorage.setItem(draftKey(id), v); else sessionStorage.removeItem(draftKey(id)); } } catch { /* storage unavailable */ } };
+  useEffect(() => { setText(readDraft(selId)); }, [selId]); // eslint-disable-line react-hooks/exhaustive-deps
+  const edit = (v: string) => { setText(v); saveDraft(selId, v); };
+
   const resize = () => { const t = taRef.current; if (t) { t.style.height = 'auto'; t.style.height = `${Math.min(160, t.scrollHeight)}px`; } };
   useEffect(resize, [text]);
   const insertCanned = (c: Canned) => {
     const body = c.body.replace(/\{(שם|name)\}/g, sel?.contactName ?? '');
-    setText((prev) => (prev ? `${prev}\n${body}` : body));
+    edit(text.startsWith('/') ? body : text ? `${text}\n${body}` : body);
     taRef.current?.focus();
   };
 
@@ -128,7 +135,7 @@ export function Inbox({ me }: { me: Me }) {
       } else {
         await api('POST', `/conversations/${selId}/messages`, { text });
       }
-      setText('');
+      edit('');
     });
     setSending(false);
   }
@@ -348,6 +355,13 @@ export function Inbox({ me }: { me: Me }) {
               </div>
 
               <form className="composer" onSubmit={send}>
+                {text.startsWith('/') && !text.includes('\n') && (
+                  <div className="slash" role="listbox" aria-label="תשובות מוכנות מתאימות">
+                    {canned.filter((c) => c.title.toLowerCase().includes(text.slice(1).trim().toLowerCase())).slice(0, 5).map((c) => (
+                      <button type="button" role="option" aria-selected="false" key={c.id} onClick={() => insertCanned(c)}>/ {c.title}</button>
+                    ))}
+                  </div>
+                )}
                 <p role="alert" className="error" style={{ margin: 0 }}>{err}</p>
                 {canned.length > 0 && (
                   <div className="composer-tools">
@@ -366,7 +380,7 @@ export function Inbox({ me }: { me: Me }) {
                   <button type="button" className="attach" onClick={() => fileRef.current?.click()} aria-label="צירוף קובץ"><Icon name="clip" /></button>
                   <input id="attach" ref={fileRef} type="file" tabIndex={-1} aria-hidden="true" accept="image/jpeg,image/png,image/webp,image/gif,application/pdf,.docx,.xlsx,audio/*,video/mp4" onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
                   <label htmlFor="reply" className="sr-only">תשובה</label>
-                  <textarea id="reply" ref={taRef} rows={1} maxLength={4000} value={text} placeholder="כתבו תשובה…" onChange={(e) => setText(e.target.value)}
+                  <textarea id="reply" ref={taRef} rows={1} maxLength={4000} value={text} placeholder="כתבו תשובה… (/ לתשובות מוכנות)" onChange={(e) => edit(e.target.value)}
                     onKeyDown={(e) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) void send(); }} />
                   <button className="primary send" type="submit" disabled={sending || !!sel.blocked || !!sel.optedOut || (!text.trim() && !file)}><Icon name="send" /><span className="sr-only">שליחה</span></button>
                 </div>
