@@ -101,6 +101,7 @@ Messages/phone numbers = personal data → Israeli Privacy Law (Amendment 13) & 
 - Hosting: Ubuntu server (Docker Compose + Caddy/Nginx HTTPS) + admin panel.
 - Stack (my call): Node 22 + TS + Fastify + PostgreSQL (plain SQL migrations) + React. Redis deferred (not needed at this scale).
 - Scale: ~4000 customer contacts, 19 staff (roles: admin / supervisor / agent). Low concurrency → single server process is enough.
+- Done in P14: menu bot (numbered menu + answers, human hand-over by "0"/keyword/unknown input/file, notes, routing, away notice, loop guard, bot-aware inbox list) + admin UI page. 87 server tests + E2E.
 - Done in P13: WhatsApp phone-number pairing code (no QR; for single-device users), phone-only install path (bootstrap.sh + token one-paste), wizard. **Pairing code uses Baileys requestPairingCode – verified against its typings only, not against real WhatsApp.**
 - Done in P12: auto-routing (round-robin/least-busy, on-duty toggle, advisory-locked), CSV report export (formula-injection safe), in-conversation search + same-customer-other-channel panel, encrypted DB backups in the admin panel (+ decrypt CLI, daily schedule option). 72 server tests + full E2E.
 - Done in P11: audit-log UI (filters, pagination), conversation tags (+filter), business hours + out-of-hours auto reply (loop-safe, excluded from response-time reports), waiting-time/SLA highlight in inbox, settings page. 60 server tests + full E2E.

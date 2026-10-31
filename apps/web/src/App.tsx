@@ -6,6 +6,7 @@ import { Account } from './pages/Account';
 import { CannedReplies } from './pages/Canned';
 import { Audit } from './pages/Audit';
 import { Settings } from './pages/Settings';
+import { Bot } from './pages/Bot';
 import { Channels } from './pages/Channels';
 import { Inbox } from './pages/Inbox';
 import { Accessibility, Privacy } from './pages/Legal';
@@ -33,7 +34,7 @@ export function App() {
   const page = me.mfaEnrollmentRequired ? 'account' : route;
 
   const links: [string, string][] = [['inbox', t.nav.inbox]];
-  if (isManager) links.push(['reports', 'דוחות'], ['canned', 'תשובות ותגיות'], ['channels', t.nav.channels], ['team', t.nav.team]);
+  if (isManager) links.push(['bot', 'בוט'], ['reports', 'דוחות'], ['canned', 'תשובות ותגיות'], ['channels', t.nav.channels], ['team', t.nav.team]);
   if (isAdmin) links.push(['audit', 'יומן ביקורת'], ['settings', 'הגדרות']);
   links.push(['account', t.nav.account]);
 
@@ -72,6 +73,7 @@ export function App() {
         {page === 'inbox' && <Inbox me={me} />}
         {page === 'channels' && isManager && <Channels isAdmin={isAdmin} />}
         {page === 'reports' && isManager && <Reports />}
+        {page === 'bot' && isManager && <Bot me={me} />}
         {page === 'canned' && isManager && <CannedReplies />}
         {page === 'audit' && isAdmin && <Audit />}
         {page === 'settings' && isAdmin && <Settings />}
@@ -79,7 +81,7 @@ export function App() {
         {page === 'account' && <Account me={me} onChanged={loadMe} />}
         {page === 'accessibility' && <Accessibility />}
         {page === 'privacy' && <Privacy />}
-        {!['inbox', 'reports', 'canned', 'audit', 'settings', 'channels', 'team', 'account', 'accessibility', 'privacy'].includes(page) && (
+        {!['inbox', 'bot', 'reports', 'canned', 'audit', 'settings', 'channels', 'team', 'account', 'accessibility', 'privacy'].includes(page) && (
           <><h1 tabIndex={-1}>הדף לא נמצא</h1><p><a href="#/inbox">חזרה לשיחות</a></p></>
         )}
       </main>

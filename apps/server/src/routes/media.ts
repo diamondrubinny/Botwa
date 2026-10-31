@@ -85,7 +85,7 @@ export function mediaRoutes(app: FastifyInstance, db: Db, mgr: ChannelManager, m
         [conv.id, caption, sent.externalMessageId ?? null, req.user!.id],
       );
       await media.storeSent(m.rows[0].id, buf, d, fileName);
-      await db.query(`UPDATE conversations SET last_message_at = now(), assigned_to = COALESCE(assigned_to, $2) WHERE id = $1`, [conv.id, req.user!.id]);
+      await db.query(`UPDATE conversations SET last_message_at = now(), assigned_to = COALESCE(assigned_to, $2), bot_state = 'human' WHERE id = $1`, [conv.id, req.user!.id]);
       await audit(db, { actorId: req.user!.id, action: 'media.sent', target: conv.id, ip: req.ip, meta: { mime: d.mime, size: buf.length } });
       return reply.code(201).send({ id: m.rows[0].id });
     },

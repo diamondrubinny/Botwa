@@ -196,6 +196,7 @@ export function Inbox({ me }: { me: Me }) {
                     </span>
                     <span className="conv-last">{c.lastMessage}</span>
                     <small>{c.channelLabel} · {c.assignedName ?? 'לא משויך'}</small>
+                    {c.botState === 'menu' && <small className="hint"> · 🤖 הבוט מטפל</small>}
                     {c.tags.length > 0 && <small className="hint"> · {c.tags.map((t) => t.name).join(', ')}</small>}
                     {(() => { const w = waitLabel(c.waitingSince); return w && <small className={w.late ? 'error' : 'hint'} style={{ display: 'block' }}>{w.late ? '⚠ ' : ''}{w.text}</small>; })()}
                   </button>
@@ -261,7 +262,7 @@ export function Inbox({ me }: { me: Me }) {
                   <div key={m.id} className={`msg ${m.direction}`}>
                     {m.attachment && <AttachmentView a={m.attachment} />}
                     {m.body}
-                    <small>{m.direction === 'out' ? (m.auto ? 'מענה אוטומטי' : (m.senderName ?? 'צוות')) : 'לקוח'} · {fmt(m.createdAt)}</small>
+                    <small>{m.direction === 'out' ? (m.auto ? 'בוט / מענה אוטומטי' : (m.senderName ?? 'צוות')) : 'לקוח'} · {fmt(m.createdAt)}</small>
                   </div>
                 ))}
               </div>

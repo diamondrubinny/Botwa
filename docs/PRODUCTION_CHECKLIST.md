@@ -42,6 +42,12 @@ Status legend: ✅ done in code/tests · 🔲 must be done by the operator · �
 - Known limitation: backups are not incremental and do not include the `media` volume; the encryption key is derived from `ENCRYPTION_KEY` (lose the key = lose the backups)
 - Known limitation: related-conversation matching only works for WhatsApp phone-number ids (not WhatsApp LID or Telegram ids)
 
+## Menu bot
+- ✅ Deterministic rules only (no AI/third party); loop guard (>=8 automatic replies in 10 min => silent hand-over); stops when a person replies/assigned; closing resets
+- ⚖️ Wording of bot messages and the hand-over notice (automatic messages to customers) – confirm with counsel; the privacy policy draft should mention automated replies
+- 🔲 Test with a real number: first message, an answer, invalid input twice, "0", a photo, outside business hours
+- Note: every automatic outbound message slightly increases the WhatsApp/Telegram ban risk; keep answers short
+
 ## Backup & recovery
 - 🔲 Daily `scripts/backup.sh` cron + off-server copy + GPG encryption
 - 🔲 Restore rehearsal on a scratch database (documented in DEPLOY.md)

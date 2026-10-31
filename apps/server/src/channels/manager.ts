@@ -3,6 +3,7 @@ import QRCode from 'qrcode';
 import type { Config } from '../config.js';
 import type { Db } from '../db.js';
 import { ingestInbound } from '../inbox.js';
+import { decide, loadBot, type BotConfig } from '../bot.js';
 import { isOpen } from '../business-hours.js';
 import { autoAssign } from '../routing.js';
 import { audit } from '../audit.js';
@@ -90,11 +91,17 @@ export class ChannelManager {
         onMessage: async (m) => {
           const r = await ingestInbound(this.db, channelId, m);
           if (r.messageId && m.media) await this.media.ingestInbound(r.messageId, m.media);
-          if (r.messageId && r.needsRouting) {
-            const to = await autoAssign(this.db, r.conversationId).catch(() => null);
-            if (to) await audit(this.db, { action: 'conversation.auto_assign', target: r.conversationId, meta: { to } }).catch(() => undefined);
+          const bot = r.messageId ? await loadBot(this.db) : null;
+          if (r.messageId && bot?.enabled) {
+            // the menu bot owns new conversations; people are assigned only at hand-over
+            await this.runBot(channelId, r.conversationId, m.externalContactId, bot, m.media ? null : m.text).catch(() => undefined);
+          } else if (r.messageId) {
+            if (r.needsRouting) {
+              const to = await autoAssign(this.db, r.conversationId).catch(() => null);
+              if (to) await audit(this.db, { action: 'conversation.auto_assign', target: r.conversationId, meta: { to } }).catch(() => undefined);
+            }
+            await this.maybeAway(channelId, r.conversationId, m.externalContactId).catch(() => undefined);
           }
-          if (r.messageId) await this.maybeAway(channelId, r.conversationId, m.externalContactId).catch(() => undefined);
           if (r.messageId) this.emit({ channelId, type: 'message', conversationId: r.conversationId, messageId: r.messageId });
         },
       },
@@ -150,6 +157,43 @@ export class ChannelManager {
     const a = this.adapters.get(channelId);
     if (!a || this.statuses.get(channelId) !== 'connected') throw new Error('channel_not_connected');
     return a.sendText(externalContactId, text);
+  }
+
+  private async botSay(channelId: string, convId: string, ext: string, text: string): Promise<void> {
+    const sent = await this.sendText(channelId, ext, text);
+    await this.db.query(`INSERT INTO messages (conversation_id, direction, body, external_id, auto) VALUES ($1,'out',$2,$3,true) ON CONFLICT DO NOTHING`, [convId, text, sent.externalMessageId ?? null]);
+  }
+
+  /** Menu bot: answer, or hand over to a person (assign via routing, leave a note, away notice outside hours). */
+  private async runBot(channelId: string, convId: string, ext: string, bot: BotConfig, text: string | null): Promise<void> {
+    const { rows } = await this.db.query('SELECT bot_state, bot_invalid, assigned_to FROM conversations WHERE id = $1', [convId]);
+    const c = rows[0];
+    if (!c || c.assigned_to) return; // a person already owns this conversation
+    if (text !== null && text.trim() === '[unsupported message type]') text = null;
+
+    // loop guard: two bots talking to each other. Many automatic replies in a short time => stop and hand over silently.
+    const recent = await this.db.query(`SELECT count(*)::int AS n FROM messages WHERE conversation_id = $1 AND auto AND created_at > now() - interval '10 minutes'`, [convId]);
+    if (recent.rows[0].n >= 8) {
+      await this.db.query(`UPDATE conversations SET bot_state = 'human' WHERE id = $1`, [convId]);
+      await this.db.query(`INSERT INTO conversation_notes (conversation_id, body) VALUES ($1, 'הבוט נעצר: יותר מדי הודעות אוטומטיות בזמן קצר (ייתכן בוט בצד הלקוח).')`, [convId]);
+      await autoAssign(this.db, convId).catch(() => null);
+      return;
+    }
+
+    const d = decide(bot, { state: c.bot_state, invalid: c.bot_invalid }, text);
+    for (const reply of d.replies) await this.botSay(channelId, convId, ext, reply);
+    await this.db.query('UPDATE conversations SET bot_state = $2, bot_invalid = $3 WHERE id = $1', [convId, d.next.state, d.next.invalid]);
+
+    if (d.handoff) {
+      const why = { requested: 'הלקוח ביקש נציג', unrecognized: 'הלקוח שלח הודעה שהבוט לא זיהה', media: 'הלקוח שלח קובץ או תוכן שאינו טקסט' }[d.handoff];
+      await this.db.query(`INSERT INTO conversation_notes (conversation_id, body) VALUES ($1, $2)`, [convId, `מועבר מהבוט לנציג: ${why}.`]);
+      const to = await autoAssign(this.db, convId).catch(() => null);
+      if (to) await audit(this.db, { action: 'conversation.auto_assign', target: convId, meta: { to, via: 'bot' } }).catch(() => undefined);
+      const hours = await loadBusinessHours(this.db);
+      const closed = hours.enabled && !isOpen(hours, new Date());
+      await this.botSay(channelId, convId, ext, closed ? hours.awayMessage : bot.humanMessage);
+      if (closed) await this.db.query('UPDATE conversations SET last_away_at = now() WHERE id = $1', [convId]);
+    }
   }
 
   /**

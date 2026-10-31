@@ -28,14 +28,16 @@ export function conversationRoutes(app: FastifyInstance, db: Db, mgr: ChannelMan
       `SELECT c.id, c.channel_id AS "channelId", c.status, c.assigned_to AS "assignedTo", c.unread_count AS "unreadCount",
               c.last_message_at AS "lastMessageAt", ct.display_name AS "contactName", ct.external_id AS "contactId", ct.id AS "contactRowId",
               ch.label AS "channelLabel", c.last_message_at AS "lastActivity",
-              (SELECT CASE WHEN lm.direction = 'in' AND c.status = 'open' THEN lm.created_at END FROM messages lm WHERE lm.conversation_id = c.id ORDER BY lm.created_at DESC LIMIT 1) AS "waitingSince",
+              c.bot_state AS "botState",
+              (SELECT CASE WHEN lm.direction = 'in' AND c.status = 'open' AND c.bot_state IS DISTINCT FROM 'menu' THEN lm.created_at END
+                 FROM messages lm WHERE lm.conversation_id = c.id AND NOT lm.auto ORDER BY lm.created_at DESC LIMIT 1) AS "waitingSince",
               COALESCE((SELECT json_agg(json_build_object('id', t.id, 'name', t.name) ORDER BY lower(t.name)) FROM conversation_tags ctg JOIN tags t ON t.id = ctg.tag_id WHERE ctg.conversation_id = c.id), '[]'::json) AS tags, ch.type AS "channelType", au.name AS "assignedName",
               (SELECT COALESCE(NULLIF(m.body, ''), '[קובץ מצורף]') FROM messages m WHERE m.conversation_id = c.id ORDER BY created_at DESC LIMIT 1) AS "lastMessage"
          FROM conversations c JOIN contacts ct ON ct.id = c.contact_id
               JOIN channels ch ON ch.id = c.channel_id LEFT JOIN users au ON au.id = c.assigned_to
         WHERE ($1::text IS NULL OR c.status = $1)
           AND ($2::boolean IS NOT TRUE OR c.assigned_to = $3)
-          AND ($4::boolean OR c.assigned_to IS NULL OR c.assigned_to = $3)
+          AND ($4::boolean OR c.assigned_to = $3 OR (c.assigned_to IS NULL AND c.bot_state IS DISTINCT FROM 'menu'))
           AND ($9::uuid IS NULL OR c.id = $9)
           AND ($8::uuid IS NULL OR EXISTS (SELECT 1 FROM conversation_tags xt WHERE xt.conversation_id = c.id AND xt.tag_id = $8))
           AND ($7::text IS NULL OR ct.display_name ILIKE $7 OR ct.external_id ILIKE $7
@@ -121,7 +123,7 @@ export function conversationRoutes(app: FastifyInstance, db: Db, mgr: ChannelMan
     );
     // Replying claims an unassigned conversation.
     await db.query(
-      `UPDATE conversations SET last_message_at = now(), assigned_to = COALESCE(assigned_to, $2) WHERE id = $1`,
+      `UPDATE conversations SET last_message_at = now(), assigned_to = COALESCE(assigned_to, $2), bot_state = 'human' WHERE id = $1`,
       [conv.id, u.id],
     );
     return reply.code(201).send(rows[0]);
@@ -149,6 +151,7 @@ export function conversationRoutes(app: FastifyInstance, db: Db, mgr: ChannelMan
       ? await db.query('UPDATE conversations SET assigned_to = $2 WHERE id = $1', [conv.id, target])
       : await db.query('UPDATE conversations SET assigned_to = $2 WHERE id = $1 AND assigned_to IS NOT DISTINCT FROM $3', [conv.id, target, conv.assigned_to]);
     if (!upd.rowCount) return reply.code(409).send({ error: 'conflict' });
+    if (target) await db.query(`UPDATE conversations SET bot_state = 'human' WHERE id = $1`, [conv.id]);
     await audit(db, { actorId: u.id, action: 'conversation.assign', target: conv.id, ip: req.ip, meta: { to: target } });
     return { ok: true };
   });
@@ -158,7 +161,10 @@ export function conversationRoutes(app: FastifyInstance, db: Db, mgr: ChannelMan
     const b = z.object({ status: z.enum(['open', 'closed']) }).safeParse(req.body);
     if (!p.success || !b.success) return reply.code(400).send({ error: 'bad_request' });
     if (!(await loadAccessible(db, req.user!, p.data.id))) return reply.code(404).send({ error: 'not_found' });
-    await db.query('UPDATE conversations SET status = $2 WHERE id = $1', [p.data.id, b.data.status]);
+    await db.query(
+      `UPDATE conversations SET status = $2, bot_state = CASE WHEN $2 = 'closed' THEN NULL ELSE bot_state END, bot_invalid = CASE WHEN $2 = 'closed' THEN 0 ELSE bot_invalid END WHERE id = $1`,
+      [p.data.id, b.data.status],
+    );
     return { ok: true };
   });
 
