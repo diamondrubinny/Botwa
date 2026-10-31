@@ -1,8 +1,16 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
-import { api, ApiError, type Channel } from '../api';
+import { api, ApiError, type Channel, type ChannelHealth } from '../api';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { usePoll } from '../hooks';
 import { errText, t } from '../strings';
+
+const WARN: Record<string, string> = {
+  restricted: 'החשבון הוגבל או נחסם (חשד). עצרו שליחה אוטומטית ובדקו את הטלפון/האפליקציה. אל תקשרו מחדש שוב ושוב.',
+  logged_out: 'החשבון מנותק. נדרש קישור מחדש.',
+  daily_cap_reached: 'הגעתם למכסה היומית. ההודעות לא יישלחו עד שהמכסה תתפנה.',
+  daily_cap_near: 'מתקרבים למכסה היומית.',
+  warming_up: 'מכסה מוגדלת בהדרגה ככל שהמספר "מתבגר".',
+};
 
 type Pending = { kind: 'logout' | 'delete'; ch: Channel } | null;
 
@@ -13,6 +21,8 @@ export function Channels({ isAdmin }: { isAdmin: boolean }) {
   const [msg, setMsg] = useState('');
   const [linking, setLinking] = useState<string | null>(null);
   const [pending, setPending] = useState<Pending>(null);
+  const [health, setHealth] = useState<ChannelHealth[]>([]);
+  usePoll(async () => setHealth(await api<ChannelHealth[]>('GET', '/channels/health').catch(() => [])), 15000);
   const [pairFor, setPairFor] = useState<string | null>(null);
   const [phone, setPhone] = useState('');
 
@@ -34,6 +44,35 @@ export function Channels({ isAdmin }: { isAdmin: boolean }) {
     <>
       <h1 tabIndex={-1}>ערוצים</h1>
       <p role="alert" className="error">{msg}</p>
+      <section className="card" aria-labelledby="health-h">
+        <h2 id="health-h">בריאות ערוצים והגנה מחסימה</h2>
+        {health.length === 0 ? <p>אין ערוצים.</p> : (
+          <div style={{ overflowX: 'auto' }}>
+            <table>
+              <caption className="sr-only">מצב ערוצים, כמות הודעות שנשלחו מול המכסה, ואזהרות</caption>
+              <thead><tr><th scope="col">ערוץ</th><th scope="col">מצב</th><th scope="col">נשלחו ב-24 שעות</th><th scope="col">אזהרות</th><th scope="col">אירועים אחרונים</th></tr></thead>
+              <tbody>
+                {health.map((h) => (
+                  <tr key={h.id}>
+                    <th scope="row">{h.label}</th>
+                    <td><span className={`badge ${h.status}`}>{t.status[h.status] ?? h.status}</span></td>
+                    <td>{h.sentLast24h} / {h.dailyCap}{h.warnings.includes('warming_up') ? ' (חימום מספר חדש)' : ''}</td>
+                    <td>
+                      {h.warnings.length === 0 ? '—' : (
+                        <ul style={{ margin: 0, paddingInlineStart: '1rem' }}>
+                          {h.warnings.map((w) => <li key={w} className={w === 'warming_up' ? 'hint' : 'error'}>{WARN[w] ?? w}</li>)}
+                        </ul>
+                      )}
+                    </td>
+                    <td><small>{h.events.slice(0, 3).map((e) => `${t.status[e.kind] ?? e.kind} (${new Date(e.at).toLocaleString('he-IL', { dateStyle: 'short', timeStyle: 'short' })})`).join(' · ')}</small></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+        <p className="hint">המערכת מגבילה את קצב השליחה (מרווח אקראי בין הודעות, מכסה לדקה וליום, חימום מספר חדש) כדי להקטין את הסיכון לחסימה. ההגדרות: הגדרות ← הגנה מחסימה. אין הבטחה מוחלטת: שימוש בספרייה לא רשמית עלול להוביל להגבלה גם בהתנהגות זהירה.</p>
+      </section>
       <ul style={{ listStyle: 'none', padding: 0 }}>
         {list.map((ch) => (
           <li key={ch.id} className="card">

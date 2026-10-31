@@ -1,5 +1,5 @@
 export type ChannelType = 'whatsapp' | 'telegram';
-export type ChannelStatus = 'stopped' | 'connecting' | 'qr' | 'connected' | 'logged_out' | 'password' | 'error';
+export type ChannelStatus = 'stopped' | 'connecting' | 'qr' | 'connected' | 'logged_out' | 'password' | 'restricted' | 'error';
 
 export interface InboundMedia {
   fileName?: string;
@@ -53,6 +53,8 @@ export interface ChannelAdapter {
   /** Telegram only: supply the cloud (2FA) password when status is 'password'. Never stored. */
   submitPassword?(password: string): void;
   sendText(externalContactId: string, text: string): Promise<{ externalMessageId?: string }>;
+  /** Show a "typing" indicator for `ms` before a message is sent (WhatsApp). Best effort. */
+  typing?(externalContactId: string, ms: number): Promise<void>;
   sendMedia?(externalContactId: string, media: OutboundMedia): Promise<{ externalMessageId?: string }>;
 }
 

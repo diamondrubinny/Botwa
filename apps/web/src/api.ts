@@ -23,7 +23,7 @@ export interface Channel { id: string; type: 'whatsapp' | 'telegram'; label: str
 export interface Conversation {
   id: string; channelId: string; status: 'open' | 'closed'; assignedTo: string | null; assignedName: string | null;
   unreadCount: number; lastMessageAt: string; contactName: string | null; contactId: string; contactRowId: string;
-  channelLabel: string; channelType: string; lastMessage: string | null; waitingSince: string | null; botState: 'menu' | 'human' | null; tags: Tag[];
+  channelLabel: string; channelType: string; lastMessage: string | null; waitingSince: string | null; botState: 'menu' | 'human' | null; blocked?: boolean; blockedReason?: string | null; tags: Tag[];
 }
 export interface Attachment { id: string; kind: string; mime: string | null; size: number | null; fileName: string | null; status: 'pending' | 'clean' | 'infected' | 'blocked'; detail: string | null }
 export interface Tag { id: string; name: string }
@@ -42,3 +42,8 @@ export interface Note { id: string; body: string; authorName: string | null; cre
 export interface Canned { id: string; title: string; body: string }
 export interface RelatedConv { id: string; status: string; lastMessageAt: string; channelLabel: string; channelType: string; contactName: string | null; assignedName: string | null; lastMessage: string | null }
 export interface BackupFile { name: string; size: number; createdAt: string }
+export interface ChannelHealth {
+  id: string; label: string; type: string; status: string; sentLast24h: number; sentLastMinute: number; dailyCap: number; ageDays: number;
+  warnings: string[]; events: { kind: string; at: string }[];
+}
+export interface SendingCfg { minDelayMs: number; maxDelayMs: number; perMinute: number; perDay: number; warmup: boolean; typing: boolean }

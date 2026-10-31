@@ -30,7 +30,9 @@ const fmt = (iso: string) => new Date(iso).toLocaleString('he-IL', { dateStyle: 
 export function Inbox({ me }: { me: Me }) {
   const isManager = me.role !== 'agent';
   const [convs, setConvs] = useState<Conversation[]>([]);
-  const [filter, setFilter] = useState<'open' | 'closed' | 'mine'>('open');
+  const [filter, setFilter] = useState<'open' | 'closed' | 'mine' | 'blocked'>('open');
+  const [blockPanel, setBlockPanel] = useState(false);
+  const [blockReason, setBlockReason] = useState('');
   const [selId, setSelId] = useState<string | null>(null);
   const [msgs, setMsgs] = useState<Message[]>([]);
   const [team, setTeam] = useState<UserRow[]>([]);
@@ -71,7 +73,7 @@ export function Inbox({ me }: { me: Me }) {
   const sel = convs.find((c) => c.id === selId) ?? (pinned && pinned.id === selId ? pinned : null);
 
   usePoll(async () => {
-    const q = (filter === 'mine' ? 'mine=true&status=open' : `status=${filter}`) + (search.trim() ? `&q=${encodeURIComponent(search.trim())}` : '') + (tagFilter ? `&tag=${tagFilter}` : '');
+    const q = (filter === 'mine' ? 'mine=true&status=open' : filter === 'blocked' ? 'blocked=true' : `status=${filter}`) + (search.trim() ? `&q=${encodeURIComponent(search.trim())}` : '') + (tagFilter ? `&tag=${tagFilter}` : '');
     setConvs(await api<Conversation[]>('GET', `/conversations?${q}`).catch(() => []));
   }, 5000, [filter, search, tagFilter, live]);
 
@@ -174,6 +176,7 @@ export function Inbox({ me }: { me: Me }) {
               <option value="open">פתוחות</option>
               <option value="mine">שלי</option>
               <option value="closed">סגורות</option>
+              {isManager && <option value="blocked">חסומים</option>}
             </select>
           </div>
           {allTags.length > 0 && (
@@ -231,6 +234,27 @@ export function Inbox({ me }: { me: Me }) {
                 </button>
               </div>
 
+              {sel.blocked && (
+                <p className="banner" role="status">
+                  הלקוח חסום{sel.blockedReason ? ` (${sel.blockedReason})` : ''}. הודעות ממנו נשמרות בשקט ואינן מפעילות בוט, התראות או שיוך.
+                  {isManager && <> <button onClick={() => act(async () => { await api('POST', `/contacts/${sel.contactRowId}/unblock`); setLive((n) => n + 1); })}>ביטול חסימה</button></>}
+                </p>
+              )}
+              {isManager && !sel.blocked && (
+                <div style={{ marginBottom: '.5rem' }}>
+                  <button className="danger" onClick={() => setBlockPanel(!blockPanel)} aria-expanded={blockPanel}>חסימת לקוח</button>
+                  {blockPanel && (
+                    <form className="card" style={{ marginTop: '.5rem' }} onSubmit={(e) => {
+                      e.preventDefault();
+                      void act(async () => { await api('POST', `/contacts/${sel.contactRowId}/block`, { reason: blockReason }); setBlockPanel(false); setBlockReason(''); setLive((n) => n + 1); });
+                    }}>
+                      <p className="hint">השיחה תיסגר ותוסתר. הודעות חדשות ממנו יישמרו בשקט (כראיה) בלי לעורר בוט, התראה או שיוך. אפשר לבטל בכל עת.</p>
+                      <div className="field"><label htmlFor="blk-r">סיבה (אופציונלי)</label><input id="blk-r" maxLength={200} value={blockReason} onChange={(e) => setBlockReason(e.target.value)} /></div>
+                      <button className="danger" type="submit">אישור חסימה</button>
+                    </form>
+                  )}
+                </div>
+              )}
               <div className="row" style={{ marginBottom: '.5rem' }} aria-label="תגיות השיחה" role="group">
                 {sel.tags.map((t) => (
                   <span key={t.id} className="badge" style={{ display: 'inline-flex', gap: '.35rem', alignItems: 'center' }}>
@@ -274,7 +298,7 @@ export function Inbox({ me }: { me: Me }) {
                     <label htmlFor="canned">תשובה מוכנה</label>
                     <select id="canned" value="" onChange={(e) => {
                       const c = canned.find((x) => x.id === e.target.value);
-                      if (c) setText((prev) => (prev ? `${prev}\n${c.body}` : c.body));
+                      if (c) { const body = c.body.replace(/\{(שם|name)\}/g, sel?.contactName ?? ''); setText((prev) => (prev ? `${prev}\n${body}` : body)); }
                     }}>
                       <option value="">בחרו להוספה לתשובה…</option>
                       {canned.map((c) => <option key={c.id} value={c.id}>{c.title}</option>)}
@@ -291,7 +315,7 @@ export function Inbox({ me }: { me: Me }) {
                     onChange={(e) => setFile(e.target.files?.[0] ?? null)} aria-describedby="attach-h" />
                   <p id="attach-h" className="hint">עד 16MB. הקובץ נסרק באנטי-וירוס לפני השליחה.</p>
                 </div>
-                <button className="primary" type="submit" disabled={sending || (!text.trim() && !file)}>{sending ? 'שולח…' : 'שליחה'}</button>
+                <button className="primary" type="submit" disabled={sending || !!sel.blocked || (!text.trim() && !file)}>{sending ? 'שולח…' : 'שליחה'}</button>
               </form>
 
               {related.length > 0 && (

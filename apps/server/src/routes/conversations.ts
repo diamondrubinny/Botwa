@@ -4,6 +4,7 @@ import { audit } from '../audit.js';
 import { isManager, loadAccessible } from '../access.js';
 import { requireAuth } from '../auth.js';
 import type { ChannelManager } from '../channels/manager.js';
+import { SendError } from '../channels/sender.js';
 import type { Db } from '../db.js';
 import { MediaService } from '../media/store.js';
 
@@ -18,6 +19,7 @@ export function conversationRoutes(app: FastifyInstance, db: Db, mgr: ChannelMan
         q: z.string().trim().min(1).max(100).optional(),
         tag: z.string().uuid().optional(),
         id: z.string().uuid().optional(),
+        blocked: z.enum(['true', 'false']).default('false'),
         mine: z.enum(['true', 'false']).optional(),
         limit: z.coerce.number().int().min(1).max(100).default(50),
         offset: z.coerce.number().int().min(0).default(0),
@@ -26,7 +28,7 @@ export function conversationRoutes(app: FastifyInstance, db: Db, mgr: ChannelMan
     const u = req.user!;
     const { rows } = await db.query(
       `SELECT c.id, c.channel_id AS "channelId", c.status, c.assigned_to AS "assignedTo", c.unread_count AS "unreadCount",
-              c.last_message_at AS "lastMessageAt", ct.display_name AS "contactName", ct.external_id AS "contactId", ct.id AS "contactRowId",
+              c.last_message_at AS "lastMessageAt", ct.display_name AS "contactName", ct.external_id AS "contactId", ct.id AS "contactRowId", ct.blocked AS "blocked", ct.blocked_reason AS "blockedReason",
               ch.label AS "channelLabel", c.last_message_at AS "lastActivity",
               c.bot_state AS "botState",
               (SELECT CASE WHEN lm.direction = 'in' AND c.status = 'open' AND c.bot_state IS DISTINCT FROM 'menu' THEN lm.created_at END
@@ -39,11 +41,12 @@ export function conversationRoutes(app: FastifyInstance, db: Db, mgr: ChannelMan
           AND ($2::boolean IS NOT TRUE OR c.assigned_to = $3)
           AND ($4::boolean OR c.assigned_to = $3 OR (c.assigned_to IS NULL AND c.bot_state IS DISTINCT FROM 'menu'))
           AND ($9::uuid IS NULL OR c.id = $9)
+          AND ct.blocked = $10::boolean
           AND ($8::uuid IS NULL OR EXISTS (SELECT 1 FROM conversation_tags xt WHERE xt.conversation_id = c.id AND xt.tag_id = $8))
           AND ($7::text IS NULL OR ct.display_name ILIKE $7 OR ct.external_id ILIKE $7
                OR EXISTS (SELECT 1 FROM messages sm WHERE sm.conversation_id = c.id AND sm.body ILIKE $7))
         ORDER BY c.last_message_at DESC LIMIT $5 OFFSET $6`,
-      [q.status ?? null, q.mine === 'true', u.id, isManager(u), q.limit, q.offset, q.q ? `%${q.q.replace(/[\\%_]/g, '\\$&')}%` : null, q.tag ?? null, q.id ?? null],
+      [q.status ?? null, q.mine === 'true', u.id, isManager(u), q.limit, q.offset, q.q ? `%${q.q.replace(/[\\%_]/g, '\\$&')}%` : null, q.tag ?? null, q.id ?? null, q.blocked === 'true' && isManager(u)],
     );
     return rows;
   });
@@ -108,11 +111,13 @@ export function conversationRoutes(app: FastifyInstance, db: Db, mgr: ChannelMan
     const u = req.user!;
     const conv = await loadAccessible(db, u, p.data.id);
     if (!conv) return reply.code(404).send({ error: 'not_found' });
+    if (conv.blocked) return reply.code(409).send({ error: 'contact_blocked' });
     let sent: { externalMessageId?: string };
     try {
       sent = await mgr.sendText(conv.channel_id, conv.external_id, b.data.text);
     } catch (e) {
       if ((e as Error).message === 'channel_not_connected') return reply.code(409).send({ error: 'channel_not_connected' });
+      if (e instanceof SendError) return reply.code(429).send({ error: e.code });
       req.log.error({ err: e }, 'send failed');
       return reply.code(502).send({ error: 'send_failed' });
     }

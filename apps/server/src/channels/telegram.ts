@@ -23,6 +23,10 @@ export function parseTgContactId(id: string): { userId: string; accessHash: stri
 
 export const tgQrPayload = (token: Buffer) => `tg://login?token=${token.toString('base64url')}`;
 
+/** Telegram errors that mean the account is limited/banned (not a normal send failure). */
+const RESTRICTION_ERRORS = ['PEER_FLOOD', 'USER_DEACTIVATED_BAN', 'USER_DEACTIVATED', 'PHONE_NUMBER_BANNED', 'FLOOD_PREMIUM_WAIT'];
+export const isRestriction = (e: unknown) => RESTRICTION_ERRORS.includes((e as { errorMessage?: string })?.errorMessage ?? '');
+
 export class TelegramAdapter implements ChannelAdapter {
   private client?: TelegramClient;
   private stopped = true;
@@ -176,19 +180,29 @@ export class TelegramAdapter implements ChannelAdapter {
     if (!this.client) throw new Error('channel_not_connected');
     const { userId, accessHash } = parseTgContactId(externalContactId);
     const peer = new Api.InputPeerUser({ userId: bigInt(userId), accessHash: bigInt(accessHash) });
-    const res = await this.client.sendMessage(peer, { message: text });
-    return { externalMessageId: String(res.id) };
+    try {
+      const res = await this.client.sendMessage(peer, { message: text });
+      return { externalMessageId: String(res.id) };
+    } catch (e) {
+      if (isRestriction(e)) this.ctx.events.onStatus('restricted');
+      throw e;
+    }
   }
 
   async sendMedia(externalContactId: string, media: OutboundMedia): Promise<{ externalMessageId?: string }> {
     if (!this.client) throw new Error('channel_not_connected');
     const { userId, accessHash } = parseTgContactId(externalContactId);
     const peer = new Api.InputPeerUser({ userId: bigInt(userId), accessHash: bigInt(accessHash) });
-    const res = await this.client.sendFile(peer, {
-      file: new CustomFile(media.fileName, media.buffer.length, '', media.buffer),
-      caption: media.caption,
-      forceDocument: !media.mime.startsWith('image/'),
-    });
-    return { externalMessageId: String(res.id) };
+    try {
+      const res = await this.client.sendFile(peer, {
+        file: new CustomFile(media.fileName, media.buffer.length, '', media.buffer),
+        caption: media.caption,
+        forceDocument: !media.mime.startsWith('image/'),
+      });
+      return { externalMessageId: String(res.id) };
+    } catch (e) {
+      if (isRestriction(e)) this.ctx.events.onStatus('restricted');
+      throw e;
+    }
   }
 }

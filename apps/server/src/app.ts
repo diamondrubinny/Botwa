@@ -12,6 +12,7 @@ import { channelRoutes } from './routes/channels.js';
 import multipart from '@fastify/multipart';
 import { MediaService } from './media/store.js';
 import { backupRoutes } from './routes/backups.js';
+import { contactRoutes } from './routes/contacts.js';
 import { tagRoutes } from './routes/tags.js';
 import { settingsRoutes } from './routes/settings.js';
 import { eventRoutes } from './routes/events.js';
@@ -76,6 +77,7 @@ export async function buildApp(cfg: Config, db: Db, mgr: ChannelManager, media: 
   reportRoutes(app, db, cfg);
   eventRoutes(app, db, mgr);
   tagRoutes(app, db);
+  contactRoutes(app, db);
   settingsRoutes(app, db);
   backupRoutes(app, db, cfg);
   return app;

@@ -9,7 +9,9 @@ import { autoAssign } from '../routing.js';
 import { audit } from '../audit.js';
 import { MediaService } from '../media/store.js';
 import { loadBusinessHours } from '../routes/settings.js';
+import { sendAlert } from '../alerts.js';
 import { createAuthStore } from './auth-store.js';
+import { ChannelSender, loadSending as loadSendingRaw, TEST_SENDING } from './sender.js';
 import type { AdapterFactory, ChannelAdapter, ChannelStatus, ChannelType, OutboundMedia, StartOptions } from './types.js';
 import { TelegramAdapter } from './telegram.js';
 import { WhatsAppAdapter } from './whatsapp.js';
@@ -36,6 +38,9 @@ export class ChannelManager {
   private lastQr = new Map<string, string>();
   private lastCode = new Map<string, string>();
   private statuses = new Map<string, ChannelStatus>();
+  private readonly sender: ChannelSender;
+  private readonly sendingFallback?: typeof TEST_SENDING;
+  private loadSending() { return loadSendingRaw(this.db, this.sendingFallback); }
 
   constructor(
     private readonly db: Db,
@@ -44,6 +49,8 @@ export class ChannelManager {
     private readonly media: MediaService = new MediaService(db, cfg),
   ) {
     this.bus.setMaxListeners(100);
+    this.sender = new ChannelSender(db);
+    this.sendingFallback = cfg.NODE_ENV === 'test' ? TEST_SENDING : undefined;
   }
 
   supports(type: ChannelType): boolean {
@@ -62,10 +69,26 @@ export class ChannelManager {
   }
 
   private async setStatus(channelId: string, status: ChannelStatus) {
+    const prev = this.statuses.get(channelId);
     this.statuses.set(channelId, status);
     if (status !== 'qr') { this.lastQr.delete(channelId); this.lastCode.delete(channelId); }
-    if (status === 'stopped' || status === 'logged_out' || status === 'error') this.adapters.delete(channelId);
+    if (status === 'stopped' || status === 'logged_out' || status === 'error' || status === 'restricted') this.adapters.delete(channelId);
+    // never auto-reconnect an account the platform has restricted: it must be reviewed by a person first
+    if (status === 'restricted') await this.db.query('UPDATE channels SET auto_start=false WHERE id=$1', [channelId]).catch(() => undefined);
     await this.db.query('UPDATE channels SET status=$2 WHERE id=$1', [channelId, status]).catch(() => undefined);
+    if (prev !== status) {
+      await this.db.query('INSERT INTO channel_events (channel_id, kind) VALUES ($1,$2)', [channelId, status]).catch(() => undefined);
+      // unexpected loss of a working channel => tell the operator (in-app health panel always; webhook if configured)
+      if (['logged_out', 'error', 'restricted'].includes(status) && prev === 'connected') {
+        const { rows } = await this.db.query('SELECT label, type FROM channels WHERE id=$1', [channelId]).catch(() => ({ rows: [] as { label: string; type: string }[] }));
+        const label = rows[0]?.label ?? channelId;
+        const msg = status === 'restricted'
+          ? `⚠️ הערוץ "${label}" הוגבל או נחסם על ידי הפלטפורמה (חשד). עצרו שליחה אוטומטית ובדקו את החשבון.`
+          : `⚠️ הערוץ "${label}" התנתק (${status}). נדרש קישור מחדש.`;
+        await audit(this.db, { action: 'channel.alert', target: channelId, meta: { status } }).catch(() => undefined);
+        void sendAlert(this.cfg, msg, { channelId, status });
+      }
+    }
     this.emit({ channelId, type: 'status', status });
   }
 
@@ -89,7 +112,12 @@ export class ChannelManager {
           });
         },
         onMessage: async (m) => {
-          const r = await ingestInbound(this.db, channelId, m);
+          const r = await ingestInbound(this.db, channelId, m, { floodLimit: this.cfg.FLOOD_LIMIT });
+          if (r.flooded) {
+            await audit(this.db, { action: 'contact.auto_block', target: r.contactId, meta: { reason: 'flood', limit: this.cfg.FLOOD_LIMIT } }).catch(() => undefined);
+            void sendAlert(this.cfg, `🚫 לקוח נחסם אוטומטית עקב הצפת הודעות (יותר מ-${this.cfg.FLOOD_LIMIT} ב-2 דקות).`, { contactId: r.contactId });
+          }
+          if (r.blocked) return; // blocked contact: stored as evidence, nothing else happens (no files, bot, away reply, routing, notification)
           if (r.messageId && m.media) await this.media.ingestInbound(r.messageId, m.media);
           const bot = r.messageId ? await loadBot(this.db) : null;
           if (r.messageId && bot?.enabled) {
@@ -153,14 +181,31 @@ export class ChannelManager {
     a.submitPassword(password);
   }
 
-  async sendText(channelId: string, externalContactId: string, text: string) {
+  /** All outbound traffic goes through the per-channel lane: human-like spacing, per-minute/day caps, typing indicator. */
+  async sendText(channelId: string, externalContactId: string, text: string, opts: { background?: boolean } = {}) {
     const a = this.adapters.get(channelId);
     if (!a || this.statuses.get(channelId) !== 'connected') throw new Error('channel_not_connected');
-    return a.sendText(externalContactId, text);
+    const settings = await this.loadSending();
+    return this.sender.run(
+      channelId,
+      settings,
+      async () => {
+        if (settings.typing && a.typing) await a.typing(externalContactId, Math.min(4000, 400 + text.length * 30)).catch(() => undefined);
+        return a.sendText(externalContactId, text);
+      },
+      { maxWaitMs: opts.background ? 45_000 : 8_000 },
+    );
+  }
+
+  /** Send-rate view for the health panel. */
+  async sendUsage(channelId: string) {
+    const settings = await this.loadSending();
+    const u = await this.sender.usage(channelId);
+    return { ...u, settings };
   }
 
   private async botSay(channelId: string, convId: string, ext: string, text: string): Promise<void> {
-    const sent = await this.sendText(channelId, ext, text);
+    const sent = await this.sendText(channelId, ext, text, { background: true });
     await this.db.query(`INSERT INTO messages (conversation_id, direction, body, external_id, auto) VALUES ($1,'out',$2,$3,true) ON CONFLICT DO NOTHING`, [convId, text, sent.externalMessageId ?? null]);
   }
 
@@ -210,7 +255,7 @@ export class ChannelManager {
     );
     if (!claim.rowCount) return;
     try {
-      const sent = await this.sendText(channelId, externalContactId, hours.awayMessage);
+      const sent = await this.sendText(channelId, externalContactId, hours.awayMessage, { background: true });
       const ins = await this.db.query(
         `INSERT INTO messages (conversation_id, direction, body, external_id, auto) VALUES ($1,'out',$2,$3,true) RETURNING id`,
         [conversationId, hours.awayMessage, sent.externalMessageId ?? null],
@@ -226,7 +271,8 @@ export class ChannelManager {
     const a = this.adapters.get(channelId);
     if (!a || this.statuses.get(channelId) !== 'connected') throw new Error('channel_not_connected');
     if (!a.sendMedia) throw new Error('media_unsupported');
-    return a.sendMedia(externalContactId, media);
+    const send = a.sendMedia.bind(a);
+    return this.sender.run(channelId, await this.loadSending(), () => send(externalContactId, media), { maxWaitMs: 8_000 });
   }
 
   async startAll(): Promise<void> {

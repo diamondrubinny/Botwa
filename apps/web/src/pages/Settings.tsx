@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from 'react';
-import { api, ApiError, type BackupFile, type BusinessHours } from '../api';
+import { api, ApiError, type BackupFile, type BusinessHours, type SendingCfg } from '../api';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { usePoll } from '../hooks';
 import { errText } from '../strings';
@@ -9,6 +9,8 @@ const DAYS = ['ראשון', 'שני', 'שלישי', 'רביעי', 'חמישי', 
 export function Settings() {
   const [h, setH] = useState<BusinessHours | null>(null);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const [snd, setSnd] = useState<SendingCfg | null>(null);
+  const [sndMsg, setSndMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [routing, setRouting] = useState<string>('off');
   const [routeMsg, setRouteMsg] = useState('');
   const [backups, setBackups] = useState<BackupFile[]>([]);
@@ -19,6 +21,7 @@ export function Settings() {
   usePoll(async () => {
     const r = await api<{ mode: string }>('GET', '/settings/routing').catch(() => null);
     if (r) setRouting(r.mode);
+    if (!snd) setSnd(await api<SendingCfg>('GET', '/settings/sending').catch(() => null));
     await loadBackups();
   }, 60000);
   const fmtMB = (n: number) => `${(n / 1024 / 1024).toFixed(1)} MB`;
@@ -84,6 +87,29 @@ export function Settings() {
         <button className="primary" type="submit">שמירה</button>
         <p role="status" className={msg?.ok ? 'ok' : 'error'}>{msg?.text}</p>
       </form>
+
+      {snd && (
+        <section className="card" aria-labelledby="snd-h">
+          <h2 id="snd-h">הגנה מחסימה: קצב שליחה</h2>
+          <p className="hint">ווצאפ וטלגרם מגבילים חשבונות ששולחים הרבה הודעות במהירות. ההגדרות האלה גורמות למערכת להתנהג כמו אדם. הודעות שחורגות מהמכסה לא נשלחות (הנציג רואה הודעה). שליחת הודעות לפי דרישה היא בסדר; אל תשתמשו בזה לשיווק המוני.</p>
+          <form onSubmit={async (e) => {
+            e.preventDefault(); setSndMsg(null);
+            try { setSnd(await api<SendingCfg>('PUT', '/settings/sending', snd)); setSndMsg({ ok: true, text: 'נשמר.' }); }
+            catch { setSndMsg({ ok: false, text: 'השמירה נכשלה (בדקו שהמרווח המקסימלי גדול או שווה למינימלי).' }); }
+          }}>
+            <div className="row">
+              <div className="field"><label htmlFor="s-min">מרווח מינימלי בין הודעות (מילישניות)</label><input id="s-min" type="number" min={0} max={60000} step={100} dir="ltr" value={snd.minDelayMs} onChange={(e) => setSnd({ ...snd, minDelayMs: Number(e.target.value) })} /></div>
+              <div className="field"><label htmlFor="s-max">מרווח מקסימלי (מילישניות)</label><input id="s-max" type="number" min={0} max={120000} step={100} dir="ltr" value={snd.maxDelayMs} onChange={(e) => setSnd({ ...snd, maxDelayMs: Number(e.target.value) })} /></div>
+              <div className="field"><label htmlFor="s-pm">מכסה לדקה</label><input id="s-pm" type="number" min={1} max={120} dir="ltr" value={snd.perMinute} onChange={(e) => setSnd({ ...snd, perMinute: Number(e.target.value) })} /></div>
+              <div className="field"><label htmlFor="s-pd">מכסה ליום (לכל ערוץ)</label><input id="s-pd" type="number" min={1} max={20000} dir="ltr" value={snd.perDay} onChange={(e) => setSnd({ ...snd, perDay: Number(e.target.value) })} /></div>
+            </div>
+            <div className="field"><label><input type="checkbox" style={{ width: 'auto', minHeight: 0, marginInlineEnd: '.5rem' }} checked={snd.warmup} onChange={(e) => setSnd({ ...snd, warmup: e.target.checked })} />חימום למספר חדש (מכסה יומית מתחילה ב-20 ועולה ב-40 בכל יום)</label></div>
+            <div className="field"><label><input type="checkbox" style={{ width: 'auto', minHeight: 0, marginInlineEnd: '.5rem' }} checked={snd.typing} onChange={(e) => setSnd({ ...snd, typing: e.target.checked })} />להציג "מקליד…" בווצאפ לפני שליחה</label></div>
+            <button className="primary" type="submit">שמירה</button>
+            <p role="status" className={sndMsg?.ok ? 'ok' : 'error'}>{sndMsg?.text}</p>
+          </form>
+        </section>
+      )}
 
       <section className="card" aria-labelledby="route-h">
         <h2 id="route-h">ניתוב אוטומטי של פניות חדשות</h2>

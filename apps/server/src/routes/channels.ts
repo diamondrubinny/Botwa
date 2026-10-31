@@ -4,6 +4,7 @@ import { audit } from '../audit.js';
 import { loadSession, requireAuth } from '../auth.js';
 import type { ChannelManager, BusEvent } from '../channels/manager.js';
 import type { Db } from '../db.js';
+import { warmupCap } from '../channels/sender.js';
 
 const idParam = z.object({ id: z.string().uuid() });
 
@@ -16,6 +17,25 @@ export function channelRoutes(app: FastifyInstance, db: Db, mgr: ChannelManager)
   app.get('/channels', { preHandler: view }, async () => {
     const { rows } = await db.query('SELECT id, type, label, status, created_at AS "createdAt" FROM channels ORDER BY created_at');
     return rows.map((r) => ({ ...r, status: mgr.snapshot(r.id).status === 'stopped' ? r.status : mgr.snapshot(r.id).status }));
+  });
+
+  // Health: current status, send usage vs. cap (anti-ban pacing) and the last status changes.
+  app.get('/channels/health', { preHandler: view }, async () => {
+    const { rows } = await db.query('SELECT id, type, label, status FROM channels ORDER BY created_at');
+    const out = [];
+    for (const ch of rows) {
+      const u = await mgr.sendUsage(ch.id);
+      const cap = warmupCap(u.settings, u.ageDays);
+      const events = (await db.query('SELECT kind, created_at AS "at" FROM channel_events WHERE channel_id = $1 ORDER BY id DESC LIMIT 6', [ch.id])).rows;
+      const status = mgr.snapshot(ch.id).status === 'stopped' ? ch.status : mgr.snapshot(ch.id).status;
+      const warnings: string[] = [];
+      if (status === 'restricted') warnings.push('restricted');
+      if (status === 'logged_out') warnings.push('logged_out');
+      if (u.day >= cap * 0.8) warnings.push(u.day >= cap ? 'daily_cap_reached' : 'daily_cap_near');
+      if (u.settings.warmup && cap < u.settings.perDay) warnings.push('warming_up');
+      out.push({ id: ch.id, label: ch.label, type: ch.type, status, sentLast24h: u.day, sentLastMinute: u.minute, dailyCap: cap, ageDays: Math.floor(u.ageDays), warnings, events });
+    }
+    return out;
   });
 
   app.post('/channels', { preHandler: adminOnly }, async (req, reply) => {

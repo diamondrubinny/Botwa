@@ -9,12 +9,13 @@ export interface AccessibleConversation {
   assigned_to: string | null;
   status: string;
   external_id: string;
+  blocked: boolean;
 }
 
 /** Agents may only touch conversations assigned to them or still unassigned. Returns null (=> 404) otherwise. */
 export async function loadAccessible(db: Db, user: AuthUser, id: string): Promise<AccessibleConversation | null> {
   const { rows } = await db.query(
-    `SELECT c.id, c.channel_id, c.assigned_to, c.status, ct.external_id
+    `SELECT c.id, c.channel_id, c.assigned_to, c.status, ct.external_id, ct.blocked
        FROM conversations c JOIN contacts ct ON ct.id = c.contact_id WHERE c.id = $1`,
     [id],
   );

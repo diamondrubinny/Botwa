@@ -5,6 +5,7 @@ import { loadAccessible } from '../access.js';
 import { audit } from '../audit.js';
 import { requireAuth } from '../auth.js';
 import type { ChannelManager } from '../channels/manager.js';
+import { SendError } from '../channels/sender.js';
 import type { Db } from '../db.js';
 import type { MediaService } from '../media/store.js';
 import { detect, sanitizeFileName } from '../media/validate.js';
@@ -72,11 +73,13 @@ export function mediaRoutes(app: FastifyInstance, db: Db, mgr: ChannelManager, m
       }
       if (scan.status !== 'clean') return reply.code(503).send({ error: 'scanner_unavailable' });
 
+      if (conv.blocked) return reply.code(409).send({ error: 'contact_blocked' });
       let sent: { externalMessageId?: string };
       try {
         sent = await mgr.sendMedia(conv.channel_id, conv.external_id, { buffer: buf, mime: d.mime, fileName, caption: caption || undefined });
       } catch (e) {
         if ((e as Error).message === 'channel_not_connected') return reply.code(409).send({ error: 'channel_not_connected' });
+        if (e instanceof SendError) return reply.code(429).send({ error: e.code });
         req.log.error({ err: e }, 'send media failed');
         return reply.code(502).send({ error: 'send_failed' });
       }

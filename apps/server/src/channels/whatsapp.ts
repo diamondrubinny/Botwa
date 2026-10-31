@@ -155,6 +155,12 @@ export class WhatsAppAdapter implements ChannelAdapter {
       events.onStatus('logged_out');
       return;
     }
+    // 403 = forbidden: WhatsApp refused this account (restricted / banned). Do NOT keep reconnecting - it makes things worse.
+    if (code === DisconnectReason.forbidden) {
+      this.stopped = true;
+      events.onStatus('restricted');
+      return;
+    }
     // 515 = restart required right after pairing; always reconnect immediately.
     const restart = code === DisconnectReason.restartRequired;
     // Never paired and QR window expired: stop instead of looping forever; user can press "link" again.
@@ -211,5 +217,12 @@ export class WhatsAppAdapter implements ChannelAdapter {
           : { document: buffer, mimetype: mime, fileName, caption };
     const res = await this.sock.sendMessage(externalContactId, content);
     return { externalMessageId: res?.key.id ?? undefined };
+  }
+
+  async typing(externalContactId: string, ms: number): Promise<void> {
+    if (!this.sock) return;
+    await this.sock.sendPresenceUpdate('composing', externalContactId);
+    await new Promise((r) => setTimeout(r, ms));
+    await this.sock.sendPresenceUpdate('paused', externalContactId);
   }
 }

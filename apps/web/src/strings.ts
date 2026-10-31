@@ -8,7 +8,7 @@ export const t = {
   nav: { inbox: 'שיחות', channels: 'ערוצים', team: 'צוות', account: 'החשבון שלי', a11y: 'הצהרת נגישות', privacy: 'פרטיות ועוגיות', logout: 'התנתקות' },
   roles: { admin: 'מנהל', supervisor: 'מפקח', agent: 'נציג' },
   status: {
-    stopped: 'לא פעיל', connecting: 'מתחבר…', qr: 'ממתין לסריקת QR', connected: 'מחובר', password: 'ממתין לסיסמת האימות הדו-שלבי של טלגרם', logged_out: 'מנותק (נדרשת סריקה מחדש)', error: 'שגיאה',
+    stopped: 'לא פעיל', connecting: 'מתחבר…', qr: 'ממתין לסריקת QR', connected: 'מחובר', password: 'ממתין לסיסמת האימות הדו-שלבי של טלגרם', restricted: 'הוגבל / נחסם על ידי הפלטפורמה (חשד)', logged_out: 'מנותק (נדרשת סריקה מחדש)', error: 'שגיאה',
   } as Record<string, string>,
   errors: {
     invalid_credentials: 'האימייל או הסיסמה שגויים.',
@@ -29,6 +29,10 @@ export const t = {
     bad_origin: `הכתובת שבה נכנסתם (${typeof location !== 'undefined' ? location.origin : ''}) אינה הכתובת הרשמית של המערכת. היכנסו מהכתובת הרשמית (למשל בלי www).`,
     rate_limited: 'יותר מדי ניסיונות. המתינו דקה ונסו שוב.',
     internal_error: 'שגיאת שרת. נסו שוב בעוד רגע, ואם זה חוזר פנו למנהל המערכת.',
+    contact_blocked: 'הלקוח חסום. בטלו את החסימה כדי לשלוח הודעה.',
+    send_throttled: 'קצב השליחה מוגבל כדי להגן על המספר מחסימה. נסו שוב בעוד כמה שניות.',
+    daily_limit: 'הגעתם למכסת ההודעות היומית של הערוץ (הגנה מחסימה). נסו שוב מחר או שנו את המכסה בהגדרות.',
+    queue_full: 'יותר מדי הודעות ממתינות לשליחה בערוץ. נסו שוב בעוד רגע.',
     forbidden: 'אין הרשאה לפעולה זו.',
     generic: 'אירעה שגיאה. נסו שוב.',
   } as Record<string, string>,

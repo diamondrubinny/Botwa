@@ -39,6 +39,10 @@ const schema = z.object({
   BACKUP_KEEP: z.coerce.number().int().min(1).max(365).default(14),
   // Hour of day (0-23, server local time) for the automatic daily backup. Unset = manual backups only.
   BACKUP_AUTO_HOUR: z.coerce.number().int().min(0).max(23).optional(),
+  // Optional: POST a JSON alert here when a channel is logged out / restricted / in error. Leave blank to disable.
+  ALERT_WEBHOOK_URL: z.string().url().optional(),
+  // Customers sending more than this many messages within 2 minutes are auto-blocked as flooders (0 = off).
+  FLOOD_LIMIT: z.coerce.number().int().min(0).max(1000).default(30),
   WEB_DIST: z.string().optional(),
   MESSAGE_RETENTION_DAYS: z.coerce.number().int().min(0).default(365),
   REQUIRE_MFA_FOR_PRIVILEGED: bool('true'),
