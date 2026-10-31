@@ -4,7 +4,9 @@ import { createReadStream, createWriteStream } from 'node:fs';
 import { chmod, mkdir, open, readdir, rename, stat, unlink } from 'node:fs/promises';
 import path from 'node:path';
 import { pipeline } from 'node:stream/promises';
-import { createGzip } from 'node:zlib';
+import { createGunzip, createGzip } from 'node:zlib';
+import { tmpdir } from 'node:os';
+import { mkdtemp, rm } from 'node:fs/promises';
 import type { Config } from './config.js';
 
 // File layout: "BOTWABK1" | iv(12) | AES-256-GCM(gzip(pg_dump plain SQL)) | tag(16). The key is derived (HKDF) from
@@ -94,5 +96,39 @@ export async function decryptBackup(cfg: Config, file: string, outFile: string):
     await pipeline(createReadStream(file, { start: head.length, end: size - 17 }), decipher, createWriteStream(outFile, { mode: 0o600 }));
   } finally {
     await fh.close();
+  }
+}
+
+export interface BackupCheck { ok: boolean; tables: number; bytes: number; reason?: string }
+
+/**
+ * Restore rehearsal without touching any database: authenticates and decrypts the file (GCM tag), gunzips it and checks that it is a
+ * complete pg_dump (has CREATE TABLE statements for the core tables and the "dump complete" trailer).
+ */
+export async function verifyBackup(cfg: Config, file: string): Promise<BackupCheck> {
+  const dir = await mkdtemp(path.join(tmpdir(), 'botwa-verify-'));
+  const gz = path.join(dir, 'x.sql.gz');
+  try {
+    await decryptBackup(cfg, file, gz);
+    let tail = '', carry = '', bytes = 0;
+    const tables = new Set<string>();
+    const sink = createGunzip();
+    sink.on('data', (c: Buffer) => {
+      bytes += c.length;
+      const text = carry + c.toString('utf8');
+      for (const m of text.matchAll(/CREATE TABLE (?:public\.)?(\w+)/g)) tables.add(m[1]!);
+      carry = text.slice(-200);
+      tail = (tail + c.toString('utf8')).slice(-400);
+    });
+    await pipeline(createReadStream(gz), sink);
+    const core = ['users', 'conversations', 'messages', 'contacts', 'channels'];
+    const missing = core.filter((t) => !tables.has(t));
+    if (missing.length) return { ok: false, tables: tables.size, bytes, reason: `missing tables: ${missing.join(', ')}` };
+    if (!/PostgreSQL database dump complete/.test(tail)) return { ok: false, tables: tables.size, bytes, reason: 'dump is truncated' };
+    return { ok: true, tables: tables.size, bytes };
+  } catch (e) {
+    return { ok: false, tables: 0, bytes: 0, reason: e instanceof Error ? e.message : 'unreadable' };
+  } finally {
+    await rm(dir, { recursive: true, force: true }).catch(() => undefined);
   }
 }

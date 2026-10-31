@@ -6,7 +6,7 @@ import path from 'node:path';
 import { gunzipSync } from 'node:zlib';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { buildApp } from '../src/app.js';
-import { decryptBackup } from '../src/backup.js';
+import { decryptBackup, verifyBackup } from '../src/backup.js';
 import { ChannelManager } from '../src/channels/manager.js';
 import type { AdapterContext, AdapterFactory, ChannelAdapter } from '../src/channels/types.js';
 import { loadConfig } from '../src/config.js';
@@ -243,6 +243,20 @@ describe('routing, csv, search, related, backups', () => {
       await expect(decryptBackup(cfg, path.join(backupDir, 'tampered.bin'), path.join(backupDir, 'x1'))).rejects.toThrow();
       const otherKey = loadConfig({ NODE_ENV: 'test', DATABASE_URL: DB_URL, ENCRYPTION_KEY: randomBytes(32).toString('base64'), APP_ORIGIN: ORIGIN });
       await expect(decryptBackup(otherKey, path.join(backupDir, name), path.join(backupDir, 'x2'))).rejects.toThrow();
+    });
+
+    it('verify endpoint proves a backup is complete and usable; wrong key fails', async () => {
+      const [{ name }] = (await call('GET', '/backups', 'admin@t.io')).json();
+      const ok = await call('POST', `/backups/${name}/verify`, 'admin@t.io');
+      expect(ok.statusCode).toBe(200);
+      expect(ok.json()).toMatchObject({ ok: true });
+      expect(ok.json().tables).toBeGreaterThan(10);
+      expect((await call('POST', `/backups/${name}/verify`, 'a1@t.io')).statusCode).toBe(403);
+      expect((await call('POST', '/backups/nope/verify', 'admin@t.io')).statusCode).toBe(404);
+      const otherKey = loadConfig({ NODE_ENV: 'test', DATABASE_URL: DB_URL, ENCRYPTION_KEY: randomBytes(32).toString('base64'), APP_ORIGIN: ORIGIN });
+      expect(await verifyBackup(otherKey, path.join(backupDir, name))).toMatchObject({ ok: false });
+      await writeFile(path.join(backupDir, 'truncated.bin'), (await readFile(path.join(backupDir, name))).subarray(0, 300));
+      expect((await verifyBackup(cfg, path.join(backupDir, 'truncated.bin'))).ok).toBe(false);
     });
 
     it('rejects path traversal / odd names; prunes to BACKUP_KEEP; delete works', async () => {

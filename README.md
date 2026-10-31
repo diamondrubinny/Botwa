@@ -72,6 +72,7 @@ Agents see only conversations assigned to them or unassigned; supervisors/admins
 ## API (P19)
 - `POST /conversations/:id/snooze {minutes}` (0 = wake), `POST /conversations/:id/star {starred}`, `POST /conversations/:id/unread`; list filters `snoozed=true`, `starred=true`.
 - `GET /push/key`, `POST /push/subscribe`, `POST /push/unsubscribe` (Web Push; HTTPS required, endpoints limited to FCM/Mozilla/Apple/Windows push services).
+- `POST /backups/:name/verify` (restore rehearsal, no DB touched); CLI: `node dist/scripts/verify-backup.js <file>`.
 - `/reports/summary` now also returns `byHour` and `topTags`.
 
 ## Attachments (images, PDF, Word/Excel, audio, MP4)

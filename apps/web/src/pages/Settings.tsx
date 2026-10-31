@@ -166,6 +166,11 @@ export function Settings({ me }: { me: Me }) {
                   <td>{new Date(b.createdAt).toLocaleString('he-IL', { dateStyle: 'short', timeStyle: 'short' })}</td>
                   <td>{fmtMB(b.size)}</td>
                   <td><div className="row">
+                    <button onClick={async () => {
+                      setBkMsg({ ok: true, text: 'בודק…' });
+                      try { const r = await api<{ ok: boolean; tables: number; reason?: string }>('POST', `/backups/${b.name}/verify`); setBkMsg(r.ok ? { ok: true, text: `הגיבוי תקין (${r.tables} טבלאות).` } : { ok: false, text: `הגיבוי פגום או לא נפתח: ${r.reason ?? ''}` }); }
+                      catch { setBkMsg({ ok: false, text: 'הבדיקה נכשלה.' }); }
+                    }}>בדיקת תקינות<span className="sr-only"> {b.name}</span></button>
                     <a className="btn" href={`/backups/${b.name}`} download>הורדה<span className="sr-only"> {b.name}</span></a>
                     <button className="danger" onClick={() => setDelBk(b.name)}>מחיקה<span className="sr-only"> {b.name}</span></button>
                   </div></td>

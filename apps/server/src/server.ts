@@ -1,7 +1,7 @@
 import { buildApp } from './app.js';
 import { ChannelManager } from './channels/manager.js';
 import { purgeOldMessages } from './inbox.js';
-import { createBackup } from './backup.js';
+import { createBackup, verifyBackup, backupPath } from './backup.js';
 import { MediaService } from './media/store.js';
 import { loadConfig } from './config.js';
 import { createDb } from './db.js';
@@ -27,7 +27,7 @@ if (cfg.BACKUP_AUTO_HOUR !== undefined) {
     const day = now.toDateString();
     if (now.getHours() === cfg.BACKUP_AUTO_HOUR && day !== lastDay) {
       lastDay = day;
-      createBackup(cfg).then((b) => app.log.info({ backup: b.name }, 'automatic backup done')).catch((err) => app.log.error({ err }, 'automatic backup failed'));
+      createBackup(cfg).then(async (b) => { const v = await verifyBackup(cfg, backupPath(cfg, b.name)); (v.ok ? app.log.info : app.log.error).call(app.log, { backup: b.name, verified: v.ok, reason: v.reason }, 'automatic backup done'); }).catch((err) => app.log.error({ err }, 'automatic backup failed'));
     }
   }, 60_000).unref();
 }
