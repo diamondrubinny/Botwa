@@ -10,7 +10,7 @@ export async function ingestInbound(db: Db, channelId: string, m: InboundMessage
     const contact = await client.query(
       `INSERT INTO contacts (channel_id, external_id, display_name) VALUES ($1,$2,$3)
        ON CONFLICT (channel_id, external_id) DO UPDATE SET display_name = COALESCE(EXCLUDED.display_name, contacts.display_name)
-       RETURNING id, blocked`,
+       RETURNING id, blocked, opted_out`,
       [channelId, m.externalContactId, m.contactName ?? null],
     );
     const conv = await client.query(
@@ -47,7 +47,7 @@ export async function ingestInbound(db: Db, channelId: string, m: InboundMessage
       }
     }
     await client.query('COMMIT');
-    return { conversationId: convId, messageId: ins.rows[0]?.id as string | undefined, duplicate: !ins.rowCount, needsRouting, blocked, flooded, contactId: contact.rows[0].id as string };
+    return { conversationId: convId, messageId: ins.rows[0]?.id as string | undefined, duplicate: !ins.rowCount, needsRouting, blocked, flooded, contactId: contact.rows[0].id as string, optedOut: contact.rows[0].opted_out as boolean };
   } catch (e) {
     await client.query('ROLLBACK');
     throw e;

@@ -4,6 +4,7 @@ import type { Config } from '../config.js';
 import type { Db } from '../db.js';
 import { ingestInbound } from '../inbox.js';
 import { decide, loadBot, type BotConfig } from '../bot.js';
+import { isStopMessage } from '../optout.js';
 import { isOpen } from '../business-hours.js';
 import { autoAssign } from '../routing.js';
 import { audit } from '../audit.js';
@@ -11,7 +12,7 @@ import { MediaService } from '../media/store.js';
 import { loadBusinessHours } from '../routes/settings.js';
 import { sendAlert } from '../alerts.js';
 import { createAuthStore } from './auth-store.js';
-import { ChannelSender, loadSending as loadSendingRaw, TEST_SENDING } from './sender.js';
+import { ChannelSender, loadSending as loadSendingRaw, SendError, TEST_SENDING } from './sender.js';
 import type { AdapterFactory, ChannelAdapter, ChannelStatus, ChannelType, OutboundMedia, StartOptions } from './types.js';
 import { TelegramAdapter } from './telegram.js';
 import { WhatsAppAdapter } from './whatsapp.js';
@@ -50,6 +51,14 @@ export class ChannelManager {
   ) {
     this.bus.setMaxListeners(100);
     this.sender = new ChannelSender(db);
+    this.sender.onAutoPause = (channelId, until, failures) => {
+      void (async () => {
+        await this.db.query('INSERT INTO channel_events (channel_id, kind, detail) VALUES ($1,$2,$3)', [channelId, 'auto_paused', `${failures} failures in a row, paused until ${until.toISOString()}`]).catch(() => undefined);
+        await audit(this.db, { action: 'channel.auto_pause', target: channelId, meta: { failures, until: until.toISOString() } }).catch(() => undefined);
+        const { rows } = await this.db.query('SELECT label FROM channels WHERE id=$1', [channelId]).catch(() => ({ rows: [] as { label: string }[] }));
+        void sendAlert(this.cfg, `⏸️ הערוץ "${rows[0]?.label ?? channelId}" הושהה אוטומטית אחרי ${failures} כשלי שליחה ברצף (עד ${until.toLocaleTimeString('he-IL')}). ייתכן שהפלטפורמה דוחה הודעות.`, { channelId, failures });
+      })();
+    };
     this.sendingFallback = cfg.NODE_ENV === 'test' ? TEST_SENDING : undefined;
   }
 
@@ -119,8 +128,18 @@ export class ChannelManager {
           }
           if (r.blocked) return; // blocked contact: stored as evidence, nothing else happens (no files, bot, away reply, routing, notification)
           if (r.messageId && m.media) await this.media.ingestInbound(r.messageId, m.media);
+          const stop = !!r.messageId && !m.media && isStopMessage(m.text);
+          if (stop) {
+            await this.db.query('UPDATE contacts SET opted_out = true, opted_out_at = now() WHERE id = $1', [r.contactId]);
+            await this.db.query(`INSERT INTO conversation_notes (conversation_id, body) VALUES ($1, 'הלקוח ביקש להפסיק לקבל הודעות. לא יישלחו אליו הודעות אוטומטיות או הודעות צוות עד שיכתוב שוב.')`, [r.conversationId]);
+          } else if (r.optedOut) {
+            await this.db.query('UPDATE contacts SET opted_out = false, opted_out_at = NULL WHERE id = $1', [r.contactId]); // they wrote again: conversation is welcome
+          }
           const bot = r.messageId ? await loadBot(this.db) : null;
-          if (r.messageId && bot?.enabled) {
+          if (r.messageId && stop) {
+            // customer said stop: no bot, no away reply - a person decides what happens next
+            if (r.needsRouting) await autoAssign(this.db, r.conversationId).catch(() => null);
+          } else if (r.messageId && bot?.enabled) {
             // the menu bot owns new conversations; people are assigned only at hand-over
             await this.runBot(channelId, r.conversationId, m.externalContactId, bot, m.media ? null : m.text).catch(() => undefined);
           } else if (r.messageId) {
@@ -185,6 +204,7 @@ export class ChannelManager {
   async sendText(channelId: string, externalContactId: string, text: string, opts: { background?: boolean } = {}) {
     const a = this.adapters.get(channelId);
     if (!a || this.statuses.get(channelId) !== 'connected') throw new Error('channel_not_connected');
+    await this.assertNotPaused(channelId);
     const settings = await this.loadSending();
     return this.sender.run(
       channelId,
@@ -195,6 +215,36 @@ export class ChannelManager {
       },
       { maxWaitMs: opts.background ? 45_000 : 8_000 },
     );
+  }
+
+  private async assertNotPaused(channelId: string): Promise<void> {
+    const { rows } = await this.db.query('SELECT paused FROM channels WHERE id = $1', [channelId]);
+    if (rows[0]?.paused) throw new SendError('channel_paused');
+  }
+
+  /** Manual emergency stop/resume of ALL outbound messages of a channel (incoming messages keep arriving). */
+  async setPaused(channelId: string, paused: boolean): Promise<void> {
+    await this.db.query('UPDATE channels SET paused = $2, paused_at = CASE WHEN $2 THEN now() END WHERE id = $1', [channelId, paused]);
+    if (!paused) this.sender.resume(channelId);
+    await this.db.query('INSERT INTO channel_events (channel_id, kind) VALUES ($1,$2)', [channelId, paused ? 'paused' : 'resumed']).catch(() => undefined);
+  }
+
+  isAutoPausedUntil(channelId: string): number { return this.sender.pausedUntil(channelId); }
+
+  /** Read receipts for the customer's unread messages (what a person does when opening a chat). Best effort, never throws. */
+  async markRead(channelId: string, conversationId: string, externalContactId: string): Promise<void> {
+    try {
+      const a = this.adapters.get(channelId);
+      if (!a?.markRead || this.statuses.get(channelId) !== 'connected') return;
+      if (!(await this.loadSending()).readReceipts) return;
+      const { rows } = await this.db.query(
+        `SELECT id, external_id FROM messages WHERE conversation_id = $1 AND direction = 'in' AND NOT read_sent AND external_id IS NOT NULL ORDER BY created_at DESC LIMIT 50`,
+        [conversationId],
+      );
+      if (rows.length === 0) return;
+      await a.markRead(externalContactId, rows.map((r) => r.external_id as string));
+      await this.db.query('UPDATE messages SET read_sent = true WHERE id = ANY($1::uuid[])', [rows.map((r) => r.id)]);
+    } catch { /* cosmetic */ }
   }
 
   /** Send-rate view for the health panel. */
@@ -271,6 +321,7 @@ export class ChannelManager {
     const a = this.adapters.get(channelId);
     if (!a || this.statuses.get(channelId) !== 'connected') throw new Error('channel_not_connected');
     if (!a.sendMedia) throw new Error('media_unsupported');
+    await this.assertNotPaused(channelId);
     const send = a.sendMedia.bind(a);
     return this.sender.run(channelId, await this.loadSending(), () => send(externalContactId, media), { maxWaitMs: 8_000 });
   }

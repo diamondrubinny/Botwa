@@ -240,6 +240,12 @@ export function Inbox({ me }: { me: Me }) {
                   {isManager && <> <button onClick={() => act(async () => { await api('POST', `/contacts/${sel.contactRowId}/unblock`); setLive((n) => n + 1); })}>ביטול חסימה</button></>}
                 </p>
               )}
+              {sel.optedOut && (
+                <p className="banner" role="status">
+                  הלקוח ביקש להפסיק לקבל הודעות. לא יישלחו אליו הודעות עד שיכתוב שוב.
+                  {isManager && <> <button onClick={() => act(async () => { await api('POST', `/contacts/${sel.contactRowId}/opt-in`); setLive((n) => n + 1); })}>החזרת הסכמה</button></>}
+                </p>
+              )}
               {isManager && !sel.blocked && (
                 <div style={{ marginBottom: '.5rem' }}>
                   <button className="danger" onClick={() => setBlockPanel(!blockPanel)} aria-expanded={blockPanel}>חסימת לקוח</button>
@@ -315,7 +321,7 @@ export function Inbox({ me }: { me: Me }) {
                     onChange={(e) => setFile(e.target.files?.[0] ?? null)} aria-describedby="attach-h" />
                   <p id="attach-h" className="hint">עד 16MB. הקובץ נסרק באנטי-וירוס לפני השליחה.</p>
                 </div>
-                <button className="primary" type="submit" disabled={sending || !!sel.blocked || (!text.trim() && !file)}>{sending ? 'שולח…' : 'שליחה'}</button>
+                <button className="primary" type="submit" disabled={sending || !!sel.blocked || !!sel.optedOut || (!text.trim() && !file)}>{sending ? 'שולח…' : 'שליחה'}</button>
               </form>
 
               {related.length > 0 && (

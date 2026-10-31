@@ -225,4 +225,9 @@ export class WhatsAppAdapter implements ChannelAdapter {
     await new Promise((r) => setTimeout(r, ms));
     await this.sock.sendPresenceUpdate('paused', externalContactId);
   }
+
+  async markRead(externalContactId: string, externalMessageIds: string[]): Promise<void> {
+    if (!this.sock || externalMessageIds.length === 0) return;
+    await this.sock.readMessages(externalMessageIds.map((id) => ({ remoteJid: externalContactId, id, fromMe: false })));
+  }
 }

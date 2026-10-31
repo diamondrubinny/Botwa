@@ -80,7 +80,7 @@ beforeAll(async () => {
 afterAll(async () => { await mgr.stopAll(); await app.close(); await db.end(); hook.close(); });
 
 describe('send pacing (unit, fake clock)', () => {
-  const S: SendingSettings = { minDelayMs: 1000, maxDelayMs: 3000, perMinute: 3, perDay: 1000, warmup: false, typing: false };
+  const S: SendingSettings = { ...DEFAULT_SENDING, minDelayMs: 1000, maxDelayMs: 3000, perMinute: 3, perDay: 1000, warmup: false, typing: false };
   const clock = () => {
     let t = 1_000_000;
     const sleeps: number[] = [];

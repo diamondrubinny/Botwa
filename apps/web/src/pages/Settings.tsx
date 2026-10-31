@@ -103,6 +103,12 @@ export function Settings() {
               <div className="field"><label htmlFor="s-pm">מכסה לדקה</label><input id="s-pm" type="number" min={1} max={120} dir="ltr" value={snd.perMinute} onChange={(e) => setSnd({ ...snd, perMinute: Number(e.target.value) })} /></div>
               <div className="field"><label htmlFor="s-pd">מכסה ליום (לכל ערוץ)</label><input id="s-pd" type="number" min={1} max={20000} dir="ltr" value={snd.perDay} onChange={(e) => setSnd({ ...snd, perDay: Number(e.target.value) })} /></div>
             </div>
+            <div className="row">
+              <div className="field"><label htmlFor="s-rw">חלון מענה (שעות): לענות רק ללקוח שכתב בחלון הזה (0 = ללא הגבלה)</label><input id="s-rw" type="number" min={0} max={720} dir="ltr" value={snd.replyWindowHours} onChange={(e) => setSnd({ ...snd, replyWindowHours: Number(e.target.value) })} aria-describedby="s-rw-h" /><p id="s-rw-h" className="hint">הודעה יזומה ללקוח שלא פנה היא הסיבה העיקרית לחסימות. מומלץ להשאיר 168 (שבוע).</p></div>
+              <div className="field"><label htmlFor="s-fp">עצירה אוטומטית אחרי כמה כשלי שליחה ברצף (0 = כבוי)</label><input id="s-fp" type="number" min={0} max={20} dir="ltr" value={snd.failuresBeforePause} onChange={(e) => setSnd({ ...snd, failuresBeforePause: Number(e.target.value) })} /></div>
+              <div className="field"><label htmlFor="s-pm2">משך העצירה האוטומטית (דקות)</label><input id="s-pm2" type="number" min={1} max={1440} dir="ltr" value={snd.pauseMinutes} onChange={(e) => setSnd({ ...snd, pauseMinutes: Number(e.target.value) })} /></div>
+            </div>
+            <div className="field"><label><input type="checkbox" style={{ width: 'auto', minHeight: 0, marginInlineEnd: '.5rem' }} checked={snd.readReceipts} onChange={(e) => setSnd({ ...snd, readReceipts: e.target.checked })} />לסמן הודעות לקוח כנקראו כשנציג פותח את השיחה</label></div>
             <div className="field"><label><input type="checkbox" style={{ width: 'auto', minHeight: 0, marginInlineEnd: '.5rem' }} checked={snd.warmup} onChange={(e) => setSnd({ ...snd, warmup: e.target.checked })} />חימום למספר חדש (מכסה יומית מתחילה ב-20 ועולה ב-40 בכל יום)</label></div>
             <div className="field"><label><input type="checkbox" style={{ width: 'auto', minHeight: 0, marginInlineEnd: '.5rem' }} checked={snd.typing} onChange={(e) => setSnd({ ...snd, typing: e.target.checked })} />להציג "מקליד…" בווצאפ לפני שליחה</label></div>
             <button className="primary" type="submit">שמירה</button>

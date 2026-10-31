@@ -32,4 +32,14 @@ export function contactRoutes(app: FastifyInstance, db: Db) {
     await audit(db, { actorId: req.user!.id, action: 'contact.unblock', target: p.data.id, ip: req.ip });
     return { ok: true };
   });
+
+  // The customer asked to stop (or a message was misread as "stop"): a manager can restore contact.
+  app.post('/contacts/:id/opt-in', { preHandler: managers }, async (req, reply) => {
+    const p = idParam.safeParse(req.params);
+    if (!p.success) return reply.code(400).send({ error: 'bad_request' });
+    const r = await db.query('UPDATE contacts SET opted_out = false, opted_out_at = NULL WHERE id = $1', [p.data.id]);
+    if (!r.rowCount) return reply.code(404).send({ error: 'not_found' });
+    await audit(db, { actorId: req.user!.id, action: 'contact.opt_in', target: p.data.id, ip: req.ip });
+    return { ok: true };
+  });
 }

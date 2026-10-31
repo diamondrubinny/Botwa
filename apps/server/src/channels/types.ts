@@ -55,6 +55,8 @@ export interface ChannelAdapter {
   sendText(externalContactId: string, text: string): Promise<{ externalMessageId?: string }>;
   /** Show a "typing" indicator for `ms` before a message is sent (WhatsApp). Best effort. */
   typing?(externalContactId: string, ms: number): Promise<void>;
+  /** Tell the platform the customer's messages were read (best effort). */
+  markRead?(externalContactId: string, externalMessageIds: string[]): Promise<void>;
   sendMedia?(externalContactId: string, media: OutboundMedia): Promise<{ externalMessageId?: string }>;
 }
 

@@ -1,11 +1,11 @@
 import { createReadStream } from 'node:fs';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { loadAccessible } from '../access.js';
+import { loadAccessible, sendBlock } from '../access.js';
 import { audit } from '../audit.js';
 import { requireAuth } from '../auth.js';
 import type { ChannelManager } from '../channels/manager.js';
-import { SendError } from '../channels/sender.js';
+import { loadSending, SendError } from '../channels/sender.js';
 import type { Db } from '../db.js';
 import type { MediaService } from '../media/store.js';
 import { detect, sanitizeFileName } from '../media/validate.js';
@@ -73,7 +73,8 @@ export function mediaRoutes(app: FastifyInstance, db: Db, mgr: ChannelManager, m
       }
       if (scan.status !== 'clean') return reply.code(503).send({ error: 'scanner_unavailable' });
 
-      if (conv.blocked) return reply.code(409).send({ error: 'contact_blocked' });
+      const blockedBy = await sendBlock(db, conv, (await loadSending(db)).replyWindowHours);
+      if (blockedBy) return reply.code(409).send({ error: blockedBy });
       let sent: { externalMessageId?: string };
       try {
         sent = await mgr.sendMedia(conv.channel_id, conv.external_id, { buffer: buf, mime: d.mime, fileName, caption: caption || undefined });

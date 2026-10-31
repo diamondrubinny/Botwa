@@ -205,4 +205,10 @@ export class TelegramAdapter implements ChannelAdapter {
       throw e;
     }
   }
+
+  async markRead(externalContactId: string): Promise<void> {
+    if (!this.client) return;
+    const { userId, accessHash } = parseTgContactId(externalContactId);
+    await this.client.markAsRead(new Api.InputPeerUser({ userId: bigInt(userId), accessHash: bigInt(accessHash) }));
+  }
 }

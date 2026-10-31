@@ -11,13 +11,20 @@ export const sendingSchema = z.object({
   warmup: z.boolean(),
   /** show "typing…" (WhatsApp) for a time proportional to the message length before sending */
   typing: z.boolean(),
+  /** staff may only write to a customer who messaged within this many hours (0 = no limit). Unsolicited messages are what gets numbers banned. */
+  replyWindowHours: z.number().int().min(0).max(720).default(168),
+  /** after this many consecutive send failures the channel pauses itself (0 = never) */
+  failuresBeforePause: z.number().int().min(0).max(20).default(3),
+  pauseMinutes: z.number().int().min(1).max(1440).default(15),
+  /** mark customer messages as read when staff open the conversation (what a person does) */
+  readReceipts: z.boolean().default(true),
 }).refine((v) => v.maxDelayMs >= v.minDelayMs, { message: 'maxDelayMs must be >= minDelayMs' });
 export type SendingSettings = z.infer<typeof sendingSchema>;
 
-export const DEFAULT_SENDING: SendingSettings = { minDelayMs: 1500, maxDelayMs: 4000, perMinute: 12, perDay: 500, warmup: true, typing: true };
+export const DEFAULT_SENDING: SendingSettings = { minDelayMs: 1500, maxDelayMs: 4000, perMinute: 12, perDay: 500, warmup: true, typing: true, replyWindowHours: 168, failuresBeforePause: 3, pauseMinutes: 15, readReceipts: true };
 
 /** Unthrottled profile used when NODE_ENV=test so the suite is fast; production uses DEFAULT_SENDING unless configured. */
-export const TEST_SENDING: SendingSettings = { minDelayMs: 0, maxDelayMs: 0, perMinute: 120, perDay: 20_000, warmup: false, typing: false };
+export const TEST_SENDING: SendingSettings = { minDelayMs: 0, maxDelayMs: 0, perMinute: 120, perDay: 20_000, warmup: false, typing: false, replyWindowHours: 168, failuresBeforePause: 3, pauseMinutes: 15, readReceipts: true };
 
 export async function loadSending(db: Db, fallback: SendingSettings = DEFAULT_SENDING): Promise<SendingSettings> {
   const { rows } = await db.query(`SELECT value FROM settings WHERE key = 'sending'`);
@@ -28,10 +35,10 @@ export async function loadSending(db: Db, fallback: SendingSettings = DEFAULT_SE
 export const warmupCap = (s: SendingSettings, channelAgeDays: number) => (s.warmup ? Math.min(s.perDay, 20 + 40 * Math.max(0, Math.floor(channelAgeDays))) : s.perDay);
 
 export class SendError extends Error {
-  constructor(public code: 'send_throttled' | 'daily_limit' | 'queue_full') { super(code); }
+  constructor(public code: 'send_throttled' | 'daily_limit' | 'queue_full' | 'channel_paused') { super(code); }
 }
 
-interface Lane { tail: Promise<unknown>; last: number; recent: number[]; pending: number }
+interface Lane { tail: Promise<unknown>; last: number; recent: number[]; pending: number; failures: number; pausedUntil: number }
 const MAX_QUEUE = 50;
 
 /**
@@ -40,11 +47,17 @@ const MAX_QUEUE = 50;
  */
 export class ChannelSender {
   private lanes = new Map<string, Lane>();
+  /** Called when a channel pauses itself after repeated failures (record an event / alert). */
+  onAutoPause?: (channelId: string, until: Date, failures: number) => void;
+
   constructor(private readonly db: Db, private readonly now: () => number = Date.now, private readonly sleep: (ms: number) => Promise<void> = (ms) => new Promise((r) => setTimeout(r, ms))) {}
+
+  pausedUntil(channelId: string): number { return this.lanes.get(channelId)?.pausedUntil ?? 0; }
+  resume(channelId: string): void { const l = this.lanes.get(channelId); if (l) { l.pausedUntil = 0; l.failures = 0; } }
 
   private lane(id: string): Lane {
     let l = this.lanes.get(id);
-    if (!l) { l = { tail: Promise.resolve(), last: 0, recent: [], pending: 0 }; this.lanes.set(id, l); }
+    if (!l) { l = { tail: Promise.resolve(), last: 0, recent: [], pending: 0, failures: 0, pausedUntil: 0 }; this.lanes.set(id, l); }
     return l;
   }
 
@@ -70,6 +83,7 @@ export class ChannelSender {
     lane.pending++;
     const maxWait = opts.maxWaitMs ?? 25_000;
     const job = lane.tail.catch(() => undefined).then(async () => {
+      if (this.now() < lane.pausedUntil) throw new SendError('channel_paused');
       const u = await this.usage(channelId);
       if (u.day >= warmupCap(settings, u.ageDays)) throw new SendError('daily_limit');
       const t0 = this.now();
@@ -82,7 +96,20 @@ export class ChannelSender {
       if (wait > 0) await this.sleep(wait);
       lane.last = this.now();
       lane.recent.push(lane.last);
-      return fn();
+      try {
+        const out = await fn();
+        lane.failures = 0;
+        return out;
+      } catch (e) {
+        // repeated failures usually mean the platform is rejecting us: stop for a while instead of hammering it
+        lane.failures++;
+        if (settings.failuresBeforePause > 0 && lane.failures >= settings.failuresBeforePause) {
+          lane.pausedUntil = this.now() + settings.pauseMinutes * 60_000;
+          this.onAutoPause?.(channelId, new Date(lane.pausedUntil), lane.failures);
+          lane.failures = 0;
+        }
+        throw e;
+      }
     });
     lane.tail = job;
     try { return await job; } finally { lane.pending--; }

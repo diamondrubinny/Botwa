@@ -50,6 +50,7 @@ Status legend: ✅ done in code/tests · 🔲 must be done by the operator · �
 
 ## Account-ban risk (WhatsApp/Telegram) and abuse
 - ✅ Mitigations in code: per-channel paced sending, per-minute/day caps, new-number warm-up, typing indicator, bot/away loop guards, restriction detection (WhatsApp 403, Telegram PEER_FLOOD/..._BAN) that stops reconnecting, health panel, optional webhook alert; flood auto-block and manual blocking of abusive customers (evidence kept)
+- ✅ Also: reply-only policy window, opt-out handling, auto-pause after failures, manual emergency pause, read receipts, risk level. Not implemented on purpose: device/fingerprint spoofing, proxy rotation or any other detection evasion (that would be evading the platforms' abuse controls)
 - ⚠️ **These reduce, not remove, the risk.** The clients are unofficial and violate the platforms' terms; a ban can happen at any time regardless of pacing. Use a dedicated number, tell customers an alternative contact channel, keep backups of the contact list, never use it for bulk/marketing messages, and consider the official WhatsApp Business Cloud API for the long term.
 - 🔲 Keep defaults (perDay 500, perMinute 12) or lower them; keep warm-up on for new numbers; watch the health panel daily during the first weeks
 - 🔲 Set `ALERT_WEBHOOK_URL` (e.g. a Slack/Discord channel) so a logout/restriction is noticed quickly

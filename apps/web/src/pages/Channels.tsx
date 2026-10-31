@@ -4,6 +4,11 @@ import { ConfirmDialog } from '../components/ConfirmDialog';
 import { usePoll } from '../hooks';
 import { errText, t } from '../strings';
 
+const RISK = { low: 'נמוך', medium: 'בינוני', high: 'גבוה' } as const;
+const RISK_WHY: Record<string, string> = {
+  restricted: 'החשבון הוגבל/נחסם', auto_paused_recently: 'עצירה אוטומטית ב-24 שעות האחרונות', cap_near: 'קרוב למכסה היומית', cap_half: 'מעל חצי מהמכסה היומית',
+  outbound_heavy: 'הרבה יותר הודעות יוצאות מנכנסות', new_number_busy: 'מספר חדש עם נפח שליחה גבוה',
+};
 const WARN: Record<string, string> = {
   restricted: 'החשבון הוגבל או נחסם (חשד). עצרו שליחה אוטומטית ובדקו את הטלפון/האפליקציה. אל תקשרו מחדש שוב ושוב.',
   logged_out: 'החשבון מנותק. נדרש קישור מחדש.',
@@ -50,13 +55,24 @@ export function Channels({ isAdmin }: { isAdmin: boolean }) {
           <div style={{ overflowX: 'auto' }}>
             <table>
               <caption className="sr-only">מצב ערוצים, כמות הודעות שנשלחו מול המכסה, ואזהרות</caption>
-              <thead><tr><th scope="col">ערוץ</th><th scope="col">מצב</th><th scope="col">נשלחו ב-24 שעות</th><th scope="col">אזהרות</th><th scope="col">אירועים אחרונים</th></tr></thead>
+              <thead><tr><th scope="col">ערוץ</th><th scope="col">מצב</th><th scope="col">נשלחו ב-24 שעות</th><th scope="col">סיכון חסימה</th><th scope="col">אזהרות</th><th scope="col">אירועים אחרונים</th></tr></thead>
               <tbody>
                 {health.map((h) => (
                   <tr key={h.id}>
                     <th scope="row">{h.label}</th>
                     <td><span className={`badge ${h.status}`}>{t.status[h.status] ?? h.status}</span></td>
                     <td>{h.sentLast24h} / {h.dailyCap}{h.warnings.includes('warming_up') ? ' (חימום מספר חדש)' : ''}</td>
+                    <td>
+                      <strong className={h.risk.level === 'low' ? 'ok' : 'error'}>{RISK[h.risk.level]}</strong>
+                      {h.risk.reasons.length > 0 && <ul style={{ margin: 0, paddingInlineStart: '1rem' }}>{h.risk.reasons.map((r) => <li key={r}><small>{RISK_WHY[r] ?? r}</small></li>)}</ul>}
+                      <div style={{ marginTop: '.4rem' }}>
+                        {h.paused
+                          ? <button onClick={() => run(() => api('POST', `/channels/${h.id}/resume`))}>חידוש שליחה<span className="sr-only"> {h.label}</span></button>
+                          : <button className="danger" onClick={() => run(() => api('POST', `/channels/${h.id}/pause`))}>עצירת חירום של שליחה<span className="sr-only"> {h.label}</span></button>}
+                      </div>
+                      {h.paused && <p className="error" role="status">השליחה מושהית ידנית.</p>}
+                      {h.autoPausedUntil && <p className="error" role="status">הושהה אוטומטית עד {new Date(h.autoPausedUntil).toLocaleTimeString('he-IL')} עקב כשלי שליחה.</p>}
+                    </td>
                     <td>
                       {h.warnings.length === 0 ? '—' : (
                         <ul style={{ margin: 0, paddingInlineStart: '1rem' }}>

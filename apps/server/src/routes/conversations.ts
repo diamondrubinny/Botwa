@@ -1,10 +1,10 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { audit } from '../audit.js';
-import { isManager, loadAccessible } from '../access.js';
+import { isManager, loadAccessible, sendBlock } from '../access.js';
 import { requireAuth } from '../auth.js';
 import type { ChannelManager } from '../channels/manager.js';
-import { SendError } from '../channels/sender.js';
+import { loadSending, SendError } from '../channels/sender.js';
 import type { Db } from '../db.js';
 import { MediaService } from '../media/store.js';
 
@@ -28,7 +28,7 @@ export function conversationRoutes(app: FastifyInstance, db: Db, mgr: ChannelMan
     const u = req.user!;
     const { rows } = await db.query(
       `SELECT c.id, c.channel_id AS "channelId", c.status, c.assigned_to AS "assignedTo", c.unread_count AS "unreadCount",
-              c.last_message_at AS "lastMessageAt", ct.display_name AS "contactName", ct.external_id AS "contactId", ct.id AS "contactRowId", ct.blocked AS "blocked", ct.blocked_reason AS "blockedReason",
+              c.last_message_at AS "lastMessageAt", ct.display_name AS "contactName", ct.external_id AS "contactId", ct.id AS "contactRowId", ct.blocked AS "blocked", ct.opted_out AS "optedOut", ct.blocked_reason AS "blockedReason",
               ch.label AS "channelLabel", c.last_message_at AS "lastActivity",
               c.bot_state AS "botState",
               (SELECT CASE WHEN lm.direction = 'in' AND c.status = 'open' AND c.bot_state IS DISTINCT FROM 'menu' THEN lm.created_at END
@@ -99,8 +99,10 @@ export function conversationRoutes(app: FastifyInstance, db: Db, mgr: ChannelMan
   app.post('/conversations/:id/read', { preHandler: any }, async (req, reply) => {
     const p = idParam.safeParse(req.params);
     if (!p.success) return reply.code(400).send({ error: 'bad_request' });
-    if (!(await loadAccessible(db, req.user!, p.data.id))) return reply.code(404).send({ error: 'not_found' });
+    const conv = await loadAccessible(db, req.user!, p.data.id);
+    if (!conv) return reply.code(404).send({ error: 'not_found' });
     await db.query('UPDATE conversations SET unread_count = 0 WHERE id = $1', [p.data.id]);
+    if (!conv.blocked) await mgr.markRead(conv.channel_id, conv.id, conv.external_id); // "seen" receipts, like a person opening the chat
     return { ok: true };
   });
 
@@ -111,7 +113,8 @@ export function conversationRoutes(app: FastifyInstance, db: Db, mgr: ChannelMan
     const u = req.user!;
     const conv = await loadAccessible(db, u, p.data.id);
     if (!conv) return reply.code(404).send({ error: 'not_found' });
-    if (conv.blocked) return reply.code(409).send({ error: 'contact_blocked' });
+    const blockedBy = await sendBlock(db, conv, (await loadSending(db)).replyWindowHours);
+    if (blockedBy) return reply.code(409).send({ error: blockedBy });
     let sent: { externalMessageId?: string };
     try {
       sent = await mgr.sendText(conv.channel_id, conv.external_id, b.data.text);
