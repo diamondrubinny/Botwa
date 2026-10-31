@@ -1,7 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { buildApp } from '../src/app.js';
-import { DEFAULT_BOT, decide, formatMenu, normalize, type BotConfig } from '../src/bot.js';
+import { botSchema, DEFAULT_BOT, decide, formatMenu, normalize, waLink, type BotConfig } from '../src/bot.js';
 import { DEFAULT_HOURS } from '../src/business-hours.js';
 import { ChannelManager } from '../src/channels/manager.js';
 import type { AdapterContext, AdapterFactory, ChannelAdapter } from '../src/channels/types.js';
@@ -53,6 +53,25 @@ describe('decide (pure)', () => {
     expect(decide({ ...bot, enabled: false }, { state: null, invalid: 0 }, 'hi').replies).toEqual([]);
     expect(decide(bot, { state: 'human', invalid: 0 }, '1').replies).toEqual([]);
     expect(decide(bot, { state: 'menu', invalid: 1 }, 'תפריט').next.invalid).toBe(0);
+  });
+});
+
+describe('referral to a personal WhatsApp (e.g. a safety officer)', () => {
+  const withContact: BotConfig = { ...bot, items: [...bot.items, { title: 'בטיחות בגובה', answer: 'לשאלות בטיחות בעבודה בגובה פנו לממונה:', contact: { name: 'דני כהן, ממונה בטיחות', phone: '050-123 4567', message: 'שלום, אני פונה בנושא בטיחות בגובה' } }] };
+  it('adds a click-to-chat link with a pre-filled message, converts Israeli local numbers, keeps the footer', () => {
+    const d = decide(withContact, { state: 'menu', invalid: 0 }, '3');
+    expect(d.replies[0]).toContain('דני כהן, ממונה בטיחות');
+    expect(d.replies[0]).toContain('https://wa.me/972501234567?text=' + encodeURIComponent('שלום, אני פונה בנושא בטיחות בגובה'));
+    expect(d.replies[0]).toContain('"נציג"'); // footer still present
+    expect(d.next).toEqual({ state: 'menu', invalid: 0 }); // stays with the bot
+    expect(waLink('+972-50-123-4567')).toBe('https://wa.me/972501234567');
+    expect(waLink('00972501234567', 'x y')).toBe('https://wa.me/972501234567?text=x%20y');
+    expect(decide(withContact, { state: 'menu', invalid: 0 }, '1').replies[0]).not.toContain('wa.me');
+  });
+  it('validates the contact in settings', () => {
+    expect(botSchema.safeParse({ ...withContact, items: [{ title: 'x', answer: 'y', contact: { name: 'a', phone: 'abc' } }] }).success).toBe(false);
+    expect(botSchema.safeParse(withContact).success).toBe(true);
+    expect(botSchema.safeParse({ ...withContact, items: [{ title: 'x', answer: 'y', contact: { name: '', phone: '0501234567' } }] }).success).toBe(false);
   });
 });
 

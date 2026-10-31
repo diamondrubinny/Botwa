@@ -5,7 +5,18 @@ export const botSchema = z.object({
   enabled: z.boolean(),
   welcome: z.string().trim().min(1).max(1000),
   /** menu entries; numbered 1..N in order */
-  items: z.array(z.object({ title: z.string().trim().min(1).max(60), answer: z.string().trim().min(1).max(1500) })).max(9),
+  items: z.array(z.object({
+    title: z.string().trim().min(1).max(60),
+    answer: z.string().trim().min(1).max(1500),
+    /** optional referral: the answer ends with a click-to-chat WhatsApp link to a named person (e.g. the safety officer for this topic) */
+    contact: z.object({
+      name: z.string().trim().min(1).max(60),
+      /** digits with country code; a leading 0 (Israeli local format) is converted to 972 */
+      phone: z.string().trim().regex(/^\+?[\d\s-]{8,18}$/),
+      /** text pre-filled in the customer's message to that person */
+      message: z.string().trim().max(200).default(''),
+    }).optional(),
+  })).max(9),
   /** option "0" = talk to a person */
   humanOption: z.boolean(),
   humanLabel: z.string().trim().min(1).max(40),
@@ -49,6 +60,18 @@ export async function loadBot(db: Db): Promise<BotConfig> {
   const { rows } = await db.query(`SELECT value FROM settings WHERE key = 'bot'`);
   const p = botSchema.safeParse(rows[0]?.value);
   return p.success ? p.data : DEFAULT_BOT;
+}
+
+/** https://wa.me click-to-chat link; Israeli local numbers (05x...) become 972... */
+export function waLink(phone: string, message = ''): string {
+  let d = phone.replace(/\D/g, '').replace(/^00/, '');
+  if (/^0\d{8,9}$/.test(d)) d = `972${d.slice(1)}`;
+  return `https://wa.me/${d}${message ? `?text=${encodeURIComponent(message)}` : ''}`;
+}
+
+/** The text sent for a menu item: its answer plus, when configured, the referral link. */
+export function itemReply(it: BotConfig['items'][number]): string {
+  return it.contact ? `${it.answer}\n\n${it.contact.name}:\n${waLink(it.contact.phone, it.contact.message)}` : it.answer;
 }
 
 export function formatMenu(bot: BotConfig): string {
@@ -96,7 +119,7 @@ export function decide(bot: BotConfig, st: BotState, text: string | null, kbAnsw
 
   let item = /^\d{1,2}$/.test(t) ? bot.items[Number(t) - 1] : undefined;
   item ??= bot.items.find((it) => normalize(it.title) === t);
-  if (item) return { replies: [bot.footer ? `${item.answer}\n\n${bot.footer}` : item.answer], next: { state: 'menu', invalid: 0 } };
+  if (item) { const body = itemReply(item); return { replies: [bot.footer ? `${body}\n\n${bot.footer}` : body], next: { state: 'menu', invalid: 0 } }; }
 
   if (st.invalid < bot.invalidRetries) return menu(st.invalid + 1, `${bot.invalidMessage}\n\n`);
   return handoff('unrecognized');

@@ -3,7 +3,7 @@ import { api, ApiError, can, type Me } from '../api';
 import { usePoll } from '../hooks';
 
 interface BotCfg {
-  enabled: boolean; welcome: string; items: { title: string; answer: string }[]; humanOption: boolean; humanLabel: string;
+  enabled: boolean; welcome: string; items: { title: string; answer: string; contact?: { name: string; phone: string; message: string } }[]; humanOption: boolean; humanLabel: string;
   humanKeywords: string[]; humanMessage: string; invalidMessage: string; invalidRetries: number; footer: string; preview?: string;
   kb: { enabled: boolean; minScore: number; maxChars: number; showSource: boolean; intro: string };
 }
@@ -19,7 +19,7 @@ export function Bot({ me }: { me: Me }) {
   if (!b) return <><h1 tabIndex={-1}>בוט</h1><p role="status">טוען…</p></>;
 
   const set = (patch: Partial<BotCfg>) => setB({ ...b, ...patch });
-  const setItem = (i: number, patch: Partial<{ title: string; answer: string }>) => set({ items: b.items.map((it, k) => (k === i ? { ...it, ...patch } : it)) });
+  const setItem = (i: number, patch: Partial<BotCfg['items'][number]>) => set({ items: b.items.map((it, k) => (k === i ? { ...it, ...patch } : it)) });
   const move = (i: number, d: -1 | 1) => {
     const j = i + d; if (j < 0 || j >= b.items.length) return;
     const items = [...b.items]; [items[i], items[j]] = [items[j]!, items[i]!]; set({ items });
@@ -63,6 +63,17 @@ export function Bot({ me }: { me: Me }) {
               <div className="field">
                 <label htmlFor={`ba${i}`}>תשובה</label>
                 <textarea id={`ba${i}`} required rows={3} maxLength={1500} value={it.answer} onChange={(e) => setItem(i, { answer: e.target.value })} />
+              </div>
+              <div className="field">
+                <label><input type="checkbox" style={{ width: 'auto', minHeight: 'auto' }} checked={!!it.contact} onChange={(e) => setItem(i, { contact: e.target.checked ? { name: '', phone: '', message: '' } : undefined })} /> הפניה לווצאפ אישי של איש מקצוע (למשל ממונה בטיחות לתחום זה)</label>
+                {it.contact && (
+                  <div className="card" style={{ marginTop: '.5rem' }}>
+                    <div className="field"><label htmlFor={`bcn${i}`}>שם ותפקיד (יוצג ללקוח)</label><input id={`bcn${i}`} required maxLength={60} value={it.contact.name} onChange={(e) => setItem(i, { contact: { ...it.contact!, name: e.target.value } })} placeholder="דני כהן, ממונה בטיחות בעבודה בגובה" /></div>
+                    <div className="field"><label htmlFor={`bcp${i}`}>מספר ווצאפ</label><input id={`bcp${i}`} required dir="ltr" inputMode="tel" pattern="\+?[\d\s\-]{8,18}" value={it.contact.phone} onChange={(e) => setItem(i, { contact: { ...it.contact!, phone: e.target.value } })} placeholder="0501234567" /></div>
+                    <div className="field"><label htmlFor={`bcm${i}`}>הודעה שתוכתב מראש ללקוח (אופציונלי)</label><input id={`bcm${i}`} maxLength={200} value={it.contact.message} onChange={(e) => setItem(i, { contact: { ...it.contact!, message: e.target.value } })} placeholder="שלום, אני פונה בנושא בטיחות בגובה" /></div>
+                    <p className="hint">הלקוח יקבל קישור שפותח צ'אט ווצאפ ישירות עם האדם. המספר יוצג ללקוחות, ולכן יש לקבל את הסכמת האדם לכך. השיחה הנוכחית נשארת בבוט ולא תועבר לנציג.</p>
+                  </div>
+                )}
               </div>
               <div className="row">
                 <button type="button" onClick={() => move(i, -1)} disabled={i === 0}>הזזה למעלה<span className="sr-only"> פריט {i + 1}</span></button>
@@ -137,6 +148,7 @@ export function Bot({ me }: { me: Me }) {
         <section aria-labelledby="b-prev" className="card">
           <h2 id="b-prev">תצוגה מקדימה של התפריט שהלקוח יקבל</h2>
           <pre style={{ whiteSpace: 'pre-wrap', margin: 0, fontFamily: 'inherit' }}>{menuText(b)}</pre>
+          {b.items.some((x) => x.contact) && <p className="hint">פריטים עם הפניה שולחים ללקוח, אחרי התשובה, קישור ווצאפ לאיש הקשר שהגדרתם.</p>}
         </section>
 
         {canEdit && <button className="primary" type="submit">שמירה</button>}
