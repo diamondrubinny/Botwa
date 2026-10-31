@@ -7,6 +7,12 @@ import type { ChannelManager, BusEvent } from '../channels/manager.js';
 import type { Db } from '../db.js';
 import { warmupCap } from '../channels/sender.js';
 
+/** Digits with country code, no leading 0/00. Israeli local format (05XXXXXXXX) is converted to 972. */
+export function normalizePhone(d: string): string {
+  const x = d.replace(/^00/, '');
+  return /^0\d{8,9}$/.test(x) ? `972${x.slice(1)}` : x;
+}
+
 const idParam = z.object({ id: z.string().uuid() });
 
 /** Heuristic "ban risk" from signals the platforms are known to care about (volume, unsolicited-looking ratio, failures). Advisory only. */
@@ -82,7 +88,7 @@ export function channelRoutes(app: FastifyInstance, db: Db, mgr: ChannelManager)
       const body = action === 'start' ? z.object({ phone: z.string().regex(/^\d{8,15}$/).optional() }).safeParse(req.body ?? {}) : null;
       if (body && !body.success) return reply.code(400).send({ error: 'bad_request' });
       try {
-        if (action === 'start') await mgr.start(p.data.id, { pairingPhone: body?.success ? body.data.phone : undefined });
+        if (action === 'start') await mgr.start(p.data.id, { pairingPhone: body?.success && body.data.phone ? normalizePhone(body.data.phone) : undefined });
         else await mgr[action](p.data.id);
       } catch (e) {
         req.log.error({ err: e }, `channel ${action} failed`);

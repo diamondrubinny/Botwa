@@ -1,4 +1,5 @@
 import makeWASocket, {
+  Browsers,
   BufferJSON,
   DisconnectReason,
   downloadMediaMessage,
@@ -81,7 +82,8 @@ export class WhatsAppAdapter implements ChannelAdapter {
     const sock = makeWASocket({
       auth: { creds, keys },
       logger,
-      browser: ['Botwa', 'Chrome', '1.0.0'],
+      // Phone-number pairing is rejected ("Couldn't link device") unless the platform/browser pair is one WhatsApp recognises.
+      browser: Browsers.ubuntu('Chrome'),
       markOnlineOnConnect: false,
       syncFullHistory: false,
     });
