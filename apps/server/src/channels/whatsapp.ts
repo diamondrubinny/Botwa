@@ -17,7 +17,10 @@ import type { AdapterContext, ChannelAdapter, OutboundMedia, StartOptions } from
 // NOTE: Baileys is an UNOFFICIAL WhatsApp Web client. Using it violates WhatsApp's ToS and the
 // number may be banned. Accepted by the product owner; keep outbound volume low and human-like.
 
-const logger = pino({ level: 'silent' });
+// Baileys' own logs can contain phone numbers/JIDs, so they stay off unless explicitly enabled for debugging.
+const logger = pino({ level: process.env.BAILEYS_LOG_LEVEL || 'silent' });
+// Our own diagnostics: status codes and error names only, never numbers or message content.
+const diag = pino({ level: 'info', base: { svc: 'whatsapp' } });
 const MAX_RECONNECT_DELAY_MS = 60_000;
 
 function dbKeyStore(ctx: AdapterContext): SignalKeyStore {
@@ -97,12 +100,12 @@ export class WhatsAppAdapter implements ChannelAdapter {
       if (sock !== this.sock) return; // stale socket
       if (u.qr) {
         if (this.pairingPhone && !creds.registered) {
-          // Phone-number linking: ask WhatsApp for an 8-char code (refreshed at most every ~50s) instead of showing the QR.
-          if (Date.now() - this.lastPairingAt > 50_000) {
+          // Phone-number linking: ask WhatsApp for an 8-char code (not refreshed within ~110s, so the code the user is typing stays valid) instead of showing the QR.
+          if (Date.now() - this.lastPairingAt > 110_000) {
             this.lastPairingAt = Date.now();
             sock.requestPairingCode(this.pairingPhone)
               .then((code) => events.onPairingCode?.(code))
-              .catch(() => events.onStatus('error'));
+              .catch((e: unknown) => { diag.warn({ event: 'pairing_code_failed', err: e instanceof Error ? e.message : 'unknown' }); events.onStatus('error'); });
           }
         } else {
           events.onQr(u.qr);
@@ -150,6 +153,7 @@ export class WhatsAppAdapter implements ChannelAdapter {
 
   private async onClose(code?: number): Promise<void> {
     const { store, events } = this.ctx;
+    diag.info({ event: 'connection_closed', code: code ?? null, registered: !!this.creds?.registered, pairing: !!this.pairingPhone });
     if (this.stopped) return;
     if (code === DisconnectReason.loggedOut) {
       this.stopped = true;
