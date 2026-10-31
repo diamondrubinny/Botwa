@@ -34,6 +34,7 @@ Automated checks do not replace manual screen-reader testing (NVDA/VoiceOver) an
 See [docs/DEPLOY.md](docs/DEPLOY.md) (Compose: Postgres + app + Caddy with automatic HTTPS, backups, restore).
 
 ## Documentation
+- docs/ROADMAP.he.md: researched feature proposals (not yet built)
 - [docs/DEPLOY.md](docs/DEPLOY.md) – install on Ubuntu (Compose + Caddy HTTPS), backup/restore
 - [docs/USER_GUIDE.he.md](docs/USER_GUIDE.he.md) – staff guide (Hebrew)
 - [docs/PRODUCTION_CHECKLIST.md](docs/PRODUCTION_CHECKLIST.md) – pre-production checks, personal-data table, cookies, risks
