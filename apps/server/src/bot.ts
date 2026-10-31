@@ -16,6 +16,8 @@ export const botSchema = z.object({
       /** text pre-filled in the customer's message to that person */
       message: z.string().trim().max(200).default(''),
     }).optional(),
+    /** optional routing: after the answer the conversation is handed to this staff member (stays in the system); falls back to normal routing if they are inactive */
+    route: z.object({ userId: z.string().uuid() }).optional(),
   })).max(9),
   /** option "0" = talk to a person */
   humanOption: z.boolean(),
@@ -94,8 +96,8 @@ export function normalize(s: string): string {
 }
 
 export interface BotState { state: 'menu' | 'human' | null; invalid: number }
-export type HandoffReason = 'requested' | 'unrecognized' | 'media';
-export interface Decision { replies: string[]; next: BotState; handoff?: HandoffReason }
+export type HandoffReason = 'requested' | 'unrecognized' | 'media' | 'topic';
+export interface Decision { replies: string[]; next: BotState; handoff?: HandoffReason; /** topic hand-over: the menu item chosen and the person responsible */ topic?: { title: string; userId: string } }
 
 const MENU_WORDS = new Set(['תפריט', 'menu', 'תפריט ראשי', 'start', 'התחלה']);
 
@@ -119,6 +121,10 @@ export function decide(bot: BotConfig, st: BotState, text: string | null, kbAnsw
 
   let item = /^\d{1,2}$/.test(t) ? bot.items[Number(t) - 1] : undefined;
   item ??= bot.items.find((it) => normalize(it.title) === t);
+  if (item?.route) {
+    const body = itemReply(item);
+    return { replies: [body], next: { state: 'human', invalid: 0 }, handoff: 'topic', topic: { title: item.title, userId: item.route.userId } };
+  }
   if (item) { const body = itemReply(item); return { replies: [bot.footer ? `${body}\n\n${bot.footer}` : body], next: { state: 'menu', invalid: 0 } }; }
 
   if (st.invalid < bot.invalidRetries) return menu(st.invalid + 1, `${bot.invalidMessage}\n\n`);

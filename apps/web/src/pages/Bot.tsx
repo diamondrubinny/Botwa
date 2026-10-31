@@ -1,9 +1,9 @@
-import { useState, type FormEvent } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
 import { api, ApiError, can, type Me } from '../api';
 import { usePoll } from '../hooks';
 
 interface BotCfg {
-  enabled: boolean; welcome: string; items: { title: string; answer: string; contact?: { name: string; phone: string; message: string } }[]; humanOption: boolean; humanLabel: string;
+  enabled: boolean; welcome: string; items: { title: string; answer: string; contact?: { name: string; phone: string; message: string }; route?: { userId: string } }[]; humanOption: boolean; humanLabel: string;
   humanKeywords: string[]; humanMessage: string; invalidMessage: string; invalidRetries: number; footer: string; preview?: string;
   kb: { enabled: boolean; minScore: number; maxChars: number; showSource: boolean; intro: string };
 }
@@ -15,6 +15,8 @@ export function Bot({ me }: { me: Me }) {
   const canEdit = can(me, 'bot.manage');
   const [b, setB] = useState<BotCfg | null>(null);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const [people, setPeople] = useState<{ id: string; name: string }[]>([]);
+  useEffect(() => { void api<{ id: string; name: string }[]>('GET', '/settings/bot/assignees').then(setPeople).catch(() => undefined); }, []);
   usePoll(async () => { if (!b) setB(await api<BotCfg>('GET', '/settings/bot').catch(() => null)); }, 60000);
   if (!b) return <><h1 tabIndex={-1}>בוט</h1><p role="status">טוען…</p></>;
 
@@ -63,6 +65,18 @@ export function Bot({ me }: { me: Me }) {
               <div className="field">
                 <label htmlFor={`ba${i}`}>תשובה</label>
                 <textarea id={`ba${i}`} required rows={3} maxLength={1500} value={it.answer} onChange={(e) => setItem(i, { answer: e.target.value })} />
+              </div>
+              <div className="field">
+                <label><input type="checkbox" style={{ width: 'auto', minHeight: 'auto' }} checked={!!it.route} onChange={(e) => setItem(i, { route: e.target.checked ? { userId: people[0]?.id ?? '' } : undefined })} disabled={people.length === 0} /> העברת השיחה לנציג מסוים שאחראי על הנושא (השיחה נשארת במערכת)</label>
+                {it.route && (
+                  <div className="card" style={{ marginTop: '.5rem' }}>
+                    <label htmlFor={`brt${i}`}>הנציג האחראי</label>
+                    <select id={`brt${i}`} required value={it.route.userId} onChange={(e) => setItem(i, { route: { userId: e.target.value } })}>
+                      {people.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
+                    </select>
+                    <p className="hint">אחרי התשובה הלקוח מועבר לנציג הזה, והבוט שותק. אם הנציג מושבת, תופעל ההקצאה הרגילה. אפשר לשלב עם הפניה לווצאפ אישי (למטה), ואז הלקוח מקבל גם קישור וגם נציג במערכת.</p>
+                  </div>
+                )}
               </div>
               <div className="field">
                 <label><input type="checkbox" style={{ width: 'auto', minHeight: 'auto' }} checked={!!it.contact} onChange={(e) => setItem(i, { contact: e.target.checked ? { name: '', phone: '', message: '' } : undefined })} /> הפניה לווצאפ אישי של איש מקצוע (למשל ממונה בטיחות לתחום זה)</label>

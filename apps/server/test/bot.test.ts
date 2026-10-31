@@ -228,4 +228,31 @@ describe('menu bot end to end', () => {
     expect((await conv('c8')).bot_state).toBeNull();
     expect([ids.a1, ids.a2]).toContain((await conv('c8')).assigned_to); // routed immediately as before
   });
+
+  it('a menu item can hand the conversation to the person responsible (and/or send their WhatsApp link)', async () => {
+    const items = [...bot.items, { title: 'בטיחות בגובה', answer: 'מעביר לממונה על התחום.', route: { userId: ids.a2 }, contact: { name: 'דני, ממונה בטיחות', phone: '0501234567', message: '' } }];
+    expect((await call('PUT', '/settings/bot', 'admin@t.io', { ...bot, enabled: true, items: [...items.slice(0, 2), { ...items[2], route: { userId: '00000000-0000-4000-8000-000000000000' } }] })).statusCode).toBe(400); // unknown person
+    expect((await call('PUT', '/settings/bot', 'admin@t.io', { ...bot, enabled: true, items })).statusCode).toBe(200);
+    expect((await call('GET', '/settings/bot/assignees', 'sup@t.io')).json().map((u: { id: string }) => u.id)).toContain(ids.a2);
+    expect((await call('GET', '/settings/bot/assignees', 'a1@t.io')).statusCode).toBe(403);
+
+    await say('rt1', 'שלום');
+    const r = await say('rt1', '3');
+    expect(r[0]).toContain('מעביר לממונה');
+    expect(r[0]).toContain('https://wa.me/972501234567'); // both: link and hand-over
+    expect(r[1]).toBe(DEFAULT_BOT.humanMessage);
+    const c = await conv('rt1');
+    expect(c.assigned_to).toBe(ids.a2);
+    expect(c.bot_state).toBe('human');
+    expect((await notes(c.id)).join()).toContain('בטיחות בגובה');
+    expect((await db.query(`SELECT 1 FROM audit_log WHERE action = 'conversation.topic_assign'`)).rowCount).toBe(1);
+
+    // the responsible person is no longer active: normal routing takes over instead of leaving it unassigned
+    await db.query('UPDATE users SET active = false WHERE id = $1', [ids.a2]);
+    await say('rt2', 'שלום');
+    await say('rt2', '3');
+    expect((await conv('rt2')).assigned_to).not.toBe(ids.a2);
+    await db.query('UPDATE users SET active = true WHERE id = $1', [ids.a2]);
+    await call('PUT', '/settings/bot', 'admin@t.io', { ...bot, enabled: false });
+  });
 });

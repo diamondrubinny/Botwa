@@ -51,9 +51,17 @@ export function settingsRoutes(app: FastifyInstance, db: Db) {
     return { ...bot, preview: formatMenu(bot) };
   });
 
+  // People a menu item may hand the conversation to.
+  app.get('/settings/bot/assignees', { preHandler: botView }, async () => (await db.query(`SELECT id, name FROM users WHERE active ORDER BY lower(name)`)).rows);
+
   app.put('/settings/bot', { preHandler: botManage }, async (req, reply) => {
     const b = botSchema.safeParse(req.body);
     if (!b.success) return reply.code(400).send({ error: 'bad_request' });
+    const routed = [...new Set(b.data.items.flatMap((i) => (i.route ? [i.route.userId] : [])))];
+    if (routed.length) {
+      const ok = await db.query(`SELECT count(*)::int AS n FROM users WHERE active AND id = ANY($1::uuid[])`, [routed]);
+      if (ok.rows[0].n !== routed.length) return reply.code(400).send({ error: 'unknown_user' });
+    }
     await db.query(
       `INSERT INTO settings (key, value) VALUES ('bot', $1) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()`,
       [JSON.stringify(b.data)],

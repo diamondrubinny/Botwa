@@ -334,10 +334,17 @@ export class ChannelManager {
     await this.db.query('UPDATE conversations SET bot_state = $2, bot_invalid = $3 WHERE id = $1', [convId, d.next.state, d.next.invalid]);
 
     if (d.handoff) {
-      const why = { requested: 'הלקוח ביקש נציג', unrecognized: 'הלקוח שלח הודעה שהבוט לא זיהה', media: 'הלקוח שלח קובץ או תוכן שאינו טקסט' }[d.handoff];
+      const why = { requested: 'הלקוח ביקש נציג', unrecognized: 'הלקוח שלח הודעה שהבוט לא זיהה', media: 'הלקוח שלח קובץ או תוכן שאינו טקסט', topic: `הלקוח בחר בנושא "${d.topic?.title ?? ''}"` }[d.handoff];
       await this.db.query(`INSERT INTO conversation_notes (conversation_id, body) VALUES ($1, $2)`, [convId, `מועבר מהבוט לנציג: ${why}.`]);
-      const to = await autoAssign(this.db, convId).catch(() => null);
-      if (to) await audit(this.db, { action: 'conversation.auto_assign', target: convId, meta: { to, via: 'bot' } }).catch(() => undefined);
+      let to: string | null = null;
+      if (d.topic) {
+        // the person responsible for the chosen topic gets the conversation (if they are still active); otherwise normal routing
+        const r = await this.db.query(`UPDATE conversations SET assigned_to = u.id FROM users u WHERE conversations.id = $1 AND u.id = $2 AND u.active RETURNING u.id`, [convId, d.topic.userId]).catch(() => ({ rows: [] as { id: string }[] }));
+        to = (r.rows[0]?.id as string | undefined) ?? null;
+        if (to) await audit(this.db, { action: 'conversation.topic_assign', target: convId, meta: { to, topic: d.topic.title } }).catch(() => undefined);
+      }
+      if (!to) to = await autoAssign(this.db, convId).catch(() => null);
+      if (to && !d.topic) await audit(this.db, { action: 'conversation.auto_assign', target: convId, meta: { to, via: 'bot' } }).catch(() => undefined);
       const hours = await loadBusinessHours(this.db);
       const closed = hours.enabled && !isOpen(hours, new Date());
       await this.botSay(channelId, convId, ext, closed ? hours.awayMessage : bot.humanMessage);
