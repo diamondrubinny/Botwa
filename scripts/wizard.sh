@@ -19,6 +19,11 @@ ok()   { printf '  %s✔%s %s\n' "$g" "$n" "$*"; }
 warn() { printf '  %s!%s %s\n' "$y" "$n" "$*"; }
 die()  { printf '  %s✘ %s%s\n' "$r" "$*" "$n" >&2; exit 1; }
 
+port_busy() { # port_busy N  -> exit 0 if something listens on that TCP port (any address)
+  local n; n=$(ss -ltnH 2>/dev/null | awk -v p=":$1" 'substr($4, length($4)-length(p)+1) == p' | wc -l); [ "$n" -gt 0 ]
+}
+pick_port() { local p; for p in $(seq 3000 3040); do port_busy "$p" || { echo "$p"; return; }; done; die "No free port between 3000 and 3040 for Botwa"; }
+
 # ask VAR "Prompt" "default" [validator-regex] [error]   (non-interactive: takes WZ_<VAR>)
 ask() {
   local var="$1" prompt="$2" def="${3:-}" re="${4:-.*}" err="${5:-Invalid value}" val ev="WZ_$1"
@@ -77,9 +82,6 @@ if [ -n "$WEBSRV" ] && [ "$WEBSRV" != caddy ]; then
   yesno PROXY "Run Botwa behind the existing $WEBSRV (recommended; existing sites stay untouched)?" "y"; EXT="$PROXY"
   [ "$EXT" = y ] && [ "$WEBSRV" != nginx ] && warn "Automatic proxy setup supports nginx only; you will have to add the reverse-proxy rule for $WEBSRV yourself (127.0.0.1:3000)."
 fi
-if [ "$EXT" = y ] && command -v ss >/dev/null 2>&1 && ss -ltnH 2>/dev/null | awk '{print $4}' | grep -qE '^(127\.0\.0\.1|0\.0\.0\.0|\*|\[::\]):3000$'; then
-  die "Port 3000 on this server is already in use (Botwa needs 127.0.0.1:3000 in proxy mode). Free it or tell me to use another port."
-fi
 pub_ip="$(curl -fsS --max-time 5 https://api.ipify.org 2>/dev/null || true)"
 dns_ip="$(getent hosts "$DOMAIN" 2>/dev/null | awk '{print $1; exit}' || true)"
 if [ -z "$dns_ip" ]; then warn "$DOMAIN does not resolve yet - create the DNS A record${pub_ip:+ to $pub_ip} or HTTPS certificate issuance will fail"
@@ -120,7 +122,7 @@ setv BACKUP_AUTO_HOUR "$BACKUP_HOUR"
 profiles=""; [ "$EXT" = y ] || profiles="caddy"
 if [ "$MEDIA" = y ]; then setv CLAMAV_HOST clamav; profiles="${profiles:+$profiles,}media"; else setv CLAMAV_HOST ""; fi
 setv COMPOSE_PROFILES "$profiles"
-[ "$EXT" = y ] && setv COMPOSE_FILE "docker-compose.yml:docker-compose.external.yml"
+if [ "$EXT" = y ]; then setv COMPOSE_FILE "docker-compose.yml:docker-compose.external.yml"; APP_PORT="$(pick_port)"; setv APP_PORT "$APP_PORT"; ok "Botwa will listen on 127.0.0.1:$APP_PORT (loopback only)"; fi
 [ "$TG" = y ] && { setv TELEGRAM_API_ID "$TG_API_ID"; setv TELEGRAM_API_HASH "$TG_API_HASH"; }
 # A listener on :80/:443 bound to one specific (non-loopback) address - typically Tailscale - blocks Docker's 0.0.0.0 bind.
 # Then publish Caddy only on this server's primary address instead.
@@ -131,6 +133,27 @@ if [ "$EXT" != y ] && command -v ss >/dev/null 2>&1; then
 fi
 chmod 600 .env
 ok ".env written (permissions 600)"
+fi
+
+if [ "$EXISTING" = 1 ]; then
+  step "Using the existing .env"
+  if grep -q '^COMPOSE_FILE=.*external' .env; then
+    cur=$(grep -m1 '^APP_PORT=' .env | cut -d= -f2- || true)
+    own=$(docker compose ps -q server 2>/dev/null | wc -l || true)   # is the busy port our own running container?
+    if [ -z "$cur" ] || { port_busy "$cur" && [ "${own:-0}" -eq 0 ]; }; then
+      newp="$(pick_port)"
+      if grep -q '^APP_PORT=' .env; then sed -i "s|^APP_PORT=.*|APP_PORT=$newp|" .env; else printf 'APP_PORT=%s\n' "$newp" >> .env; fi
+      ok "Using free port 127.0.0.1:$newp"
+    fi
+  fi
+  if [ -z "${ADMIN_EMAIL:-}" ]; then
+    yesno MKADMIN "Create the first administrator now?" "y"
+    if [ "$MKADMIN" = y ]; then
+      ask ADMIN_EMAIL "Admin e-mail" "" '^[^@[:space:]]+@[^@[:space:]]+\.[^@[:space:]]+$' "Enter a valid e-mail"
+      ask ADMIN_NAME "Admin display name" "Admin" '^.{1,100}$' "1-100 characters"
+      secret ADMIN_PASSWORD "Admin password (min 12 chars; MFA will be required at first login)" 12
+    fi
+  fi
 fi
 
 if [ -n "$DRY" ]; then step "Dry run - stopping before Docker"; exit 0; fi
@@ -153,12 +176,13 @@ ok "App is healthy"
 setup_nginx() { # reverse proxy for DOMAIN -> 127.0.0.1:3000, with Let's Encrypt via certbot (only this one conf file is added)
   local dom conf ip listen80 listen443 email
   dom="$(grep '^DOMAIN=' .env | cut -d= -f2-)"
+  APP_PORT_N="$(grep -m1 '^APP_PORT=' .env | cut -d= -f2- || true)"; APP_PORT_N="${APP_PORT_N:-3000}"
   conf="${WIZARD_NGINX_DIR:-/etc/nginx/conf.d}/botwa-$dom.conf"
   ip=$(ss -ltnH 2>/dev/null | awk '{print $4}' | grep -E ':80$' | grep -vE '^(0\.0\.0\.0|\*|\[::\]|127\.|\[::1\])' | head -1 | sed 's/:80$//' || true)
   listen80="listen ${ip:-0.0.0.0}:80;"; listen443="listen ${ip:-0.0.0.0}:443 ssl;"
   locs() { cat <<LOC
     location / {
-        proxy_pass http://127.0.0.1:3000;
+        proxy_pass http://127.0.0.1:${APP_PORT_N};
         proxy_http_version 1.1;
         proxy_set_header Host \$host;
         proxy_set_header X-Real-IP \$remote_addr;
