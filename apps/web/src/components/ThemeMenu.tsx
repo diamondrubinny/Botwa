@@ -52,9 +52,9 @@ export function ThemeMenu({ align = 'end' }: { align?: 'start' | 'end' }) {
                   setNotify(on);
                   setNotifyMsg(e.target.checked && !on ? 'הדפדפן חסם התראות' : '');
                 }} />
-                התראה על הודעה חדשה כשהלשונית ברקע
+                התראה על הודעה חדשה (גם כשהאפליקציה סגורה)
               </label>
-              <p className="hint" role="status">{notifyMsg || 'ההתראה כללית בלבד, בלי תוכן ההודעה. פועלת כשהמערכת פתוחה.'}</p>
+              <p className="hint" role="status">{notifyMsg || 'ההתראה כללית בלבד, בלי תוכן ההודעה. בנייד כדאי להתקין את האפליקציה (הוספה למסך הבית).'}</p>
             </>
           )}
         </div>

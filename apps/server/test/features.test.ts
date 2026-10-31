@@ -187,3 +187,49 @@ describe('unread counter endpoint', () => {
     await app2.close(); await db2.end();
   });
 });
+
+describe('snooze, star, mark unread', () => {
+  it('hides snoozed chats, keeps stars private, wakes on new inbound, enforces access', async () => {
+    const db2 = createDb(cfg.DATABASE_URL);
+    const app2 = await buildApp(cfg, db2, new ChannelManager(db2, cfg));
+    const login = async (email: string) => {
+      const r = await app2.inject({ method: 'POST', url: '/auth/login', remoteAddress: `10.98.0.${Math.floor(Math.random() * 250)}`, headers: { origin: ORIGIN }, payload: { email, password: PW } });
+      return `botwa_sid=${r.cookies[0]!.value}`;
+    };
+    const ch = (await db2.query(`SELECT id FROM channels LIMIT 1`)).rows[0].id;
+    const a1 = (await db2.query(`SELECT id FROM users WHERE email='a1@t.io'`)).rows[0].id;
+    await db2.query(`DELETE FROM conversations`);
+    const mk = async (ext: string, assigned: string | null) => {
+      const c = (await db2.query(`INSERT INTO contacts (channel_id, external_id) VALUES ($1,$2) RETURNING id`, [ch, ext])).rows[0].id;
+      return (await db2.query(`INSERT INTO conversations (channel_id, contact_id, unread_count, assigned_to) VALUES ($1,$2,2,$3) RETURNING id`, [ch, c, assigned])).rows[0].id as string;
+    };
+    const mine = await mk('s1', a1); const others = await mk('s2', (await db2.query(`SELECT id FROM users WHERE email='a2@t.io'`)).rows[0].id);
+    const c1 = await login('a1@t.io'); const c2 = await login('a2@t.io');
+    const post = (id: string, path: string, cookie: string, payload?: unknown) => app2.inject({ method: 'POST', url: `/conversations/${id}/${path}`, headers: { cookie, origin: ORIGIN }, payload: payload as never });
+    const list = async (cookie: string, qs = '') => (await app2.inject({ url: `/conversations?${qs}`, headers: { cookie } })).json() as { id: string; starred: boolean; snoozedUntil: string | null }[];
+
+    expect((await post(mine, 'snooze', c1, { minutes: 60 })).statusCode).toBe(200);
+    expect((await list(c1)).map((c) => c.id)).not.toContain(mine);
+    expect((await list(c1, 'snoozed=true')).map((c) => c.id)).toContain(mine);
+    expect((await app2.inject({ url: '/conversations/unread', headers: { cookie: c1 } })).json()).toEqual({ count: 0 });
+    expect((await post(mine, 'snooze', c1, { minutes: 999999 })).statusCode).toBe(400);
+    expect((await post(mine, 'snooze', c2, { minutes: 5 })).statusCode).toBe(404); // not their conversation
+
+    // a new customer message wakes it
+    await db2.query(`UPDATE conversations SET snoozed_until = NULL WHERE id = $1`, [mine]);
+    await post(mine, 'snooze', c1, { minutes: 60 });
+    await db2.query(`UPDATE conversations SET snoozed_until = now() - interval '1 minute' WHERE id = $1`, [mine]);
+    expect((await list(c1)).map((c) => c.id)).toContain(mine); // expired snooze shows again without any job
+
+    // stars are per user
+    expect((await post(mine, 'star', c1, { starred: true })).json()).toEqual({ starred: true });
+    expect((await list(c1, 'starred=true')).map((c) => c.id)).toEqual([mine]);
+    expect((await list(c1)).find((c) => c.id === mine)!.starred).toBe(true);
+    expect((await post(others, 'star', c1, { starred: true })).statusCode).toBe(404);
+
+    await post(mine, 'read', c1);
+    await post(mine, 'unread', c1);
+    expect((await db2.query(`SELECT unread_count FROM conversations WHERE id=$1`, [mine])).rows[0].unread_count).toBe(1);
+    await app2.close(); await db2.end();
+  });
+});

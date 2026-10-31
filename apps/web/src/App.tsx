@@ -4,7 +4,7 @@ import { A11yWidget } from './components/A11yWidget';
 import { Icon } from './components/Icon';
 import { ThemeMenu } from './components/ThemeMenu';
 import { useHashRoute, usePoll } from './hooks';
-import { LiveProvider, useLive } from './live';
+import { LiveProvider, resubscribeIfEnabled, unsubscribePush, useLive } from './live';
 import { Account } from './pages/Account';
 import { Audit } from './pages/Audit';
 import { Bot } from './pages/Bot';
@@ -74,7 +74,9 @@ function Shell({ me, reloadMe, onLogout }: { me: Me; reloadMe: () => Promise<voi
   useEffect(() => { document.querySelector<HTMLElement>('main h1')?.focus(); }, [page, me.id]);
   useEffect(() => { sheet.current?.close(); }, [page]);
 
+  useEffect(() => { resubscribeIfEnabled(); }, []);
   async function logout() {
+    await unsubscribePush();
     await api('POST', '/auth/logout').catch(() => undefined);
     onLogout();
   }

@@ -14,6 +14,8 @@ import { MediaService } from './media/store.js';
 import { passkeyRoutes } from './routes/passkeys.js';
 import { roleRoutes } from './routes/roles.js';
 import { backupRoutes } from './routes/backups.js';
+import { pushRoutes } from './routes/push.js';
+import { PushService } from './push.js';
 import { contactRoutes } from './routes/contacts.js';
 import { tagRoutes } from './routes/tags.js';
 import { settingsRoutes } from './routes/settings.js';
@@ -84,5 +86,9 @@ export async function buildApp(cfg: Config, db: Db, mgr: ChannelManager, media: 
   contactRoutes(app, db);
   settingsRoutes(app, db);
   backupRoutes(app, db, cfg);
+  const push = new PushService(db, cfg);
+  await push.init();
+  mgr.onInbound = (id) => void push.notifyInbound(id).catch(() => undefined);
+  pushRoutes(app, db, push);
   return app;
 }

@@ -69,6 +69,11 @@ Agents see only conversations assigned to them or unassigned; supervisors/admins
 - `POST /auth/passkeys/register/options|verify` (logged in), `POST /auth/passkeys/login/options|verify` (public, rate limited), `GET /auth/passkeys`, `DELETE /auth/passkeys/:id`. Needs HTTPS (or localhost); optional `WEBAUTHN_RP_ID` overrides the RP ID derived from `APP_ORIGIN`.
 - `GET /conversations/unread` – `{count}` of open conversations visible to the caller (drives the badge and tab title).
 
+## API (P19)
+- `POST /conversations/:id/snooze {minutes}` (0 = wake), `POST /conversations/:id/star {starred}`, `POST /conversations/:id/unread`; list filters `snoozed=true`, `starred=true`.
+- `GET /push/key`, `POST /push/subscribe`, `POST /push/unsubscribe` (Web Push; HTTPS required, endpoints limited to FCM/Mozilla/Apple/Windows push services).
+- `/reports/summary` now also returns `byHour` and `topTags`.
+
 ## Attachments (images, PDF, Word/Excel, audio, MP4)
 Disabled unless an antivirus daemon is configured (`CLAMAV_HOST`; Docker: `docker compose --profile media up -d` and `CLAMAV_HOST=clamav`). Fail-closed pipeline: file type decided by **content** allowlist (not name/MIME; SVG/HTML/exe/archives blocked) -> stored under a random id in `MEDIA_DIR/quarantine` (0600, outside any web root) -> ClamAV INSTREAM scan -> moved to `clean/` only if OK; infected files are deleted and audited. Files are served only when `clean`, behind login + the conversation's access rules, with `nosniff`, `CSP: sandbox`, and `attachment` disposition for everything except images. Staff uploads are scanned *before* being sent to the customer. If the scanner is down, inbound files stay pending (retried every minute) and uploads return 503.
 API: `GET /attachments/:id`, `POST /conversations/:id/attachments` (multipart: `file`, optional `caption`).

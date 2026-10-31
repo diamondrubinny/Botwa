@@ -41,7 +41,7 @@ export async function ingestInbound(db: Db, channelId: string, m: InboundMessage
         await client.query(`UPDATE conversations SET status = 'closed', unread_count = 0, bot_state = NULL, last_message_at = $2 WHERE id = $1`, [convId, m.timestamp]);
       } else {
         await client.query(
-          `UPDATE conversations SET status='open', unread_count = unread_count + 1, last_message_at = $2 WHERE id = $1`,
+          `UPDATE conversations SET status='open', snoozed_until = NULL, unread_count = unread_count + 1, last_message_at = $2 WHERE id = $1`,
           [convId, m.timestamp],
         );
       }

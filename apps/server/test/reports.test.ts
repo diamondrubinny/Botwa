@@ -59,6 +59,9 @@ describe('reports', () => {
     const r = (await get('/reports/summary?days=7', 'sup@t.io')).json();
     expect(r.totals).toMatchObject({ newConversations: 3, inbound: 5, outbound: 3, openNow: 3, unassignedNow: 3 });
     // waits: c1 (60s, a1), c2 first (300s, a2), c2 second (100s from 500s ago -> a1 at 400s ago), c3 unanswered
+    expect(r.byHour).toHaveLength(24);
+    expect(r.byHour.reduce((n: number, h: { inbound: number }) => n + h.inbound, 0)).toBe(5); // every inbound message lands in exactly one hour
+    expect(Array.isArray(r.topTags)).toBe(true);
     expect(r.responseTime).toMatchObject({ answered: 3, unanswered: 1 });
     expect(r.responseTime.avgSeconds).toBe(Math.round((60 + 300 + 100) / 3));
     expect(r.responseTime.medianSeconds).toBe(100);

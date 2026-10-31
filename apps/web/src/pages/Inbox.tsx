@@ -41,7 +41,7 @@ export function Inbox({ me }: { me: Me }) {
   const { tick: live } = useLive();
 
   const [convs, setConvs] = useState<Conversation[]>([]);
-  const [filter, setFilter] = useState<'open' | 'closed' | 'mine' | 'blocked'>('open');
+  const [filter, setFilter] = useState<'open' | 'closed' | 'mine' | 'starred' | 'snoozed' | 'blocked'>('open');
   const [blockPanel, setBlockPanel] = useState(false);
   const [blockReason, setBlockReason] = useState('');
   const [selId, setSelId] = useState<string | null>(null);
@@ -71,7 +71,7 @@ export function Inbox({ me }: { me: Me }) {
   useEffect(() => { document.body.classList.toggle('chat-open', !!sel); return () => document.body.classList.remove('chat-open'); }, [sel]);
 
   usePoll(async () => {
-    const q = (filter === 'mine' ? 'mine=true&status=open' : filter === 'blocked' ? 'blocked=true' : `status=${filter}`) + (search.trim() ? `&q=${encodeURIComponent(search.trim())}` : '') + (tagFilter ? `&tag=${tagFilter}` : '');
+    const q = (filter === 'mine' ? 'mine=true&status=open' : filter === 'blocked' ? 'blocked=true' : filter === 'starred' ? 'starred=true' : filter === 'snoozed' ? 'snoozed=true&status=open' : `status=${filter}`) + (search.trim() ? `&q=${encodeURIComponent(search.trim())}` : '') + (tagFilter ? `&tag=${tagFilter}` : '');
     setConvs(await api<Conversation[]>('GET', `/conversations?${q}`).catch(() => []));
   }, 5000, [filter, search, tagFilter, live, bump]);
   usePoll(async () => setAllTags(await api<Tag[]>('GET', '/tags').catch(() => [])), 60000);
@@ -167,7 +167,7 @@ export function Inbox({ me }: { me: Me }) {
   }
 
   const assignTo = (userId: string | null) => act(() => api('POST', `/conversations/${selId}/assign`, { userId }));
-  const FILTERS: [typeof filter, string][] = [['open', 'פתוחות'], ['mine', 'שלי'], ['closed', 'סגורות'], ...(canBlock ? [['blocked', 'חסומים'] as [typeof filter, string]] : [])];
+  const FILTERS: [typeof filter, string][] = [['open', 'פתוחות'], ['mine', 'שלי'], ['starred', 'מסומנות'], ['snoozed', 'נדחו'], ['closed', 'סגורות'], ...(canBlock ? [['blocked', 'חסומים'] as [typeof filter, string]] : [])];
 
   return (
     <>
@@ -248,6 +248,17 @@ export function Inbox({ me }: { me: Me }) {
                 ) : (
                   <button onClick={() => assignTo(me.id)}>קח שיחה</button>
                 )}
+                <button aria-pressed={!!sel.starred} onClick={() => act(() => api('POST', `/conversations/${sel.id}/star`, { starred: !sel.starred }))}>{sel.starred ? '★ הסרת סימון' : '☆ סימון'}</button>
+                <label htmlFor="snz" className="sr-only">דחיית שיחה</label>
+                <select id="snz" value="" onChange={(e) => { const m = Number(e.target.value); if (Number.isNaN(m)) return; void act(async () => { await api('POST', `/conversations/${sel.id}/snooze`, { minutes: m }); if (m > 0) setSelId(null); }); }}>
+                  <option value="">{sel.snoozedUntil && new Date(sel.snoozedUntil) > new Date() ? `נדחתה עד ${new Date(sel.snoozedUntil).toLocaleString('he-IL', { dateStyle: 'short', timeStyle: 'short' })}` : 'דחייה…'}</option>
+                  <option value="60">שעה</option>
+                  <option value="180">3 שעות</option>
+                  <option value="1440">מחר</option>
+                  <option value="10080">שבוע</option>
+                  {sel.snoozedUntil && <option value="0">ביטול דחייה</option>}
+                </select>
+                <button onClick={() => act(async () => { await api('POST', `/conversations/${sel.id}/unread`); setSelId(null); })}>סימון כלא נקראה</button>
                 <button onClick={() => act(() => api('POST', `/conversations/${sel.id}/status`, { status: sel.status === 'open' ? 'closed' : 'open' }))}>
                   {sel.status === 'open' ? 'סגירת שיחה' : 'פתיחה מחדש'}
                 </button>

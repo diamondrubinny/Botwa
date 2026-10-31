@@ -45,7 +45,7 @@ interface Agent { name: string; messagesSent: number; conversations: number; avg
 async function computeSummary(db: Db, cfg: Config, days: number) {
   {
 
-    const [totals, waits, perAgent, daily] = await Promise.all([
+    const [totals, waits, perAgent, daily, byHour, topTags] = await Promise.all([
       db.query(
         `SELECT
            (SELECT count(*) FROM conversations WHERE created_at >= now() - make_interval(days => $1))::int AS "newConversations",
@@ -93,7 +93,23 @@ async function computeSummary(db: Db, cfg: Config, days: number) {
           GROUP BY 1 ORDER BY 1`,
         [days, cfg.REPORT_TZ],
       ),
+      // busiest hours of the day (customer messages, in the report time zone)
+      db.query(
+        `SELECT extract(hour FROM created_at AT TIME ZONE $2)::int AS hour, count(*)::int AS inbound
+           FROM messages WHERE direction = 'in' AND created_at >= now() - make_interval(days => $1)
+          GROUP BY 1 ORDER BY 1`,
+        [days, cfg.REPORT_TZ],
+      ),
+      // most used conversation tags among conversations active in the period (aggregate only)
+      db.query(
+        `SELECT t.name, count(*)::int AS conversations
+           FROM conversation_tags ct JOIN tags t ON t.id = ct.tag_id JOIN conversations c ON c.id = ct.conversation_id
+          WHERE c.last_message_at >= now() - make_interval(days => $1)
+          GROUP BY t.id, t.name ORDER BY conversations DESC, lower(t.name) LIMIT 8`,
+        [days],
+      ),
     ]);
+    const hours = Array.from({ length: 24 }, (_, h) => ({ hour: h, inbound: byHour.rows.find((r) => r.hour === h)?.inbound ?? 0 }));
 
     const overall = waits.rows.find((r) => r.isTotal === 1);
     const respByUser = new Map(waits.rows.filter((r) => r.isTotal === 0 && r.userId).map((r) => [r.userId, r]));
@@ -106,6 +122,8 @@ async function computeSummary(db: Db, cfg: Config, days: number) {
         : { answered: 0, unanswered: 0, avgSeconds: null, medianSeconds: null },
       agents: perAgent.rows.map((a) => ({ ...a, avgFirstResponseSeconds: respByUser.get(a.userId)?.avgSeconds ?? null, medianFirstResponseSeconds: respByUser.get(a.userId)?.medianSeconds ?? null })),
       daily: daily.rows,
+      byHour: hours,
+      topTags: topTags.rows,
     };
   }
 }

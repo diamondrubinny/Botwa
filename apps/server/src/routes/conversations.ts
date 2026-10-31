@@ -21,6 +21,8 @@ export function conversationRoutes(app: FastifyInstance, db: Db, mgr: ChannelMan
         id: z.string().uuid().optional(),
         blocked: z.enum(['true', 'false']).default('false'),
         mine: z.enum(['true', 'false']).optional(),
+        snoozed: z.enum(['true', 'false']).default('false'),
+        starred: z.enum(['true', 'false']).default('false'),
         limit: z.coerce.number().int().min(1).max(100).default(50),
         offset: z.coerce.number().int().min(0).default(0),
       })
@@ -30,7 +32,8 @@ export function conversationRoutes(app: FastifyInstance, db: Db, mgr: ChannelMan
       `SELECT c.id, c.channel_id AS "channelId", c.status, c.assigned_to AS "assignedTo", c.unread_count AS "unreadCount",
               c.last_message_at AS "lastMessageAt", ct.display_name AS "contactName", ct.external_id AS "contactId", ct.id AS "contactRowId", ct.blocked AS "blocked", ct.opted_out AS "optedOut", ct.blocked_reason AS "blockedReason",
               ch.label AS "channelLabel", c.last_message_at AS "lastActivity",
-              c.bot_state AS "botState",
+              c.bot_state AS "botState", c.snoozed_until AS "snoozedUntil",
+              EXISTS (SELECT 1 FROM conversation_stars cs WHERE cs.conversation_id = c.id AND cs.user_id = $3) AS "starred",
               (SELECT CASE WHEN lm.direction = 'in' AND c.status = 'open' AND c.bot_state IS DISTINCT FROM 'menu' THEN lm.created_at END
                  FROM messages lm WHERE lm.conversation_id = c.id AND NOT lm.auto ORDER BY lm.created_at DESC LIMIT 1) AS "waitingSince",
               COALESCE((SELECT json_agg(json_build_object('id', t.id, 'name', t.name) ORDER BY lower(t.name)) FROM conversation_tags ctg JOIN tags t ON t.id = ctg.tag_id WHERE ctg.conversation_id = c.id), '[]'::json) AS tags, ch.type AS "channelType", au.name AS "assignedName",
@@ -42,11 +45,13 @@ export function conversationRoutes(app: FastifyInstance, db: Db, mgr: ChannelMan
           AND ($4::boolean OR c.assigned_to = $3 OR (c.assigned_to IS NULL AND c.bot_state IS DISTINCT FROM 'menu'))
           AND ($9::uuid IS NULL OR c.id = $9)
           AND ct.blocked = $10::boolean
+          AND (($11::boolean AND c.snoozed_until > now()) OR (NOT $11::boolean AND (c.snoozed_until IS NULL OR c.snoozed_until <= now())))
+          AND (NOT $12::boolean OR EXISTS (SELECT 1 FROM conversation_stars fs WHERE fs.conversation_id = c.id AND fs.user_id = $3))
           AND ($8::uuid IS NULL OR EXISTS (SELECT 1 FROM conversation_tags xt WHERE xt.conversation_id = c.id AND xt.tag_id = $8))
           AND ($7::text IS NULL OR ct.display_name ILIKE $7 OR ct.external_id ILIKE $7
                OR EXISTS (SELECT 1 FROM messages sm WHERE sm.conversation_id = c.id AND sm.body ILIKE $7))
         ORDER BY c.last_message_at DESC LIMIT $5 OFFSET $6`,
-      [q.status ?? null, q.mine === 'true', u.id, isManager(u), q.limit, q.offset, q.q ? `%${q.q.replace(/[\\%_]/g, '\\$&')}%` : null, q.tag ?? null, q.id ?? null, q.blocked === 'true' && isManager(u)],
+      [q.status ?? null, q.mine === 'true', u.id, isManager(u), q.limit, q.offset, q.q ? `%${q.q.replace(/[\\%_]/g, '\\$&')}%` : null, q.tag ?? null, q.id ?? null, q.blocked === 'true' && isManager(u), q.snoozed === 'true', q.starred === 'true'],
     );
     return rows;
   });
@@ -57,7 +62,7 @@ export function conversationRoutes(app: FastifyInstance, db: Db, mgr: ChannelMan
     const { rows } = await db.query(
       `SELECT COALESCE(sum(c.unread_count), 0)::int AS count
          FROM conversations c JOIN contacts ct ON ct.id = c.contact_id
-        WHERE c.status = 'open' AND NOT ct.blocked
+        WHERE c.status = 'open' AND NOT ct.blocked AND (c.snoozed_until IS NULL OR c.snoozed_until <= now())
           AND ($1::boolean OR c.assigned_to = $2 OR (c.assigned_to IS NULL AND c.bot_state IS DISTINCT FROM 'menu'))`,
       [isManager(u), u.id],
     );
@@ -186,6 +191,39 @@ export function conversationRoutes(app: FastifyInstance, db: Db, mgr: ChannelMan
       `UPDATE conversations SET status = $2, bot_state = CASE WHEN $2 = 'closed' THEN NULL ELSE bot_state END, bot_invalid = CASE WHEN $2 = 'closed' THEN 0 ELSE bot_invalid END WHERE id = $1`,
       [p.data.id, b.data.status],
     );
+    return { ok: true };
+  });
+
+  // Snooze: hide until a time (minutes from now, max 30 days) or wake now with minutes = 0. A new customer message wakes it automatically.
+  app.post('/conversations/:id/snooze', { preHandler: any }, async (req, reply) => {
+    const p = idParam.safeParse(req.params);
+    const b = z.object({ minutes: z.number().int().min(0).max(43200) }).safeParse(req.body);
+    if (!p.success || !b.success) return reply.code(400).send({ error: 'bad_request' });
+    if (!(await loadAccessible(db, req.user!, p.data.id))) return reply.code(404).send({ error: 'not_found' });
+    const { rows } = await db.query(
+      `UPDATE conversations SET snoozed_until = CASE WHEN $2 = 0 THEN NULL ELSE now() + make_interval(mins => $2) END WHERE id = $1 RETURNING snoozed_until AS "snoozedUntil"`,
+      [p.data.id, b.data.minutes],
+    );
+    return rows[0];
+  });
+
+  // Personal star (visible only to the person who set it).
+  app.post('/conversations/:id/star', { preHandler: any }, async (req, reply) => {
+    const p = idParam.safeParse(req.params);
+    const b = z.object({ starred: z.boolean() }).safeParse(req.body);
+    if (!p.success || !b.success) return reply.code(400).send({ error: 'bad_request' });
+    if (!(await loadAccessible(db, req.user!, p.data.id))) return reply.code(404).send({ error: 'not_found' });
+    if (b.data.starred) await db.query('INSERT INTO conversation_stars (user_id, conversation_id) VALUES ($1, $2) ON CONFLICT DO NOTHING', [req.user!.id, p.data.id]);
+    else await db.query('DELETE FROM conversation_stars WHERE user_id = $1 AND conversation_id = $2', [req.user!.id, p.data.id]);
+    return { starred: b.data.starred };
+  });
+
+  // "Mark as unread": bring the conversation back to the top of attention (shared counter, like the customer wrote again).
+  app.post('/conversations/:id/unread', { preHandler: any }, async (req, reply) => {
+    const p = idParam.safeParse(req.params);
+    if (!p.success) return reply.code(400).send({ error: 'bad_request' });
+    if (!(await loadAccessible(db, req.user!, p.data.id))) return reply.code(404).send({ error: 'not_found' });
+    await db.query('UPDATE conversations SET unread_count = GREATEST(unread_count, 1) WHERE id = $1', [p.data.id]);
     return { ok: true };
   });
 

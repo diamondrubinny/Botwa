@@ -102,3 +102,9 @@ Lawyer (privacy, ToS risk, employee monitoring/notice) · Privacy officer (if re
 - [ ] Test passkey registration and login on a real phone and a real desktop browser (automated tests use a virtual authenticator only).
 - [ ] Review custom roles: keep `settings.manage`, `roles.manage`, `users.manage`, `backups.manage`, `privacy.manage` limited to admins; roles with `mfaRequired` need TOTP or a passkey.
 - [ ] Verify the PWA install and phone layout on real iOS and Android devices.
+
+## Web Push (P19)
+- [ ] HTTPS and a valid certificate (push does not work on plain HTTP except localhost).
+- [ ] Add push devices to the personal-data map: endpoint + keys per device, deleted at logout, user removal and when the push service reports the subscription expired. Mention in the privacy policy draft (lawyer review).
+- [ ] Changing `ENCRYPTION_KEY` invalidates the VAPID private key: the server regenerates it and drops all subscriptions, so staff must re-enable alerts.
+- [ ] Test on a real Android and a real iPhone (iOS needs the installed home-screen app).

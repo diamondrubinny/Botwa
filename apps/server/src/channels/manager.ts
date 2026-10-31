@@ -73,6 +73,9 @@ export class ChannelManager {
     return { status: this.statuses.get(channelId) ?? 'stopped', qr: this.lastQr.get(channelId), code: this.lastCode.get(channelId) };
   }
 
+  /** Set by the app: called for each new customer message that reached staff (not blocked, not a duplicate). */
+  onInbound?: (conversationId: string) => void;
+
   private emit(e: BusEvent) {
     this.bus.emit('event', e);
   }
@@ -150,6 +153,7 @@ export class ChannelManager {
             await this.maybeAway(channelId, r.conversationId, m.externalContactId).catch(() => undefined);
           }
           if (r.messageId) this.emit({ channelId, type: 'message', conversationId: r.conversationId, messageId: r.messageId });
+          if (r.messageId && !r.blocked) this.onInbound?.(r.conversationId);
         },
       },
     });
