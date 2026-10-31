@@ -116,6 +116,8 @@ setv() { # setv KEY VALUE  (values never contain '|' or newlines: validated abov
   if grep -q "^$1=" .env; then sed -i "s|^$1=.*|$1=$2|" .env; else printf '%s=%s\n' "$1" "$2" >> .env; fi
 }
 setv DOMAIN "$DOMAIN"; setv APP_ORIGIN "https://$DOMAIN"
+www_ip="$(getent hosts "www.$DOMAIN" 2>/dev/null | awk '{print $1; exit}' || true)"
+if [ -n "$www_ip" ] && [ "$www_ip" = "${dns_ip:-}" ]; then setv APP_ORIGIN "https://$DOMAIN,https://www.$DOMAIN"; ok "www.$DOMAIN points here too - it will be served and accepted as a login origin"; fi
 setv DB_PASSWORD "$DB_PASSWORD"; setv ENCRYPTION_KEY "$ENC_KEY"
 setv MESSAGE_RETENTION_DAYS "$RETENTION"; setv REPORT_TZ "$TZ"
 setv BACKUP_AUTO_HOUR "$BACKUP_HOUR"
@@ -177,6 +179,7 @@ setup_nginx() { # reverse proxy for DOMAIN -> 127.0.0.1:3000, with Let's Encrypt
   local dom conf ip listen80 listen443 email
   dom="$(grep '^DOMAIN=' .env | cut -d= -f2-)"
   APP_PORT_N="$(grep -m1 '^APP_PORT=' .env | cut -d= -f2- || true)"; APP_PORT_N="${APP_PORT_N:-3000}"
+  names="$dom"; grep -m1 '^APP_ORIGIN=' .env | grep -qF "https://www.$dom" && names="$dom www.$dom"   # www alias also accepted by the app
   conf="${WIZARD_NGINX_DIR:-/etc/nginx/conf.d}/botwa-$dom.conf"
   ip=$(ss -ltnH 2>/dev/null | awk '{print $4}' | grep -E ':80$' | grep -vE '^(0\.0\.0\.0|\*|\[::\]|127\.|\[::1\])' | head -1 | sed 's/:80$//' || true)
   listen80="listen ${ip:-0.0.0.0}:80;"; listen443="listen ${ip:-0.0.0.0}:443 ssl;"
@@ -194,17 +197,18 @@ setup_nginx() { # reverse proxy for DOMAIN -> 127.0.0.1:3000, with Let's Encrypt
     }
 LOC
   }
-  { printf 'server {\n    %s\n    server_name %s;\n' "$listen80" "$dom"; printf '    location /.well-known/acme-challenge/ { root /var/www/letsencrypt; }\n'; locs; printf '}\n'; } | $SUDO tee "$conf" >/dev/null
+  { printf 'server {\n    %s\n    server_name %s;\n' "$listen80" "$names"; printf '    location /.well-known/acme-challenge/ { root /var/www/letsencrypt; }\n'; locs; printf '}\n'; } | $SUDO tee "$conf" >/dev/null
   $SUDO mkdir -p /var/www/letsencrypt
   if ! $SUDO nginx -t >/dev/null 2>&1; then $SUDO rm -f "$conf"; warn "nginx config test failed - removed $conf, nothing changed. Add the proxy rule manually (see docs/DEPLOY.md)"; return; fi
   $SUDO systemctl reload nginx && ok "nginx: HTTP proxy for $dom added ($conf)"
   if command -v certbot >/dev/null 2>&1; then
     email="${ADMIN_EMAIL:-$(grep -m1 '^ADMIN_EMAIL=' .env 2>/dev/null | cut -d= -f2-)}"
-    local cb=(certbot certonly --webroot -w /var/www/letsencrypt -d "$dom" --agree-tos --non-interactive)
+    local cb=(certbot certonly --webroot -w /var/www/letsencrypt --expand --agree-tos --non-interactive); local n
+    for n in $names; do cb+=(-d "$n"); done
     if [ -n "$email" ]; then cb+=(-m "$email"); else cb+=(--register-unsafely-without-email); fi
     if $SUDO "${cb[@]}"; then
-      { printf 'server {\n    %s\n    server_name %s;\n    location /.well-known/acme-challenge/ { root /var/www/letsencrypt; }\n    location / { return 301 https://$host$request_uri; }\n}\n' "$listen80" "$dom"
-        printf 'server {\n    %s\n    server_name %s;\n    ssl_certificate /etc/letsencrypt/live/%s/fullchain.pem;\n    ssl_certificate_key /etc/letsencrypt/live/%s/privkey.pem;\n    ssl_protocols TLSv1.2 TLSv1.3;\n' "$listen443" "$dom" "$dom" "$dom"; locs; printf '}\n'; } | $SUDO tee "$conf" >/dev/null
+      { printf 'server {\n    %s\n    server_name %s;\n    location /.well-known/acme-challenge/ { root /var/www/letsencrypt; }\n    location / { return 301 https://$host$request_uri; }\n}\n' "$listen80" "$names"
+        printf 'server {\n    %s\n    server_name %s;\n    ssl_certificate /etc/letsencrypt/live/%s/fullchain.pem;\n    ssl_certificate_key /etc/letsencrypt/live/%s/privkey.pem;\n    ssl_protocols TLSv1.2 TLSv1.3;\n' "$listen443" "$names" "$dom" "$dom"; locs; printf '}\n'; } | $SUDO tee "$conf" >/dev/null
       if $SUDO nginx -t >/dev/null 2>&1; then $SUDO systemctl reload nginx && ok "HTTPS enabled for $dom"
         # certbot renews the certificate by itself, but nginx only serves the new one after a reload
         hook=/etc/letsencrypt/renewal-hooks/deploy/reload-nginx.sh
