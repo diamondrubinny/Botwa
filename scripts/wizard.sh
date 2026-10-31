@@ -205,7 +205,13 @@ LOC
     if $SUDO "${cb[@]}"; then
       { printf 'server {\n    %s\n    server_name %s;\n    location /.well-known/acme-challenge/ { root /var/www/letsencrypt; }\n    location / { return 301 https://$host$request_uri; }\n}\n' "$listen80" "$dom"
         printf 'server {\n    %s\n    server_name %s;\n    ssl_certificate /etc/letsencrypt/live/%s/fullchain.pem;\n    ssl_certificate_key /etc/letsencrypt/live/%s/privkey.pem;\n    ssl_protocols TLSv1.2 TLSv1.3;\n' "$listen443" "$dom" "$dom" "$dom"; locs; printf '}\n'; } | $SUDO tee "$conf" >/dev/null
-      if $SUDO nginx -t >/dev/null 2>&1; then $SUDO systemctl reload nginx && ok "HTTPS enabled for $dom"; else warn "nginx rejected the HTTPS config; HTTP-only proxy is still in place. Check: nginx -t"; fi
+      if $SUDO nginx -t >/dev/null 2>&1; then $SUDO systemctl reload nginx && ok "HTTPS enabled for $dom"
+        # certbot renews the certificate by itself, but nginx only serves the new one after a reload
+        hook=/etc/letsencrypt/renewal-hooks/deploy/reload-nginx.sh
+        if [ ! -e "$hook" ]; then
+          $SUDO mkdir -p "$(dirname "$hook")" && printf '#!/bin/sh\nsystemctl reload nginx\n' | $SUDO tee "$hook" >/dev/null && $SUDO chmod +x "$hook" && ok "Renewal hook installed (nginx reloads after each renewal)"
+        fi
+      else warn "nginx rejected the HTTPS config; HTTP-only proxy is still in place. Check: nginx -t"; fi
     else warn "certbot failed (is the DNS A record for $dom pointing here?). HTTP proxy is active; re-run: certbot certonly --webroot -w /var/www/letsencrypt -d $dom"; fi
   else warn "certbot not installed: install it (apt install certbot) and run: certbot certonly --webroot -w /var/www/letsencrypt -d $dom, then re-run this wizard step manually (docs/DEPLOY.md)"; fi
 }
