@@ -103,6 +103,13 @@ setv MESSAGE_RETENTION_DAYS "$RETENTION"; setv REPORT_TZ "$TZ"
 setv BACKUP_AUTO_HOUR "$BACKUP_HOUR"
 if [ "$MEDIA" = y ]; then setv CLAMAV_HOST clamav; setv COMPOSE_PROFILES media; else setv CLAMAV_HOST ""; fi
 [ "$TG" = y ] && { setv TELEGRAM_API_ID "$TG_API_ID"; setv TELEGRAM_API_HASH "$TG_API_HASH"; }
+# A listener on :80/:443 bound to one specific (non-loopback) address - typically Tailscale - blocks Docker's 0.0.0.0 bind.
+# Then publish Caddy only on this server's primary address instead.
+if command -v ss >/dev/null 2>&1; then
+  specific=$(ss -ltnH 2>/dev/null | awk '{print $4}' | grep -E ':(80|443)$' | grep -vE '^(0\.0\.0\.0|\*|\[::\]|127\.|\[::1\])' || true)
+  primary=$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i=="src") print $(i+1)}' | head -1)
+  if [ -n "$specific" ] && [ -n "$primary" ]; then setv BIND_IP "$primary"; ok "Another service listens on a specific address ($(echo "$specific" | head -1)) - Caddy will bind only $primary"; fi
+fi
 chmod 600 .env
 ok ".env written (permissions 600)"
 fi

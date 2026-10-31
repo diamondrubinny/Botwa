@@ -49,7 +49,8 @@ services:
     restart: unless-stopped
     environment:
       DOMAIN: ${DOMAIN:?set DOMAIN in .env}
-    ports: ["80:80", "443:443"]
+    # BIND_IP: bind only the public address (needed when another service, e.g. Tailscale, already listens on :443 of another IP)
+    ports: ["${BIND_IP:-0.0.0.0}:80:80", "${BIND_IP:-0.0.0.0}:443:443"]
     volumes:
       - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data
