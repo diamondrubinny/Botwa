@@ -15,6 +15,7 @@ import { passkeyRoutes } from './routes/passkeys.js';
 import { roleRoutes } from './routes/roles.js';
 import { backupRoutes } from './routes/backups.js';
 import { pushRoutes } from './routes/push.js';
+import { webhookRoutes } from './routes/webhooks.js';
 import { PushService } from './push.js';
 import { contactRoutes } from './routes/contacts.js';
 import { tagRoutes } from './routes/tags.js';
@@ -50,7 +51,7 @@ export async function buildApp(cfg: Config, db: Db, mgr: ChannelManager, media: 
   const allowedOrigins = cfg.APP_ORIGIN.split(',').map((o) => o.trim().replace(/\/$/, ''));
   // CSRF defence in depth (cookie is already SameSite=Strict): mutating requests must come from our origin.
   app.addHook('onRequest', async (req, reply) => {
-    if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method)) {
+    if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method) && !req.url.startsWith('/webhooks/')) { // webhooks authenticate by HMAC signature instead
       const origin = req.headers.origin;
       if (!origin || !allowedOrigins.includes(origin)) return reply.code(403).send({ error: 'bad_origin' });
     }
@@ -77,7 +78,7 @@ export async function buildApp(cfg: Config, db: Db, mgr: ChannelManager, media: 
   passkeyRoutes(app, db, cfg);
   userRoutes(app, db);
   roleRoutes(app, db);
-  channelRoutes(app, db, mgr);
+  channelRoutes(app, db, mgr, cfg);
   conversationRoutes(app, db, mgr, media);
   mediaRoutes(app, db, mgr, media);
   reportRoutes(app, db, cfg);
@@ -90,5 +91,6 @@ export async function buildApp(cfg: Config, db: Db, mgr: ChannelManager, media: 
   await push.init();
   mgr.onInbound = (id) => void push.notifyInbound(id).catch(() => undefined);
   pushRoutes(app, db, push);
+  webhookRoutes(app, db, mgr);
   return app;
 }

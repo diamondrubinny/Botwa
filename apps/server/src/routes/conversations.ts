@@ -4,7 +4,7 @@ import { audit } from '../audit.js';
 import { isManager, loadAccessible, sendBlock } from '../access.js';
 import { requireAuth } from '../auth.js';
 import type { ChannelManager } from '../channels/manager.js';
-import { loadSending, SendError } from '../channels/sender.js';
+import { loadSending, PolicyRejected, SendError } from '../channels/sender.js';
 import type { Db } from '../db.js';
 import { MediaService } from '../media/store.js';
 
@@ -139,6 +139,7 @@ export function conversationRoutes(app: FastifyInstance, db: Db, mgr: ChannelMan
     } catch (e) {
       if ((e as Error).message === 'channel_not_connected') return reply.code(409).send({ error: 'channel_not_connected' });
       if (e instanceof SendError) return reply.code(429).send({ error: e.code });
+      if (e instanceof PolicyRejected) return reply.code(409).send({ error: e.code });
       req.log.error({ err: e }, 'send failed');
       return reply.code(502).send({ error: 'send_failed' });
     }

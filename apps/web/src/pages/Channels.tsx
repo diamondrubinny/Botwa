@@ -23,13 +23,14 @@ export function Channels({ me }: { me: Me }) {
   const isAdmin = can(me, 'channels.manage');
   const [list, setList] = useState<Channel[]>([]);
   const [label, setLabel] = useState('');
-  const [type, setType] = useState<'whatsapp' | 'telegram'>('whatsapp');
+  const [type, setType] = useState<'whatsapp' | 'whatsapp_cloud' | 'telegram'>('whatsapp');
   const [msg, setMsg] = useState('');
   const [linking, setLinking] = useState<string | null>(null);
   const [pending, setPending] = useState<Pending>(null);
   const [health, setHealth] = useState<ChannelHealth[]>([]);
   usePoll(async () => setHealth(await api<ChannelHealth[]>('GET', '/channels/health').catch(() => [])), 15000);
   const [pairFor, setPairFor] = useState<string | null>(null);
+  const [cloudFor, setCloudFor] = useState<string | null>(null);
   const [phone, setPhone] = useState('');
 
   const reload = async () => setList(await api<Channel[]>('GET', '/channels').catch(() => []));
@@ -95,14 +96,21 @@ export function Channels({ me }: { me: Me }) {
           <li key={ch.id} className="card">
             <div className="row">
               <strong>{ch.label}</strong>
-              <span>{ch.type === 'whatsapp' ? 'ווצאפ' : 'טלגרם'}</span>
+              <span>{ch.type === 'whatsapp' ? 'ווצאפ' : ch.type === 'whatsapp_cloud' ? 'ווצאפ רשמי (Cloud API)' : 'טלגרם'}</span>
               <span className={`badge ${ch.status}`}>{t.status[ch.status] ?? ch.status}</span>
             </div>
             {isAdmin && (
               <div className="row" style={{ marginTop: '.5rem' }}>
-                <button className="primary" onClick={() => { setLinking(ch.id); void run(() => api('POST', `/channels/${ch.id}/start`)); }}>
-                  קישור / הפעלה
-                </button>
+                {ch.type === 'whatsapp_cloud' ? (
+                  <>
+                    <button className="primary" onClick={() => setCloudFor(cloudFor === ch.id ? null : ch.id)} aria-expanded={cloudFor === ch.id}>הגדרת הערוץ הרשמי</button>
+                    <button onClick={() => run(() => api('POST', `/channels/${ch.id}/start`))}>הפעלה</button>
+                  </>
+                ) : (
+                  <button className="primary" onClick={() => { setLinking(ch.id); void run(() => api('POST', `/channels/${ch.id}/start`)); }}>
+                    קישור / הפעלה
+                  </button>
+                )}
                 {ch.type === 'whatsapp' && (
                   <button onClick={() => { setPairFor(pairFor === ch.id ? null : ch.id); setPhone(''); }} aria-expanded={pairFor === ch.id}>קישור עם מספר טלפון (בלי QR)</button>
                 )}
@@ -121,6 +129,7 @@ export function Channels({ me }: { me: Me }) {
                 <button className="primary" type="submit">קבלת קוד קישור</button>
               </form>
             )}
+            {cloudFor === ch.id && <CloudPanel channel={ch} onSaved={() => { setCloudFor(null); void reload(); }} />}
             {linking === ch.id && <LinkPanel channel={ch} onClose={() => setLinking(null)} />}
           </li>
         ))}
@@ -138,9 +147,11 @@ export function Channels({ me }: { me: Me }) {
             <label htmlFor="ch-type">פלטפורמה</label>
             <select id="ch-type" value={type} onChange={(e) => setType(e.target.value as 'whatsapp')}>
               <option value="whatsapp">ווצאפ (סריקת QR)</option>
+              <option value="whatsapp_cloud">ווצאפ רשמי (WhatsApp Business Cloud API)</option>
               <option value="telegram">טלגרם (חשבון משתמש, סריקת QR)</option>
             </select>
-            <p className="hint">הערה: החיבור לווצאפ נעשה באמצעות ספרייה לא רשמית וקיים סיכון לחסימת המספר. גם שליחה אוטומטית מחשבון טלגרם עלולה להוביל להגבלת החשבון.</p>
+            {type === 'whatsapp_cloud' && <p className="hint">הדרך המותרת והיציבה: מספר עסקי מאומת אצל Meta, בלי סיכון חסימה בגלל ספרייה לא רשמית. דורשת חשבון Meta Business ועלולה לעלות כסף לפי שיחה. ניתן לשלוח טקסט חופשי רק עד 24 שעות מהודעת הלקוח האחרונה.</p>}
+            <p className="hint">הערה: החיבור לווצאפ בסריקת QR נעשה באמצעות ספרייה לא רשמית וקיים סיכון לחסימת המספר. גם שליחה אוטומטית מחשבון טלגרם עלולה להוביל להגבלת החשבון.</p>
           </div>
           <button className="primary" type="submit">יצירה</button>
         </form>
@@ -251,5 +262,57 @@ function LinkPanel({ channel, onClose }: { channel: Channel; onClose: () => void
       {(status === 'stopped' || status === 'logged_out') && <p>לא התקבלה סריקה. לחצו "קישור / הפעלה" לניסיון נוסף.</p>}
       <button onClick={onClose}>סגירה</button>
     </section>
+  );
+}
+
+
+/** Credentials for the official WhatsApp channel, plus the webhook details to paste into Meta's app dashboard. */
+function CloudPanel({ channel, onSaved }: { channel: Channel; onSaved: () => void }) {
+  const [info, setInfo] = useState<{ configured: boolean; phoneNumberId?: string; verifyToken?: string; webhookUrl: string } | null>(null);
+  const [phoneNumberId, setPhoneNumberId] = useState('');
+  const [accessToken, setAccessToken] = useState('');
+  const [appSecret, setAppSecret] = useState('');
+  const [msg, setMsg] = useState('');
+  const [busy, setBusy] = useState(false);
+  useEffect(() => { void api<typeof info>('GET', `/channels/${channel.id}/cloud`).then((d) => { setInfo(d); if (d?.phoneNumberId) setPhoneNumberId(d.phoneNumberId); }).catch(() => undefined); }, [channel.id]);
+
+  async function save(e: FormEvent) {
+    e.preventDefault();
+    setBusy(true); setMsg('');
+    try {
+      const r = await api<{ status: string }>('PUT', `/channels/${channel.id}/cloud`, { phoneNumberId, accessToken, appSecret });
+      setAccessToken(''); setAppSecret('');
+      setMsg(r.status === 'connected' ? 'החיבור הצליח.' : 'הפרטים נשמרו אך החיבור ל-Meta נכשל. בדקו את מזהה המספר ואת האסימון.');
+      onSaved();
+    } catch (er) { setMsg(errText(er instanceof ApiError ? er.code : 'generic')); }
+    setBusy(false);
+  }
+  const copy = (v: string) => void navigator.clipboard?.writeText(v).catch(() => undefined);
+
+  return (
+    <div className="card">
+      <h3>הגדרת ווצאפ רשמי</h3>
+      <ol>
+        <li>ב-Meta for Developers: צרו אפליקציה מסוג Business והוסיפו את המוצר WhatsApp.</li>
+        <li>העתיקו את <strong>Phone number ID</strong>, צרו אסימון גישה קבוע (System User) ואת <strong>App secret</strong> (הגדרות האפליקציה ← Basic).</li>
+        <li>הדביקו אותם בטופס. הערכים נשמרים מוצפנים ולא יוצגו שוב.</li>
+        <li>ב-WhatsApp ← Configuration ← Webhook: הדביקו את הכתובת ואת ה-Verify token שלמטה, ואז הרשמו (Subscribe) לשדה <span dir="ltr">messages</span>.</li>
+      </ol>
+      <p className="hint">שמות השדות והשלבים אצל Meta משתנים מעת לעת. יש לאמת מול התיעוד הרשמי.</p>
+      {info && (
+        <dl>
+          <dt>כתובת Webhook (Callback URL)</dt>
+          <dd dir="ltr"><code>{info.webhookUrl}</code> <button type="button" onClick={() => copy(info.webhookUrl)}>העתקה</button></dd>
+          {info.verifyToken && (<><dt>Verify token</dt><dd dir="ltr"><code>{info.verifyToken}</code> <button type="button" onClick={() => copy(info.verifyToken!)}>העתקה</button></dd></>)}
+        </dl>
+      )}
+      <form onSubmit={save}>
+        <div className="field"><label htmlFor={`pn-${channel.id}`}>Phone number ID</label><input id={`pn-${channel.id}`} required inputMode="numeric" dir="ltr" pattern="\d{5,32}" value={phoneNumberId} onChange={(e) => setPhoneNumberId(e.target.value.replace(/\D/g, ''))} /></div>
+        <div className="field"><label htmlFor={`tk-${channel.id}`}>אסימון גישה (Access token)</label><input id={`tk-${channel.id}`} required type="password" autoComplete="off" dir="ltr" minLength={20} value={accessToken} onChange={(e) => setAccessToken(e.target.value.trim())} /></div>
+        <div className="field"><label htmlFor={`as-${channel.id}`}>App secret</label><input id={`as-${channel.id}`} required type="password" autoComplete="off" dir="ltr" minLength={16} value={appSecret} onChange={(e) => setAppSecret(e.target.value.trim())} /></div>
+        <button className="primary" type="submit" disabled={busy}>{info?.configured ? 'עדכון ופתיחת חיבור' : 'שמירה וחיבור'}</button>
+        <p role="status" className={msg.startsWith('החיבור הצליח') ? 'ok' : 'error'}>{msg}</p>
+      </form>
+    </div>
   );
 }

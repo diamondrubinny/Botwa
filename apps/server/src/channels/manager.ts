@@ -12,9 +12,10 @@ import { MediaService } from '../media/store.js';
 import { loadBusinessHours } from '../routes/settings.js';
 import { sendAlert } from '../alerts.js';
 import { createAuthStore } from './auth-store.js';
-import { ChannelSender, loadSending as loadSendingRaw, SendError, TEST_SENDING } from './sender.js';
+import { ChannelSender, loadSending as loadSendingRaw, SendError, TEST_SENDING, type SendingSettings } from './sender.js';
 import type { AdapterFactory, ChannelAdapter, ChannelStatus, ChannelType, OutboundMedia, StartOptions } from './types.js';
 import { TelegramAdapter } from './telegram.js';
+import { CLOUD_CREDS_KEY, newVerifyToken, WhatsAppCloudAdapter, type CloudCreds } from './whatsapp-cloud.js';
 import { WhatsAppAdapter } from './whatsapp.js';
 
 export type BusEvent =
@@ -26,6 +27,7 @@ export type BusEvent =
 export function createDefaultFactory(cfg: Config): AdapterFactory {
   return (type, ctx) => {
     if (type === 'whatsapp') return new WhatsAppAdapter(ctx);
+    if (type === 'whatsapp_cloud') return new WhatsAppCloudAdapter(ctx, undefined, cfg.WHATSAPP_GRAPH_VERSION);
     if (type === 'telegram' && cfg.TELEGRAM_API_ID && cfg.TELEGRAM_API_HASH) {
       return new TelegramAdapter(ctx, { apiId: cfg.TELEGRAM_API_ID, apiHash: cfg.TELEGRAM_API_HASH });
     }
@@ -39,6 +41,7 @@ export class ChannelManager {
   private lastQr = new Map<string, string>();
   private lastCode = new Map<string, string>();
   private statuses = new Map<string, ChannelStatus>();
+  private types = new Map<string, ChannelType>();
   private readonly sender: ChannelSender;
   private readonly sendingFallback?: typeof TEST_SENDING;
   private loadSending() { return loadSendingRaw(this.db, this.sendingFallback); }
@@ -108,6 +111,7 @@ export class ChannelManager {
     if (this.adapters.has(channelId)) return;
     const { rows } = await this.db.query('SELECT type FROM channels WHERE id=$1', [channelId]);
     if (!rows[0]) throw new Error('not_found');
+    this.types.set(channelId, rows[0].type as ChannelType);
     const adapter = this.factory(rows[0].type, {
       channelId,
       store: createAuthStore(this.db, channelId, this.cfg.ENCRYPTION_KEY),
@@ -209,7 +213,7 @@ export class ChannelManager {
     const a = this.adapters.get(channelId);
     if (!a || this.statuses.get(channelId) !== 'connected') throw new Error('channel_not_connected');
     await this.assertNotPaused(channelId);
-    const settings = await this.loadSending();
+    const settings = this.effective(channelId, await this.loadSending());
     return this.sender.run(
       channelId,
       settings,
@@ -219,6 +223,36 @@ export class ChannelManager {
       },
       { maxWaitMs: opts.background ? 45_000 : 8_000 },
     );
+  }
+
+  /** The official API needs no human-like pacing or warm-up (Meta enforces its own limits); the per-minute/day caps still apply. */
+  private effective(channelId: string, s: SendingSettings): SendingSettings {
+    return this.types.get(channelId) === 'whatsapp_cloud' ? { ...s, warmup: false, typing: false, minDelayMs: 0, maxDelayMs: Math.min(s.maxDelayMs, 300) } : s;
+  }
+
+  // ---- Official WhatsApp (Cloud API) -------------------------------------------------------------------------------
+  /** The running official-API adapter for webhook handling (null when the channel is not started or is another type). */
+  cloudAdapter(channelId: string): WhatsAppCloudAdapter | null {
+    const a = this.adapters.get(channelId);
+    return a instanceof WhatsAppCloudAdapter ? a : null;
+  }
+
+  async getCloudConfig(channelId: string): Promise<{ configured: boolean; phoneNumberId?: string; verifyToken?: string }> {
+    const raw = await createAuthStore(this.db, channelId, this.cfg.ENCRYPTION_KEY).get(CLOUD_CREDS_KEY);
+    if (!raw) return { configured: false };
+    const c = JSON.parse(raw) as CloudCreds;
+    return { configured: true, phoneNumberId: c.phoneNumberId, verifyToken: c.verifyToken };
+  }
+
+  /** Save the official-API credentials (encrypted at rest) and restart the channel so they take effect. The verify token is kept across edits. */
+  async setCloudCredentials(channelId: string, c: { phoneNumberId: string; accessToken: string; appSecret: string }): Promise<void> {
+    const store = createAuthStore(this.db, channelId, this.cfg.ENCRYPTION_KEY);
+    const prev = await store.get(CLOUD_CREDS_KEY);
+    const verifyToken = prev ? (JSON.parse(prev) as CloudCreds).verifyToken : newVerifyToken();
+    await store.set(CLOUD_CREDS_KEY, JSON.stringify({ ...c, verifyToken } satisfies CloudCreds));
+    const a = this.adapters.get(channelId);
+    if (a) await a.stop().catch(() => undefined);
+    await this.start(channelId);
   }
 
   private async assertNotPaused(channelId: string): Promise<void> {
@@ -327,7 +361,7 @@ export class ChannelManager {
     if (!a.sendMedia) throw new Error('media_unsupported');
     await this.assertNotPaused(channelId);
     const send = a.sendMedia.bind(a);
-    return this.sender.run(channelId, await this.loadSending(), () => send(externalContactId, media), { maxWaitMs: 8_000 });
+    return this.sender.run(channelId, this.effective(channelId, await this.loadSending()), () => send(externalContactId, media), { maxWaitMs: 8_000 });
   }
 
   async startAll(): Promise<void> {

@@ -108,3 +108,10 @@ Lawyer (privacy, ToS risk, employee monitoring/notice) · Privacy officer (if re
 - [ ] Add push devices to the personal-data map: endpoint + keys per device, deleted at logout, user removal and when the push service reports the subscription expired. Mention in the privacy policy draft (lawyer review).
 - [ ] Changing `ENCRYPTION_KEY` invalidates the VAPID private key: the server regenerates it and drops all subscriptions, so staff must re-enable alerts.
 - [ ] Test on a real Android and a real iPhone (iOS needs the installed home-screen app).
+
+## Official WhatsApp channel (P21)
+- [ ] Verify every Meta-specific detail (API version, 24h window, error codes, pricing, template rules) against the current official documentation.
+- [ ] Real end-to-end test with a verified business number (inbound text/media, reply, read receipt, expired-token behaviour). Only simulated Meta responses were tested.
+- [ ] Reverse proxy passes `/webhooks/` unchanged over HTTPS; no WAF rule blocks Meta's POSTs.
+- [ ] Add Meta (WhatsApp) to the data map and privacy policy draft; check DPA / international transfer (lawyer).
+- [ ] Rotate the access token and app secret on staff changes; they are write-only in the panel.

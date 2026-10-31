@@ -14,13 +14,14 @@ export interface AccessibleConversation {
   external_id: string;
   blocked: boolean;
   opted_out: boolean;
+  channel_type?: string;
 }
 
 /** Agents may only touch conversations assigned to them or still unassigned. Returns null (=> 404) otherwise. */
 export async function loadAccessible(db: Db, user: AuthUser, id: string): Promise<AccessibleConversation | null> {
   const { rows } = await db.query(
-    `SELECT c.id, c.channel_id, c.assigned_to, c.status, ct.external_id, ct.blocked, ct.opted_out
-       FROM conversations c JOIN contacts ct ON ct.id = c.contact_id WHERE c.id = $1`,
+    `SELECT c.id, c.channel_id, c.assigned_to, c.status, ct.external_id, ct.blocked, ct.opted_out, ch.type AS channel_type
+       FROM conversations c JOIN contacts ct ON ct.id = c.contact_id JOIN channels ch ON ch.id = c.channel_id WHERE c.id = $1`,
     [id],
   );
   const c = rows[0];
@@ -38,6 +39,8 @@ export type SendBlock = 'contact_blocked' | 'contact_opted_out' | 'outside_reply
 export async function sendBlock(db: Db, conv: AccessibleConversation, replyWindowHours: number): Promise<SendBlock | null> {
   if (conv.blocked) return 'contact_blocked';
   if (conv.opted_out) return 'contact_opted_out';
+  // The official API only allows free-form messages within 24h of the customer's last message (verify against Meta's docs).
+  if (conv.channel_type === 'whatsapp_cloud') replyWindowHours = replyWindowHours > 0 ? Math.min(replyWindowHours, 24) : 24;
   if (replyWindowHours > 0) {
     const { rows } = await db.query(
       `SELECT (max(created_at) IS NOT NULL AND max(created_at) > now() - make_interval(hours => $2)) AS ok

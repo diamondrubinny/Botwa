@@ -60,6 +60,17 @@ await page.waitForSelector('text=השליחה מושהית ידנית.');
 await axe('channels: paused');
 await page.click('button:has-text("חידוש שליחה")');
 await page.waitForSelector('button:has-text("עצירת חירום של שליחה")');
+// official WhatsApp (Cloud API) channel: create, configure panel is accessible, credentials never shown back, then remove
+await page.fill('#ch-label', 'רשמי'); await page.selectOption('#ch-type', 'whatsapp_cloud'); await page.click('button:has-text("יצירה")');
+await page.waitForSelector('li.card:has-text("רשמי")');
+await page.click('li.card:has-text("רשמי") >> button:has-text("הגדרת הערוץ הרשמי")');
+await page.waitForSelector('text=כתובת Webhook (Callback URL)');
+check('official channel shows webhook URL and verify token', (await page.textContent('li.card:has-text("רשמי")'))?.includes('/webhooks/whatsapp/') && (await page.textContent('li.card:has-text("רשמי")'))?.includes('Verify token'));
+await axe('channels: official WhatsApp setup');
+await page.click('li.card:has-text("רשמי") >> button:has-text("מחיקת ערוץ")');
+await page.click('dialog[open] button:has-text("אישור")');
+await page.waitForFunction(() => !document.body.textContent?.includes('ווצאפ רשמי (Cloud API)'));
+check('official channel can be removed', true);
 check('emergency pause and resume work from the panel', true);
 await axe('channels');
 await page.click('text=קישור עם מספר טלפון (בלי QR)');

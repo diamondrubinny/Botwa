@@ -38,6 +38,11 @@ export class SendError extends Error {
   constructor(public code: 'send_throttled' | 'daily_limit' | 'queue_full' | 'channel_paused') { super(code); }
 }
 
+/** The platform refused a message for policy reasons (e.g. outside the 24h window). Not a failure of the channel: never counts toward auto-pause. */
+export class PolicyRejected extends Error {
+  constructor(public code: 'outside_reply_window') { super(code); }
+}
+
 interface Lane { tail: Promise<unknown>; last: number; recent: number[]; pending: number; failures: number; pausedUntil: number }
 const MAX_QUEUE = 50;
 
@@ -102,6 +107,7 @@ export class ChannelSender {
         return out;
       } catch (e) {
         // repeated failures usually mean the platform is rejecting us: stop for a while instead of hammering it
+        if (e instanceof PolicyRejected) throw e;
         lane.failures++;
         if (settings.failuresBeforePause > 0 && lane.failures >= settings.failuresBeforePause) {
           lane.pausedUntil = this.now() + settings.pauseMinutes * 60_000;

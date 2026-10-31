@@ -4,6 +4,7 @@ import { audit } from '../audit.js';
 import { loadSession, requireAuth } from '../auth.js';
 import { can } from '../permissions.js';
 import type { ChannelManager, BusEvent } from '../channels/manager.js';
+import type { Config } from '../config.js';
 import type { Db } from '../db.js';
 import { warmupCap } from '../channels/sender.js';
 
@@ -28,7 +29,7 @@ export function assessRisk(x: { status: string; day: number; cap: number; inboun
   return { level: score >= 5 ? 'high' : score >= 2 ? 'medium' : 'low', reasons };
 }
 
-export function channelRoutes(app: FastifyInstance, db: Db, mgr: ChannelManager) {
+export function channelRoutes(app: FastifyInstance, db: Db, mgr: ChannelManager, cfg: Config) {
   const adminOnly = requireAuth(db, 'channels.manage');
   const view = requireAuth(db, 'channels.view');
 
@@ -57,7 +58,7 @@ export function channelRoutes(app: FastifyInstance, db: Db, mgr: ChannelManager)
       const pausedRow = (await db.query('SELECT paused FROM channels WHERE id = $1', [ch.id])).rows[0];
       const autoPausedUntil = mgr.isAutoPausedUntil(ch.id);
       const recentAutoPauses = (await db.query(`SELECT count(*)::int AS n FROM channel_events WHERE channel_id = $1 AND kind = 'auto_paused' AND created_at > now() - interval '24 hours'`, [ch.id])).rows[0].n as number;
-      const risk = assessRisk({ status, day: u.day, cap, inbound24h: inb, ageDays: u.ageDays, recentAutoPauses });
+      const risk = ch.type === 'whatsapp_cloud' ? { level: 'low' as const, reasons: [] as string[] } : assessRisk({ status, day: u.day, cap, inbound24h: inb, ageDays: u.ageDays, recentAutoPauses });
       out.push({
         id: ch.id, label: ch.label, type: ch.type, status, sentLast24h: u.day, inboundLast24h: inb, sentLastMinute: u.minute, dailyCap: cap, ageDays: Math.floor(u.ageDays),
         paused: !!pausedRow?.paused, autoPausedUntil: autoPausedUntil > Date.now() ? new Date(autoPausedUntil).toISOString() : null,
@@ -68,7 +69,7 @@ export function channelRoutes(app: FastifyInstance, db: Db, mgr: ChannelManager)
   });
 
   app.post('/channels', { preHandler: adminOnly }, async (req, reply) => {
-    const b = z.object({ type: z.enum(['whatsapp', 'telegram']), label: z.string().min(1).max(80) }).safeParse(req.body);
+    const b = z.object({ type: z.enum(['whatsapp', 'whatsapp_cloud', 'telegram']), label: z.string().min(1).max(80) }).safeParse(req.body);
     if (!b.success) return reply.code(400).send({ error: 'bad_request' });
     if (!mgr.supports(b.data.type)) return reply.code(501).send({ error: 'unsupported_channel_type' });
     const { rows } = await db.query(
@@ -98,6 +99,33 @@ export function channelRoutes(app: FastifyInstance, db: Db, mgr: ChannelManager)
       return { ok: true };
     });
   }
+
+  // Official WhatsApp (Cloud API): credentials + the webhook details to paste into Meta's app dashboard.
+  const cloudWebhook = (id: string, origin: string) => `${origin.split(',')[0]!.trim().replace(/\/$/, '')}/webhooks/whatsapp/${id}`;
+  app.get('/channels/:id/cloud', { preHandler: adminOnly }, async (req, reply) => {
+    const p = idParam.safeParse(req.params);
+    if (!p.success || (await db.query(`SELECT 1 FROM channels WHERE id=$1 AND type='whatsapp_cloud'`, [p.data.id])).rowCount !== 1) return reply.code(404).send({ error: 'not_found' });
+    const c = await mgr.getCloudConfig(p.data.id);
+    return { ...c, webhookUrl: cloudWebhook(p.data.id, cfg.APP_ORIGIN) };
+  });
+  app.put('/channels/:id/cloud', { preHandler: adminOnly, config: { rateLimit: { max: 10, timeWindow: '1 minute' } } }, async (req, reply) => {
+    const p = idParam.safeParse(req.params);
+    const b = z.object({
+      phoneNumberId: z.string().regex(/^\d{5,32}$/),
+      accessToken: z.string().min(20).max(1000).regex(/^[\w.\-~+/=]+$/),
+      appSecret: z.string().min(16).max(200).regex(/^[\w.\-~+/=]+$/),
+    }).safeParse(req.body);
+    if (!p.success || !b.success) return reply.code(400).send({ error: 'bad_request' });
+    if ((await db.query(`SELECT 1 FROM channels WHERE id=$1 AND type='whatsapp_cloud'`, [p.data.id])).rowCount !== 1) return reply.code(404).send({ error: 'not_found' });
+    try {
+      await mgr.setCloudCredentials(p.data.id, b.data);
+    } catch (e) {
+      req.log.error({ err: e }, 'cloud credentials failed');
+      return reply.code(502).send({ error: 'channel_error' });
+    }
+    await audit(db, { actorId: req.user!.id, action: 'channel.cloud_credentials', target: p.data.id, ip: req.ip }); // never logs the values
+    return { ok: true, status: mgr.snapshot(p.data.id).status };
+  });
 
   // Telegram two-step verification password during QR login. Not persisted, not logged.
   app.post('/channels/:id/password', { preHandler: adminOnly, config: { rateLimit: { max: 10, timeWindow: '1 minute' } } }, async (req, reply) => {

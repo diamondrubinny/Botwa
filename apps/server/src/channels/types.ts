@@ -1,4 +1,4 @@
-export type ChannelType = 'whatsapp' | 'telegram';
+export type ChannelType = 'whatsapp' | 'whatsapp_cloud' | 'telegram';
 export type ChannelStatus = 'stopped' | 'connecting' | 'qr' | 'connected' | 'logged_out' | 'password' | 'restricted' | 'error';
 
 export interface InboundMedia {

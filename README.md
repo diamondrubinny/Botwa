@@ -34,6 +34,7 @@ Automated checks do not replace manual screen-reader testing (NVDA/VoiceOver) an
 See [docs/DEPLOY.md](docs/DEPLOY.md) (Compose: Postgres + app + Caddy with automatic HTTPS, backups, restore).
 
 ## Documentation
+- docs/WHATSAPP_OFFICIAL.he.md: official WhatsApp channel (Cloud API) setup
 - docs/ROADMAP.he.md: researched feature proposals (not yet built)
 - [docs/DEPLOY.md](docs/DEPLOY.md) – install on Ubuntu (Compose + Caddy HTTPS), backup/restore
 - [docs/USER_GUIDE.he.md](docs/USER_GUIDE.he.md) – staff guide (Hebrew)
@@ -74,6 +75,9 @@ Agents see only conversations assigned to them or unassigned; supervisors/admins
 - `GET /push/key`, `POST /push/subscribe`, `POST /push/unsubscribe` (Web Push; HTTPS required, endpoints limited to FCM/Mozilla/Apple/Windows push services).
 - `POST /backups/:name/verify` (restore rehearsal, no DB touched); CLI: `node dist/scripts/verify-backup.js <file>`.
 - `/reports/summary` now also returns `byHour` and `topTags`.
+
+## API (P21: official WhatsApp)
+- `GET/PUT /channels/:id/cloud` (channels.manage): webhook URL + verify token / save credentials. Public `GET/POST /webhooks/whatsapp/:channelId` (HMAC signature, no session).
 
 ## Attachments (images, PDF, Word/Excel, audio, MP4)
 Disabled unless an antivirus daemon is configured (`CLAMAV_HOST`; Docker: `docker compose --profile media up -d` and `CLAMAV_HOST=clamav`). Fail-closed pipeline: file type decided by **content** allowlist (not name/MIME; SVG/HTML/exe/archives blocked) -> stored under a random id in `MEDIA_DIR/quarantine` (0600, outside any web root) -> ClamAV INSTREAM scan -> moved to `clean/` only if OK; infected files are deleted and audited. Files are served only when `clean`, behind login + the conversation's access rules, with `nosniff`, `CSP: sandbox`, and `attachment` disposition for everything except images. Staff uploads are scanned *before* being sent to the customer. If the scanner is down, inbound files stay pending (retried every minute) and uploads return 503.
