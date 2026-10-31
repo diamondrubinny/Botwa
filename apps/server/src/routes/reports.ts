@@ -15,7 +15,7 @@ export function csvCell(v: unknown): string {
 export const toCsv = (rows: unknown[][]) => '\uFEFF' + rows.map((r) => r.map(csvCell).join(',')).join('\r\n') + '\r\n';
 
 export function reportRoutes(app: FastifyInstance, db: Db, cfg: Config) {
-  const managers = requireAuth(db, ['admin', 'supervisor']);
+  const managers = requireAuth(db, 'reports.view');
 
   app.get('/reports/export.csv', { preHandler: managers }, async (req, reply) => {
     const q = z.object({ days: z.coerce.number().int().min(1).max(365).default(30), kind: z.enum(['agents', 'daily']).default('agents') }).safeParse(req.query);

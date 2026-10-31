@@ -11,6 +11,8 @@ import { userRoutes } from './routes/users.js';
 import { channelRoutes } from './routes/channels.js';
 import multipart from '@fastify/multipart';
 import { MediaService } from './media/store.js';
+import { passkeyRoutes } from './routes/passkeys.js';
+import { roleRoutes } from './routes/roles.js';
 import { backupRoutes } from './routes/backups.js';
 import { contactRoutes } from './routes/contacts.js';
 import { tagRoutes } from './routes/tags.js';
@@ -70,7 +72,9 @@ export async function buildApp(cfg: Config, db: Db, mgr: ChannelManager, media: 
   }
 
   authRoutes(app, db, cfg);
+  passkeyRoutes(app, db, cfg);
   userRoutes(app, db);
+  roleRoutes(app, db);
   channelRoutes(app, db, mgr);
   conversationRoutes(app, db, mgr, media);
   mediaRoutes(app, db, mgr, media);

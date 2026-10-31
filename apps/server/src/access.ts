@@ -1,7 +1,10 @@
 import type { AuthUser } from './auth.js';
 import type { Db } from './db.js';
 
-export const isManager = (u: AuthUser) => u.role === 'admin' || u.role === 'supervisor';
+import { can } from './permissions.js';
+
+/** sees every conversation (supervisors/admins and any custom role granted inbox.view_all) */
+export const isManager = (u: AuthUser) => can(u, 'inbox.view_all');
 
 export interface AccessibleConversation {
   id: string;

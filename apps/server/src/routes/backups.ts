@@ -9,7 +9,7 @@ import { unlink } from 'node:fs/promises';
 
 /** Admin-only. Backups are encrypted at rest; downloading one is audited. Restore is CLI-only by design. */
 export function backupRoutes(app: FastifyInstance, db: Db, cfg: Config) {
-  const adminOnly = requireAuth(db, ['admin']);
+  const adminOnly = requireAuth(db, 'backups.manage');
 
   app.get('/backups', { preHandler: adminOnly }, async () => listBackups(cfg));
 

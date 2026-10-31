@@ -2,7 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import { authenticator } from 'otplib';
 import { z } from 'zod';
 import { audit } from '../audit.js';
-import { cookieOptions, isPrivileged, requireAuth, SESSION_COOKIE } from '../auth.js';
+import { needsMfaEnrollment, requireAuth, SESSION_COOKIE, startSession } from '../auth.js';
 import type { Config } from '../config.js';
 import { decrypt, encrypt, newToken, sha256 } from '../crypto.js';
 import type { Db } from '../db.js';
@@ -61,14 +61,8 @@ export function authRoutes(app: FastifyInstance, db: Db, cfg: Config) {
     }
 
     await db.query('UPDATE users SET failed_logins = 0, locked_until = NULL WHERE id = $1', [u.id]);
-    const token = newToken();
-    await db.query(
-      `INSERT INTO sessions (user_id, token_hash, ip, user_agent, expires_at)
-       VALUES ($1,$2,$3,$4, now() + make_interval(hours => $5))`,
-      [u.id, sha256(token), req.ip, (req.headers['user-agent'] ?? '').slice(0, 300), cfg.SESSION_TTL_HOURS],
-    );
+    await startSession(db, cfg, req, reply, u.id);
     await audit(db, { actorId: u.id, action: 'login.success', ip: req.ip });
-    reply.setCookie(SESSION_COOKIE, token, cookieOptions(cfg));
     return { ok: true };
   });
 
@@ -88,8 +82,11 @@ export function authRoutes(app: FastifyInstance, db: Db, cfg: Config) {
       email: u.email,
       name: u.name,
       role: u.role,
+      roleName: u.roleName,
+      permissions: u.permissions,
       mfaEnabled: u.totpEnabled,
-      mfaEnrollmentRequired: cfg.REQUIRE_MFA_FOR_PRIVILEGED && isPrivileged(u.role) && !u.totpEnabled,
+      passkeys: u.passkeys,
+      mfaEnrollmentRequired: cfg.REQUIRE_MFA_FOR_PRIVILEGED && needsMfaEnrollment(u),
     };
   });
 

@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { audit } from '../audit.js';
 import { loadSession, requireAuth } from '../auth.js';
+import { can } from '../permissions.js';
 import type { ChannelManager, BusEvent } from '../channels/manager.js';
 import type { Db } from '../db.js';
 import { warmupCap } from '../channels/sender.js';
@@ -22,8 +23,8 @@ export function assessRisk(x: { status: string; day: number; cap: number; inboun
 }
 
 export function channelRoutes(app: FastifyInstance, db: Db, mgr: ChannelManager) {
-  const adminOnly = requireAuth(db, ['admin']);
-  const view = requireAuth(db, ['admin', 'supervisor']);
+  const adminOnly = requireAuth(db, 'channels.manage');
+  const view = requireAuth(db, 'channels.view');
 
   const exists = async (id: string) => (await db.query('SELECT 1 FROM channels WHERE id=$1', [id])).rowCount === 1;
 
@@ -158,7 +159,7 @@ export function channelRoutes(app: FastifyInstance, db: Db, mgr: ChannelManager)
     const recheck = setInterval(async () => {
       const t = req.cookies.botwa_sid;
       const ok = t ? await loadSession(db, t).catch(() => null) : null;
-      if (!ok || ok.role !== 'admin') res.end();
+      if (!ok || !can(ok, 'channels.manage')) res.end();
     }, 60_000);
     req.raw.on('close', () => {
       clearInterval(hb);

@@ -203,7 +203,7 @@ export function conversationRoutes(app: FastifyInstance, db: Db, mgr: ChannelMan
   });
 
   // Canned replies: everyone reads, supervisors/admins curate.
-  const curators = requireAuth(db, ['admin', 'supervisor']);
+  const curators = requireAuth(db, 'canned.manage');
   app.get('/canned-replies', { preHandler: any }, async () => {
     const { rows } = await db.query('SELECT id, title, body FROM canned_replies ORDER BY title');
     return rows;
@@ -224,7 +224,7 @@ export function conversationRoutes(app: FastifyInstance, db: Db, mgr: ChannelMan
   });
 
   // Privacy: data-subject export / erasure for one contact (admin only, audited).
-  const adminOnly = requireAuth(db, ['admin']);
+  const adminOnly = requireAuth(db, 'privacy.manage');
   app.get('/contacts/:id/export', { preHandler: adminOnly }, async (req, reply) => {
     const p = idParam.safeParse(req.params);
     if (!p.success) return reply.code(400).send({ error: 'bad_request' });

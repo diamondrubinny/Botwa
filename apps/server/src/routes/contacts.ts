@@ -8,7 +8,7 @@ const idParam = z.object({ id: z.string().uuid() });
 
 /** Blocking a customer (abuse/spam): supervisors and admins. The conversation is closed; new messages are stored silently. */
 export function contactRoutes(app: FastifyInstance, db: Db) {
-  const managers = requireAuth(db, ['admin', 'supervisor']);
+  const managers = requireAuth(db, 'contacts.block');
 
   app.post('/contacts/:id/block', { preHandler: managers }, async (req, reply) => {
     const p = idParam.safeParse(req.params);

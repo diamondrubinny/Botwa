@@ -14,11 +14,14 @@ export async function loadBusinessHours(db: Db): Promise<BusinessHours> {
 }
 
 export function settingsRoutes(app: FastifyInstance, db: Db) {
-  const adminOnly = requireAuth(db, ['admin']);
+  const manage = requireAuth(db, 'settings.manage');
+  const view = requireAuth(db, 'settings.view');
+  const botView = requireAuth(db, 'bot.view');
+  const botManage = requireAuth(db, 'bot.manage');
 
-  app.get('/settings/business-hours', { preHandler: requireAuth(db, ['admin', 'supervisor']) }, async () => loadBusinessHours(db));
+  app.get('/settings/business-hours', { preHandler: view }, async () => loadBusinessHours(db));
 
-  app.put('/settings/business-hours', { preHandler: adminOnly }, async (req, reply) => {
+  app.put('/settings/business-hours', { preHandler: manage }, async (req, reply) => {
     const b = businessHoursSchema.safeParse(req.body);
     if (!b.success) return reply.code(400).send({ error: 'bad_request' });
     await db.query(
@@ -30,9 +33,9 @@ export function settingsRoutes(app: FastifyInstance, db: Db) {
     return b.data;
   });
 
-  app.get('/settings/routing', { preHandler: requireAuth(db, ['admin', 'supervisor']) }, async () => loadRouting(db));
+  app.get('/settings/routing', { preHandler: view }, async () => loadRouting(db));
 
-  app.put('/settings/routing', { preHandler: adminOnly }, async (req, reply) => {
+  app.put('/settings/routing', { preHandler: manage }, async (req, reply) => {
     const b = routingSchema.safeParse(req.body);
     if (!b.success) return reply.code(400).send({ error: 'bad_request' });
     await db.query(
@@ -43,12 +46,12 @@ export function settingsRoutes(app: FastifyInstance, db: Db) {
     return b.data;
   });
 
-  app.get('/settings/bot', { preHandler: requireAuth(db, ['admin', 'supervisor']) }, async () => {
+  app.get('/settings/bot', { preHandler: botView }, async () => {
     const bot = await loadBot(db);
     return { ...bot, preview: formatMenu(bot) };
   });
 
-  app.put('/settings/bot', { preHandler: adminOnly }, async (req, reply) => {
+  app.put('/settings/bot', { preHandler: botManage }, async (req, reply) => {
     const b = botSchema.safeParse(req.body);
     if (!b.success) return reply.code(400).send({ error: 'bad_request' });
     await db.query(
@@ -59,9 +62,9 @@ export function settingsRoutes(app: FastifyInstance, db: Db) {
     return { ...b.data, preview: formatMenu(b.data) };
   });
 
-  app.get('/settings/sending', { preHandler: requireAuth(db, ['admin', 'supervisor']) }, async () => loadSending(db));
+  app.get('/settings/sending', { preHandler: view }, async () => loadSending(db));
 
-  app.put('/settings/sending', { preHandler: adminOnly }, async (req, reply) => {
+  app.put('/settings/sending', { preHandler: manage }, async (req, reply) => {
     const b = sendingSchema.safeParse(req.body);
     if (!b.success) return reply.code(400).send({ error: 'bad_request' });
     await db.query(

@@ -43,6 +43,8 @@ const schema = z.object({
   ALERT_WEBHOOK_URL: z.string().url().optional(),
   // Customers sending more than this many messages within 2 minutes are auto-blocked as flooders (0 = off).
   FLOOD_LIMIT: z.coerce.number().int().min(0).max(1000).default(30),
+  // Passkeys are bound to this host. Default: derived from APP_ORIGIN (apex when apex+www are listed).
+  WEBAUTHN_RP_ID: z.string().min(3).optional(),
   WEB_DIST: z.string().optional(),
   MESSAGE_RETENTION_DAYS: z.coerce.number().int().min(0).default(365),
   REQUIRE_MFA_FOR_PRIVILEGED: bool('true'),

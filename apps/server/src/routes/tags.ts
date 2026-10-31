@@ -10,7 +10,7 @@ const idParam = z.object({ id: z.string().uuid() });
 /** Tags: supervisors/admins curate the list; any staff member can label conversations they can access. */
 export function tagRoutes(app: FastifyInstance, db: Db) {
   const any = requireAuth(db);
-  const curators = requireAuth(db, ['admin', 'supervisor']);
+  const curators = requireAuth(db, 'tags.manage');
 
   app.get('/tags', { preHandler: any }, async () => {
     const { rows } = await db.query('SELECT id, name FROM tags ORDER BY lower(name)');
