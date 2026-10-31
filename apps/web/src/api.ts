@@ -16,8 +16,14 @@ export async function api<T = unknown>(method: string, url: string, body?: unkno
   return data as T;
 }
 
-export type Role = 'admin' | 'supervisor' | 'agent';
-export interface Me { available?: boolean; id: string; email: string; name: string; role: Role; mfaEnabled: boolean; mfaEnrollmentRequired: boolean }
+export type Role = string; // role key: admin | supervisor | agent | custom (r_xxxx)
+export interface Me {
+  available?: boolean; id: string; email: string; name: string; role: Role; roleName: string; permissions: string[]; passkeys: number;
+  mfaEnabled: boolean; mfaEnrollmentRequired: boolean;
+}
+export const can = (me: Pick<Me, 'permissions'>, p: string) => me.permissions.includes(p);
+export interface RoleRow { key: string; name: string; permissions: string[]; builtin: boolean; mfaRequired: boolean; userCount: number }
+export interface PasskeyRow { id: string; name: string; deviceType: string | null; backedUp: boolean; createdAt: string; lastUsedAt: string | null }
 export interface UserRow { available?: boolean; id: string; email: string; name: string; role: Role; active: boolean; mfaEnabled: boolean }
 export interface Channel { id: string; type: 'whatsapp' | 'telegram'; label: string; status: string }
 export interface Conversation {

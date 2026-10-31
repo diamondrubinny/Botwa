@@ -51,6 +51,19 @@ export function conversationRoutes(app: FastifyInstance, db: Db, mgr: ChannelMan
     return rows;
   });
 
+  // Total unread customer messages in open conversations the caller may see (badge on the navigation / app icon).
+  app.get('/conversations/unread', { preHandler: any }, async (req) => {
+    const u = req.user!;
+    const { rows } = await db.query(
+      `SELECT COALESCE(sum(c.unread_count), 0)::int AS count
+         FROM conversations c JOIN contacts ct ON ct.id = c.contact_id
+        WHERE c.status = 'open' AND NOT ct.blocked
+          AND ($1::boolean OR c.assigned_to = $2 OR (c.assigned_to IS NULL AND c.bot_state IS DISTINCT FROM 'menu'))`,
+      [isManager(u), u.id],
+    );
+    return { count: rows[0].count as number };
+  });
+
   app.get('/conversations/:id/messages', { preHandler: any }, async (req, reply) => {
     const p = idParam.safeParse(req.params);
     const q = z.object({ limit: z.coerce.number().int().min(1).max(200).default(50), before: z.string().datetime().optional(), q: z.string().trim().min(1).max(100).optional() }).safeParse(req.query);

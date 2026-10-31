@@ -1,5 +1,8 @@
+import { startAuthentication, browserSupportsWebAuthn } from '@simplewebauthn/browser';
 import { useState, type FormEvent } from 'react';
 import { api, ApiError } from '../api';
+import { Icon } from '../components/Icon';
+import { ThemeMenu } from '../components/ThemeMenu';
 import { errText, t } from '../strings';
 
 export function Login({ onDone }: { onDone: () => void }) {
@@ -9,6 +12,7 @@ export function Login({ onDone }: { onDone: () => void }) {
   const [needMfa, setNeedMfa] = useState(false);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
+  const passkeys = browserSupportsWebAuthn();
 
   async function submit(e: FormEvent) {
     e.preventDefault();
@@ -27,28 +31,55 @@ export function Login({ onDone }: { onDone: () => void }) {
     }
   }
 
+  async function withPasskey() {
+    if (busy) return;
+    setBusy(true);
+    setError('');
+    try {
+      const { challengeId, options } = await api<{ challengeId: string; options: Parameters<typeof startAuthentication>[0]['optionsJSON'] }>('POST', '/auth/passkeys/login/options');
+      const response = await startAuthentication({ optionsJSON: options });
+      await api('POST', '/auth/passkeys/login/verify', { challengeId, response });
+      onDone();
+    } catch (err) {
+      // user cancelled the browser prompt => stay quiet; real failures get the generic message
+      const cancelled = err instanceof Error && (err.name === 'NotAllowedError' || err.name === 'AbortError');
+      if (!cancelled) setError(err instanceof ApiError ? errText(err.code) : 'לא הצלחנו להיכנס עם Passkey. נסו שוב או היכנסו עם סיסמה.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
-    <main className="login" id="main">
-      <h1 tabIndex={-1}>{t.appName}</h1>
-      <form className="card" onSubmit={submit} noValidate>
-        <div className="field">
-          <label htmlFor="email">אימייל</label>
-          <input id="email" type="email" autoComplete="username" required value={email} onChange={(e) => setEmail(e.target.value)} dir="ltr" />
-        </div>
-        <div className="field">
-          <label htmlFor="pw">סיסמה</label>
-          <input id="pw" type="password" autoComplete="current-password" required value={password} onChange={(e) => setPassword(e.target.value)} dir="ltr" />
-        </div>
-        {needMfa && (
+    <div className="login-page">
+      <div style={{ position: 'fixed', top: '.6rem', insetInlineStart: '.6rem' }}><ThemeMenu align="start" /></div>
+      <main className="login" id="main">
+        <div className="brand"><span className="brand-mark"><Icon name="chat" /></span><h1 tabIndex={-1}>{t.appName}</h1></div>
+        <form className="card" onSubmit={submit} noValidate>
+          {passkeys && (
+            <>
+              <button type="button" className="primary" style={{ width: '100%' }} onClick={withPasskey} disabled={busy}><Icon name="key" size={20} />כניסה עם Passkey</button>
+              <div className="divider" aria-hidden="true">או עם סיסמה</div>
+            </>
+          )}
           <div className="field">
-            <label htmlFor="totp">קוד אימות (6 ספרות)</label>
-            <input id="totp" inputMode="numeric" pattern="\d{6}" maxLength={6} autoComplete="one-time-code" autoFocus value={totp} onChange={(e) => setTotp(e.target.value)} dir="ltr" aria-describedby="totp-hint" />
-            <p id="totp-hint" className="hint">מתוך אפליקציית האימות שלכם.</p>
+            <label htmlFor="email">אימייל</label>
+            <input id="email" type="email" autoComplete="username webauthn" required value={email} onChange={(e) => setEmail(e.target.value)} dir="ltr" />
           </div>
-        )}
-        <p role="alert" className="error">{error}</p>
-        <button className="primary" type="submit" disabled={busy}>{busy ? t.loading : 'התחברות'}</button>
-      </form>
-    </main>
+          <div className="field">
+            <label htmlFor="pw">סיסמה</label>
+            <input id="pw" type="password" autoComplete="current-password" required value={password} onChange={(e) => setPassword(e.target.value)} dir="ltr" />
+          </div>
+          {needMfa && (
+            <div className="field">
+              <label htmlFor="totp">קוד אימות (6 ספרות)</label>
+              <input id="totp" inputMode="numeric" pattern="\d{6}" maxLength={6} autoComplete="one-time-code" autoFocus value={totp} onChange={(e) => setTotp(e.target.value)} dir="ltr" aria-describedby="totp-hint" />
+              <p id="totp-hint" className="hint">מתוך אפליקציית האימות שלכם.</p>
+            </div>
+          )}
+          <p role="alert" className="error">{error}</p>
+          <button className={passkeys ? '' : 'primary'} style={{ width: '100%' }} type="submit" disabled={busy}>{busy ? t.loading : 'התחברות'}</button>
+        </form>
+      </main>
+    </div>
   );
 }

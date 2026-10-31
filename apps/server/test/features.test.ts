@@ -162,3 +162,28 @@ describe('tags, settings, audit, away reply, waiting time', () => {
     expect(JSON.stringify(all)).not.toContain('hello'); // no message content in the audit log
   });
 });
+
+describe('unread counter endpoint', () => {
+  it('counts unread in open conversations the caller may see (agents: own + unassigned non-bot)', async () => {
+    const db2 = createDb(cfg.DATABASE_URL);
+    const app2 = await buildApp(cfg, db2, new ChannelManager(db2, cfg));
+    const login = async (email: string) => {
+      const r = await app2.inject({ method: 'POST', url: '/auth/login', remoteAddress: `10.99.0.${Math.floor(Math.random() * 250)}`, headers: { origin: ORIGIN }, payload: { email, password: PW } });
+      return `botwa_sid=${r.cookies[0]!.value}`;
+    };
+    const ch = (await db2.query(`SELECT id FROM channels LIMIT 1`)).rows[0].id;
+    const mk = async (ext: string, unread: number, assigned: string | null, status = 'open', bot: string | null = null) => {
+      const c = (await db2.query(`INSERT INTO contacts (channel_id, external_id) VALUES ($1,$2) RETURNING id`, [ch, ext])).rows[0].id;
+      await db2.query(`INSERT INTO conversations (channel_id, contact_id, unread_count, assigned_to, status, bot_state) VALUES ($1,$2,$3,$4,$5,$6)`, [ch, c, unread, assigned, status, bot]);
+    };
+    const a1 = (await db2.query(`SELECT id FROM users WHERE email='a1@t.io'`)).rows[0].id;
+    const a2 = (await db2.query(`SELECT id FROM users WHERE email='a2@t.io'`)).rows[0].id;
+    await db2.query(`DELETE FROM conversations`);
+    await mk('u1', 2, a1); await mk('u2', 3, a2); await mk('u3', 4, null); await mk('u4', 5, null, 'open', 'menu'); await mk('u5', 7, a1, 'closed');
+    const get = async (email: string) => (await app2.inject({ url: '/conversations/unread', headers: { cookie: await login(email) } })).json();
+    expect(await get('a1@t.io')).toEqual({ count: 2 + 4 });          // own + unassigned (bot-handled and closed excluded)
+    expect(await get('sup@t.io')).toEqual({ count: 2 + 3 + 4 + 5 }); // manager sees everything open
+    expect((await app2.inject({ url: '/conversations/unread' })).statusCode).toBe(401);
+    await app2.close(); await db2.end();
+  });
+});

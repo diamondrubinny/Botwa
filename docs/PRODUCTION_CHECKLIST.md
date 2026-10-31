@@ -96,3 +96,9 @@ Status legend: ✅ done in code/tests · 🔲 must be done by the operator · �
 
 ## Requires professional approval before go-live
 Lawyer (privacy, ToS risk, employee monitoring/notice) · Privacy officer (if required) · Accessibility consultant · Penetration tester.
+
+## Passkeys, roles, PWA (P17)
+- [ ] Passkeys: served over HTTPS; RP ID equals the site domain (apex shared with www). Set `WEBAUTHN_RP_ID` only if the panel moves to another subdomain. Changing the domain invalidates existing passkeys.
+- [ ] Test passkey registration and login on a real phone and a real desktop browser (automated tests use a virtual authenticator only).
+- [ ] Review custom roles: keep `settings.manage`, `roles.manage`, `users.manage`, `backups.manage`, `privacy.manage` limited to admins; roles with `mfaRequired` need TOTP or a passkey.
+- [ ] Verify the PWA install and phone layout on real iOS and Android devices.

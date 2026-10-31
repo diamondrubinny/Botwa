@@ -38,8 +38,8 @@ export function A11yWidget() {
           <button onClick={() => setP(DEFAULT)}>איפוס</button>
         </div>
       )}
-      <button className="primary" aria-expanded={open} aria-controls="a11y-panel" onClick={() => setOpen(!open)}>
-        <span aria-hidden="true">♿ </span>נגישות
+      <button className="primary a11y-toggle" aria-expanded={open} aria-controls="a11y-panel" onClick={() => setOpen(!open)} aria-label="התאמות נגישות">
+        <span aria-hidden="true">♿</span><span className="t"> נגישות</span>
       </button>
     </div>
   );

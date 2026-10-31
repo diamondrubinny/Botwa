@@ -1,6 +1,11 @@
 import QRCode from 'qrcode';
 import { useState, type FormEvent } from 'react';
-import { api, ApiError, type Me } from '../api';
+import { startRegistration, browserSupportsWebAuthn } from '@simplewebauthn/browser';
+import { api, ApiError, type Me, type PasskeyRow } from '../api';
+import { ConfirmDialog } from '../components/ConfirmDialog';
+import { Icon } from '../components/Icon';
+import { ThemeMenu } from '../components/ThemeMenu';
+import { usePoll } from '../hooks';
 import { errText } from '../strings';
 
 export function Account({ me, onChanged }: { me: Me; onChanged: () => void }) {
@@ -10,6 +15,29 @@ export function Account({ me, onChanged }: { me: Me; onChanged: () => void }) {
   const [setup, setSetup] = useState<{ secret: string; qr: string } | null>(null);
   const [code, setCode] = useState('');
   const [mfaMsg, setMfaMsg] = useState('');
+  const [pks, setPks] = useState<PasskeyRow[]>([]);
+  const [pkName, setPkName] = useState('');
+  const [pkMsg, setPkMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const [delPk, setDelPk] = useState<PasskeyRow | null>(null);
+  const loadPks = async () => setPks(await api<PasskeyRow[]>('GET', '/auth/passkeys').catch(() => []));
+  usePoll(loadPks, 60000);
+  const supported = browserSupportsWebAuthn();
+
+  async function addPasskey() {
+    setPkMsg(null);
+    try {
+      const { challengeId, options } = await api<{ challengeId: string; options: Parameters<typeof startRegistration>[0]['optionsJSON'] }>('POST', '/auth/passkeys/register/options');
+      const response = await startRegistration({ optionsJSON: options });
+      await api('POST', '/auth/passkeys/register/verify', { challengeId, response, name: pkName.trim() || undefined });
+      setPkName('');
+      setPkMsg({ ok: true, text: 'ה-Passkey נוסף.' });
+      await loadPks();
+      onChanged();
+    } catch (err) {
+      const cancelled = err instanceof Error && (err.name === 'NotAllowedError' || err.name === 'AbortError');
+      if (!cancelled) setPkMsg({ ok: false, text: err instanceof ApiError ? errText(err.code) : 'ההוספה נכשלה. ודאו שהמכשיר תומך ב-Passkey ושה-HTTPS פעיל.' });
+    }
+  }
 
   async function changePw(e: FormEvent) {
     e.preventDefault();
@@ -47,7 +75,42 @@ export function Account({ me, onChanged }: { me: Me; onChanged: () => void }) {
   return (
     <>
       <h1 tabIndex={-1}>החשבון שלי</h1>
-      <p>{me.name} · {me.email}</p>
+      <p>{me.name} · {me.email} · {me.roleName}</p>
+
+      <section className="card" aria-labelledby="pk-h">
+        <h2 id="pk-h"><Icon name="key" size={20} /> Passkey (כניסה בטביעת אצבע / זיהוי פנים / נעילת מכשיר)</h2>
+        <p className="hint">Passkey מחליף סיסמה, עמיד בפני הונאות דיוג, ונחשב גם כאימות דו-שלבי. אפשר לרשום כמה מכשירים.</p>
+        {pks.length > 0 && (
+          <ul style={{ listStyle: 'none', padding: 0 }}>
+            {pks.map((k) => (
+              <li key={k.id} className="row" style={{ borderBottom: '1px solid var(--border)', padding: '.5rem 0' }}>
+                <strong>{k.name}</strong>
+                <small className="hint">נוסף {new Date(k.createdAt).toLocaleDateString('he-IL')}{k.lastUsedAt ? ` · שימוש אחרון ${new Date(k.lastUsedAt).toLocaleDateString('he-IL')}` : ''}{k.backedUp ? ' · מסונכרן בענן' : ''}</small>
+                <span className="spacer" />
+                <button className="danger" onClick={() => setDelPk(k)}>הסרה<span className="sr-only"> {k.name}</span></button>
+              </li>
+            ))}
+          </ul>
+        )}
+        {supported ? (
+          <div className="row">
+            <div style={{ flex: 1, minWidth: 180 }}>
+              <label htmlFor="pk-name" className="sr-only">שם למכשיר</label>
+              <input id="pk-name" maxLength={60} placeholder="שם למכשיר (למשל: הטלפון שלי)" value={pkName} onChange={(e) => setPkName(e.target.value)} />
+            </div>
+            <button className="primary" onClick={addPasskey}><Icon name="plus" size={18} />הוספת Passkey</button>
+          </div>
+        ) : <p className="error">הדפדפן או המכשיר אינם תומכים ב-Passkey.</p>}
+        <p role="status" className={pkMsg?.ok ? 'ok' : 'error'}>{pkMsg?.text}</p>
+        <ConfirmDialog open={!!delPk} danger title="הסרת Passkey" message={`ה-Passkey "${delPk?.name ?? ''}" יוסר. עדיין אפשר להיכנס עם סיסמה.`} onCancel={() => setDelPk(null)}
+          onConfirm={async () => { const k = delPk!; setDelPk(null); await api('DELETE', `/auth/passkeys/${k.id}`).catch(() => undefined); await loadPks(); onChanged(); }} />
+      </section>
+
+      <section className="card" aria-labelledby="look-h">
+        <h2 id="look-h">מראה</h2>
+        <p className="hint">בחירת מצב בהיר/כהה וצבע ראשי. נשמר במכשיר הזה בלבד.</p>
+        <ThemeMenu align="start" />
+      </section>
 
       <section className="card" aria-labelledby="mfa-h">
         <h2 id="mfa-h">אימות דו-שלבי (MFA)</h2>

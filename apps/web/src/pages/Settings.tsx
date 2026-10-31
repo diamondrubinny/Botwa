@@ -1,12 +1,15 @@
 import { useState, type FormEvent } from 'react';
-import { api, ApiError, type BackupFile, type BusinessHours, type SendingCfg } from '../api';
+import { api, ApiError, can, type BackupFile, type BusinessHours, type Me, type SendingCfg } from '../api';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { usePoll } from '../hooks';
 import { errText } from '../strings';
 
 const DAYS = ['ראשון', 'שני', 'שלישי', 'רביעי', 'חמישי', 'שישי', 'שבת'];
 
-export function Settings() {
+export function Settings({ me }: { me: Me }) {
+  const canView = can(me, 'settings.view');
+  const canEdit = can(me, 'settings.manage');
+  const canBackup = can(me, 'backups.manage');
   const [h, setH] = useState<BusinessHours | null>(null);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [snd, setSnd] = useState<SendingCfg | null>(null);
@@ -27,9 +30,9 @@ export function Settings() {
   const fmtMB = (n: number) => `${(n / 1024 / 1024).toFixed(1)} MB`;
   usePoll(async () => { if (!h) setH(await api<BusinessHours>('GET', '/settings/business-hours').catch(() => null)); }, 60000);
 
-  if (!h) return <><h1 tabIndex={-1}>הגדרות</h1><p role="status">טוען…</p></>;
+  if (canView && !h) return <><h1 tabIndex={-1}>הגדרות</h1><p role="status">טוען…</p></>;
 
-  const setDay = (i: number, v: { open: string; close: string } | null) => setH({ ...h, days: h.days.map((d, k) => (k === i ? v : d)) });
+  const setDay = (i: number, v: { open: string; close: string } | null) => h && setH({ ...h, days: h.days.map((d, k) => (k === i ? v : d)) });
 
   async function save(e: FormEvent) {
     e.preventDefault();
@@ -45,6 +48,9 @@ export function Settings() {
   return (
     <>
       <h1 tabIndex={-1}>הגדרות</h1>
+      {canView && !canEdit && <p className="banner" role="note">צפייה בלבד. אין לכם הרשאה לשנות הגדרות.</p>}
+      {canView && h && (
+      <fieldset disabled={!canEdit} style={{ border: 0, padding: 0, margin: 0 }}>
       <form className="card" onSubmit={save}>
         <h2>שעות פעילות ומענה אוטומטי</h2>
         <p className="hint">מחוץ לשעות הפעילות נשלחת ללקוח הודעה אוטומטית אחת (לכל היותר אחת ל-12 שעות לשיחה). ההודעה מסומנת כ"מענה אוטומטי" ואינה נחשבת תשובת נציג בדוחות.</p>
@@ -134,6 +140,10 @@ export function Settings() {
         <p role="status" className="ok">{routeMsg}</p>
       </section>
 
+      </fieldset>
+      )}
+
+      {canBackup && (<>
       <section className="card" aria-labelledby="bk-h">
         <h2 id="bk-h">גיבויים</h2>
         <p className="hint">גיבוי מוצפן של מסד הנתונים (הודעות, משתמשים, הגדרות). קבצים מצורפים נשמרים בנפרד ב-volume של המדיה. שחזור מתבצע ידנית בשרת בלבד (ראו docs/DEPLOY.md). הורדת גיבוי נרשמת ביומן הביקורת.</p>
@@ -167,6 +177,7 @@ export function Settings() {
       </section>
       <ConfirmDialog open={!!delBk} danger title="מחיקת גיבוי" message={`הקובץ ${delBk ?? ''} יימחק לצמיתות.`} onCancel={() => setDelBk(null)}
         onConfirm={async () => { const n = delBk!; setDelBk(null); await api('DELETE', `/backups/${n}`).catch(() => undefined); await loadBackups(); }} />
+      </>)}
     </>
   );
 }

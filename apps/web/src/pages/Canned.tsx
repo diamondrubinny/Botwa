@@ -1,9 +1,11 @@
 import { useState, type FormEvent } from 'react';
-import { api, ApiError, type Canned as CannedT, type Tag } from '../api';
+import { api, ApiError, can, type Canned as CannedT, type Me, type Tag } from '../api';
 import { usePoll } from '../hooks';
 import { errText } from '../strings';
 
-export function CannedReplies() {
+export function CannedReplies({ me }: { me: Me }) {
+  const canCanned = can(me, 'canned.manage');
+  const canTags = can(me, 'tags.manage');
   const [list, setList] = useState<CannedT[]>([]);
   const [title, setTitle] = useState('');
   const [body, setBody] = useState('');
@@ -26,7 +28,7 @@ export function CannedReplies() {
     <>
       <h1 tabIndex={-1}>תשובות מוכנות ותגיות</h1>
       <p role="alert" className="error">{msg}</p>
-      <section className="card" aria-labelledby="tags-h">
+      {canTags && <section className="card" aria-labelledby="tags-h">
         <h2 id="tags-h">תגיות לשיחות</h2>
         <ul className="row" style={{ listStyle: 'none', padding: 0 }}>
           {tags.map((t) => (
@@ -45,8 +47,8 @@ export function CannedReplies() {
           </div>
           <button className="primary" type="submit">הוספת תגית</button>
         </form>
-      </section>
-      <h2>תשובות מוכנות</h2>
+      </section>}
+      {canCanned && <><h2>תשובות מוכנות</h2>
       <ul style={{ listStyle: 'none', padding: 0 }}>
         {list.map((c) => (
           <li key={c.id} className="card">
@@ -63,6 +65,7 @@ export function CannedReplies() {
         <div className="field"><label htmlFor="c-body">תוכן</label><textarea id="c-body" required rows={4} maxLength={4000} value={body} onChange={(e) => setBody(e.target.value)} /></div>
         <button className="primary" type="submit">הוספה</button>
       </form>
+      </>}
     </>
   );
 }

@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from 'react';
-import { api, ApiError, type Me } from '../api';
+import { api, ApiError, can, type Me } from '../api';
 import { usePoll } from '../hooks';
 
 interface BotCfg {
@@ -11,7 +11,7 @@ const menuText = (b: BotCfg) =>
   `${b.welcome}\n\n${[...b.items.map((it, i) => `${i + 1}. ${it.title}`), ...(b.humanOption ? [`0. ${b.humanLabel}`] : [])].join('\n')}`;
 
 export function Bot({ me }: { me: Me }) {
-  const canEdit = me.role === 'admin';
+  const canEdit = can(me, 'bot.manage');
   const [b, setB] = useState<BotCfg | null>(null);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
   usePoll(async () => { if (!b) setB(await api<BotCfg>('GET', '/settings/bot').catch(() => null)); }, 60000);

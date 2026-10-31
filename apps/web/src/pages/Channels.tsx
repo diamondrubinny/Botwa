@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
-import { api, ApiError, type Channel, type ChannelHealth } from '../api';
+import { api, ApiError, can, type Channel, type ChannelHealth, type Me } from '../api';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { usePoll } from '../hooks';
 import { errText, t } from '../strings';
@@ -19,7 +19,8 @@ const WARN: Record<string, string> = {
 
 type Pending = { kind: 'logout' | 'delete'; ch: Channel } | null;
 
-export function Channels({ isAdmin }: { isAdmin: boolean }) {
+export function Channels({ me }: { me: Me }) {
+  const isAdmin = can(me, 'channels.manage');
   const [list, setList] = useState<Channel[]>([]);
   const [label, setLabel] = useState('');
   const [type, setType] = useState<'whatsapp' | 'telegram'>('whatsapp');
