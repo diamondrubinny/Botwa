@@ -42,11 +42,12 @@ export async function buildApp(cfg: Config, db: Db, mgr: ChannelManager, media: 
   await app.register(multipart, { limits: { fileSize: media.maxBytes, files: 1, fields: 4, parts: 6 } });
   await app.register(rateLimit, { max: 300, timeWindow: '1 minute' });
 
+  const allowedOrigins = cfg.APP_ORIGIN.split(',').map((o) => o.trim().replace(/\/$/, ''));
   // CSRF defence in depth (cookie is already SameSite=Strict): mutating requests must come from our origin.
   app.addHook('onRequest', async (req, reply) => {
     if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method)) {
       const origin = req.headers.origin;
-      if (origin !== cfg.APP_ORIGIN) return reply.code(403).send({ error: 'bad_origin' });
+      if (!origin || !allowedOrigins.includes(origin)) return reply.code(403).send({ error: 'bad_origin' });
     }
   });
 

@@ -175,3 +175,23 @@ describe('users admin', () => {
     expect((await app.inject({ url: '/audit', headers: { cookie } })).json().length).toBeGreaterThan(0);
   });
 });
+
+describe('multiple allowed origins', () => {
+  it('accepts every listed origin and still rejects others (comma-separated APP_ORIGIN)', async () => {
+    const multi = loadConfig({
+      NODE_ENV: 'test', DATABASE_URL: cfg.DATABASE_URL, ENCRYPTION_KEY: cfg.ENCRYPTION_KEY, COOKIE_SECURE: 'false',
+      APP_ORIGIN: 'https://panel.test, https://www.panel.test/',
+    });
+    const a2 = await buildApp(multi, db, new ChannelManager(db, multi));
+    const login = (origin?: string) => a2.inject({
+      method: 'POST', url: '/auth/login', remoteAddress: `10.77.0.${Math.floor(Math.random() * 250)}`,
+      headers: origin ? { origin } : {}, payload: { email: 'nobody@t.io', password: 'whatever-whatever' },
+    });
+    expect((await login('https://panel.test')).statusCode).toBe(401);      // allowed (reaches the credential check)
+    expect((await login('https://www.panel.test')).statusCode).toBe(401);  // allowed, trailing slash in config tolerated
+    expect((await login('https://evil.test')).statusCode).toBe(403);
+    expect((await login()).statusCode).toBe(403);
+    await a2.close();
+    expect(() => loadConfig({ NODE_ENV: 'test', DATABASE_URL: 'x', ENCRYPTION_KEY: cfg.ENCRYPTION_KEY, APP_ORIGIN: 'https://ok.test,notaurl' })).toThrow();
+  });
+});

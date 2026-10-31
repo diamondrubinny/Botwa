@@ -12,7 +12,7 @@ export async function api<T = unknown>(method: string, url: string, body?: unkno
     body: body !== undefined ? JSON.stringify(body) : undefined,
   });
   const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new ApiError(res.status, (data as { error?: string }).error ?? 'error');
+  if (!res.ok) throw new ApiError(res.status, res.status === 429 ? 'rate_limited' : ((data as { error?: string }).error ?? 'error'));
   return data as T;
 }
 

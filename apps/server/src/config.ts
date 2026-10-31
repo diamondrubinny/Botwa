@@ -14,7 +14,11 @@ const schema = z.object({
   ENCRYPTION_KEY: z
     .string()
     .refine((v) => Buffer.from(v, 'base64').length === 32, 'ENCRYPTION_KEY must be 32 bytes, base64'),
-  APP_ORIGIN: z.string().url(),
+  // Public origin(s) of the panel, comma-separated (e.g. "https://example.com,https://www.example.com").
+  // Mutating requests must carry exactly one of them in the Origin header (CSRF defence).
+  APP_ORIGIN: z
+    .string()
+    .refine((v) => v.split(',').every((o) => z.string().url().safeParse(o.trim()).success), 'APP_ORIGIN must be one or more comma-separated URLs'),
   COOKIE_SECURE: bool('true'),
   TRUST_PROXY: bool('false'),
   SESSION_TTL_HOURS: z.coerce.number().int().min(1).max(168).default(12),
