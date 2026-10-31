@@ -9,6 +9,7 @@ import { isOpen } from '../business-hours.js';
 import { autoAssign } from '../routing.js';
 import { audit } from '../audit.js';
 import { MediaService } from '../media/store.js';
+import type { KnowledgeBase } from '../kb/service.js';
 import { loadBusinessHours } from '../routes/settings.js';
 import { sendAlert } from '../alerts.js';
 import { createAuthStore } from './auth-store.js';
@@ -75,6 +76,9 @@ export class ChannelManager {
   snapshot(channelId: string): { status: ChannelStatus; qr?: string; code?: string } {
     return { status: this.statuses.get(channelId) ?? 'stopped', qr: this.lastQr.get(channelId), code: this.lastCode.get(channelId) };
   }
+
+  /** Set by the app: lets the menu bot answer free-text questions from the knowledge base. */
+  kb?: KnowledgeBase;
 
   /** Set by the app: called for each new customer message that reached staff (not blocked, not a duplicate). */
   onInbound?: (conversationId: string) => void;
@@ -298,6 +302,18 @@ export class ChannelManager {
   }
 
   /** Menu bot: answer, or hand over to a person (assign via routing, leave a note, away notice outside hours). */
+  /** A confident knowledge-base answer for a free-text message, formatted for the customer; null when unsure (then the normal menu flow applies). */
+  private async kbAnswer(bot: BotConfig, state: string | null, text: string | null): Promise<string | null> {
+    if (!this.kb || !bot.kb.enabled || state === 'human' || !text) return null;
+    const t = text.trim();
+    if (/^\d{1,2}$/.test(t) || t.length < 3) return null;
+    try {
+      const a = await this.kb.answer(t, { minScore: bot.kb.minScore, maxChars: bot.kb.maxChars });
+      if (!a) return null;
+      return [bot.kb.intro, a.text, bot.kb.showSource ? `מקור: ${a.url ?? a.title}` : ''].filter(Boolean).join('\n\n');
+    } catch { return null; }
+  }
+
   private async runBot(channelId: string, convId: string, ext: string, bot: BotConfig, text: string | null): Promise<void> {
     const { rows } = await this.db.query('SELECT bot_state, bot_invalid, assigned_to FROM conversations WHERE id = $1', [convId]);
     const c = rows[0];
@@ -313,7 +329,7 @@ export class ChannelManager {
       return;
     }
 
-    const d = decide(bot, { state: c.bot_state, invalid: c.bot_invalid }, text);
+    const d = decide(bot, { state: c.bot_state, invalid: c.bot_invalid }, text, await this.kbAnswer(bot, c.bot_state, text));
     for (const reply of d.replies) await this.botSay(channelId, convId, ext, reply);
     await this.db.query('UPDATE conversations SET bot_state = $2, bot_invalid = $3 WHERE id = $1', [convId, d.next.state, d.next.invalid]);
 

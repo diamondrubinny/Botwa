@@ -18,6 +18,7 @@ export const PERMISSIONS = [
   'audit.view',
   'privacy.manage',            // export / erase a customer's data
   'backups.manage',
+  'kb.manage',                 // knowledge base: add/edit documents, links and FAQ, synonyms, search tests
 ] as const;
 export type Permission = (typeof PERMISSIONS)[number];
 
@@ -29,7 +30,7 @@ export const BUILTIN_ROLES: Record<string, { name: string; permissions: Permissi
   admin: { name: 'מנהל', permissions: [...PERMISSIONS], mfaRequired: true },
   supervisor: {
     name: 'מפקח',
-    permissions: ['inbox.view_all', 'conversations.assign_others', 'contacts.block', 'tags.manage', 'canned.manage', 'reports.view', 'channels.view', 'users.view', 'bot.view', 'settings.view'],
+    permissions: ['inbox.view_all', 'conversations.assign_others', 'contacts.block', 'tags.manage', 'canned.manage', 'reports.view', 'channels.view', 'users.view', 'bot.view', 'settings.view', 'kb.manage'],
     mfaRequired: true,
   },
   agent: { name: 'נציג', permissions: [], mfaRequired: false },

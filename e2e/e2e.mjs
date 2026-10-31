@@ -71,6 +71,7 @@ await page.click('li.card:has-text("רשמי") >> button:has-text("מחיקת ע
 await page.click('dialog[open] button:has-text("אישור")');
 await page.waitForFunction(() => !document.body.textContent?.includes('ווצאפ רשמי (Cloud API)'));
 check('official channel can be removed', true);
+
 check('emergency pause and resume work from the panel', true);
 await axe('channels');
 await page.click('text=קישור עם מספר טלפון (בלי QR)');
@@ -153,6 +154,28 @@ await axe('audit log');
 await page.selectOption('#af', { label: 'הכול' });
 await page.waitForSelector('td:has-text("הפעלת אימות דו-שלבי")');
 
+// knowledge base: add a Q&A, test the search, check every tab for accessibility
+await page.click('aside.sidebar nav >> text=מאגר ידע');
+await page.waitForSelector('h1:has-text("מאגר ידע")');
+await page.click('button:has-text("שאלה ותשובה")');
+await page.fill('#kb-t', 'מהן שעות הפעילות שלכם?');
+await page.fill('#kb-b', 'פתוחים בימים א׳–ה׳ בין 9:00 ל-17:00.');
+await axe('knowledge base: add form');
+await page.click('form button[type=submit]:has-text("הוספה")');
+await page.waitForSelector('th:has-text("מהן שעות הפעילות שלכם?")');
+await page.waitForSelector('.badge:has-text("מוכן")');
+check('knowledge base: FAQ added and indexed', true);
+await axe('knowledge base: sources');
+await page.click('.chips >> text=בדיקת חיפוש');
+await page.fill('#pg-q', 'בשעות הפעילות');
+await page.click('button:has-text("בדיקה")');
+await page.waitForSelector('text=הבוט היה עונה.');
+check('knowledge base: playground finds the answer despite a Hebrew prefix', true);
+await axe('knowledge base: playground');
+for (const tab of ['שאלות ללא מענה', 'מילים נרדפות', 'סטטיסטיקה']) { await page.click(`.chips >> text=${tab}`); await page.waitForTimeout(400); await axe(`knowledge base: ${tab}`); }
+await page.click('aside.sidebar nav >> text=בוט');
+await page.waitForSelector('legend:has-text("מענה ממאגר הידע")');
+await axe('bot page with knowledge base settings');
 // canned replies page
 await page.click('aside.sidebar nav >> text=תשובות ותגיות');
 await page.fill('#c-title', 'ברכה'); await page.fill('#c-body', 'שלום, איך אפשר לעזור?');
@@ -450,7 +473,7 @@ await page.click('button[aria-label="חזרה לרשימה"]');
 await page.waitForSelector('.list-pane');
 const small = await page.evaluate(() => [...document.querySelectorAll('.chip, .bn-item, .conv-item')].filter((e) => { const r = e.getBoundingClientRect(); return r.width > 0 && Math.min(r.width, r.height) < 44; }).map((e) => e.className));
 check('phone: chips, tabs and list rows are all >= 44px touch targets', small.length === 0, JSON.stringify(small));
-for (const route of ['settings', 'team', 'channels', 'reports', 'roles', 'bot']) {
+for (const route of ['settings', 'team', 'channels', 'reports', 'roles', 'bot', 'kb']) {
   await page.goto(BASE + '/#/' + route);
   await page.waitForSelector('main h1');
   await page.waitForLoadState('networkidle').catch(() => {});

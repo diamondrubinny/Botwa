@@ -115,3 +115,11 @@ Lawyer (privacy, ToS risk, employee monitoring/notice) · Privacy officer (if re
 - [ ] Reverse proxy passes `/webhooks/` unchanged over HTTPS; no WAF rule blocks Meta's POSTs.
 - [ ] Add Meta (WhatsApp) to the data map and privacy policy draft; check DPA / international transfer (lawyer).
 - [ ] Rotate the access token and app secret on staff changes; they are write-only in the panel.
+
+## Knowledge base (P22)
+- [ ] ClamAV running (needed for PDF/DOCX; without it those uploads are refused by design).
+- [ ] Review what is uploaded: customer-facing content only. Mark internal material "נציגים בלבד".
+- [ ] Add the question log (customer text, short retention `KB_QUERY_RETENTION_DAYS`) to the data map and privacy policy draft (lawyer).
+- [ ] Only add sites you may copy (terms of use / copyright). The crawler does not read robots.txt.
+- [ ] Test the bot answers with real phrasing from your customers; tune the confidence threshold and synonyms.
+- [ ] Outbound HTTPS from the server must be allowed for links (private addresses are blocked on purpose).

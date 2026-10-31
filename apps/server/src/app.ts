@@ -17,6 +17,8 @@ import { backupRoutes } from './routes/backups.js';
 import { pushRoutes } from './routes/push.js';
 import { webhookRoutes } from './routes/webhooks.js';
 import { PushService } from './push.js';
+import { KnowledgeBase } from './kb/service.js';
+import { kbRoutes } from './routes/kb.js';
 import { contactRoutes } from './routes/contacts.js';
 import { tagRoutes } from './routes/tags.js';
 import { settingsRoutes } from './routes/settings.js';
@@ -92,5 +94,8 @@ export async function buildApp(cfg: Config, db: Db, mgr: ChannelManager, media: 
   mgr.onInbound = (id) => void push.notifyInbound(id).catch(() => undefined);
   pushRoutes(app, db, push);
   webhookRoutes(app, db, mgr);
+  const kb = new KnowledgeBase(db, cfg, media);
+  mgr.kb = kb;
+  kbRoutes(app, db, kb);
   return app;
 }

@@ -64,6 +64,7 @@ export function Inbox({ me }: { me: Me }) {
   const [msgQuery, setMsgQuery] = useState('');
   const [related, setRelated] = useState<RelatedConv[]>([]);
   const [pinned, setPinned] = useState<Conversation | null>(null);
+  const [sugg, setSugg] = useState<{ sourceId: string; title: string; url: string | null; score: number; text: string }[]>([]);
   const [bump, setBump] = useState(0); // local refetch trigger after an action
 
   const sel = convs.find((c) => c.id === selId) ?? (pinned && pinned.id === selId ? pinned : null);
@@ -114,6 +115,24 @@ export function Inbox({ me }: { me: Me }) {
   const saveDraft = (id: string | null, v: string) => { try { if (id) { if (v) sessionStorage.setItem(draftKey(id), v); else sessionStorage.removeItem(draftKey(id)); } } catch { /* storage unavailable */ } };
   useEffect(() => { setText(readDraft(selId)); }, [selId]); // eslint-disable-line react-hooks/exhaustive-deps
   const edit = (v: string) => { setText(v); saveDraft(selId, v); };
+
+  // Suggested answers from the knowledge base for the customer's latest message.
+  useEffect(() => {
+    setSugg([]);
+    if (!selId) return;
+    let live = true;
+    void api<{ hits: typeof sugg }>('GET', `/conversations/${selId}/kb-suggestions`).then((d) => { if (live) setSugg(d.hits); }).catch(() => undefined);
+    return () => { live = false; };
+  }, [selId, msgs.filter((m) => m.direction === 'in').length]); // eslint-disable-line react-hooks/exhaustive-deps
+  const useSuggestion = (h: (typeof sugg)[number]) => {
+    edit(text ? `${text}\n${h.text}` : h.text);
+    taRef.current?.focus();
+    void api('POST', '/kb/feedback', { sourceId: h.sourceId, action: 'used' }).catch(() => undefined);
+  };
+  const rate = (h: (typeof sugg)[number], helpful: boolean) => {
+    void api('POST', '/kb/feedback', { sourceId: h.sourceId, action: helpful ? 'helpful' : 'unhelpful' }).catch(() => undefined);
+    if (!helpful) setSugg((l) => l.filter((x) => x.sourceId !== h.sourceId));
+  };
 
   const resize = () => { const t = taRef.current; if (t) { t.style.height = 'auto'; t.style.height = `${Math.min(160, t.scrollHeight)}px`; } };
   useEffect(resize, [text]);
@@ -365,6 +384,24 @@ export function Inbox({ me }: { me: Me }) {
                 ))}
               </div>
 
+              {sugg.length > 0 && (
+                <details className="kb-sugg" open={window.matchMedia('(min-width: 900px)').matches}>
+                  <summary>הצעות ממאגר הידע ({sugg.length})</summary>
+                  <ul>
+                    {sugg.map((h) => (
+                      <li key={h.sourceId}>
+                        <strong>{h.title}</strong> <small className="hint">{Math.round(h.score * 100)}%</small>
+                        <p style={{ margin: '.2rem 0', whiteSpace: 'pre-wrap' }}>{h.text.length > 240 ? `${h.text.slice(0, 240)}…` : h.text}</p>
+                        <div className="row">
+                          <button type="button" onClick={() => useSuggestion(h)}>הוספה לתשובה<span className="sr-only"> {h.title}</span></button>
+                          <button type="button" onClick={() => rate(h, true)} aria-label={`הצעה מועילה: ${h.title}`}>👍</button>
+                          <button type="button" onClick={() => rate(h, false)} aria-label={`הצעה לא מתאימה: ${h.title}`}>👎</button>
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                </details>
+              )}
               <form className="composer" onSubmit={send}>
                 {text.startsWith('/') && !text.includes('\n') && (
                   <div className="slash" role="listbox" aria-label="תשובות מוכנות מתאימות">

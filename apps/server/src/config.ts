@@ -37,6 +37,8 @@ const schema = z.object({
   CLAMAV_PORT: z.coerce.number().int().default(3310),
   MEDIA_ALLOW_UNSCANNED: bool('false'), // development only: accept files without antivirus
   REPORT_TZ: z.string().default('Asia/Jerusalem'),
+  /** knowledge-base question log (customer text) is deleted after this many days */
+  KB_QUERY_RETENTION_DAYS: z.coerce.number().int().min(1).max(365).default(30),
   BACKUP_DIR: z.string().default('./data/backups'),
   BACKUP_KEEP: z.coerce.number().int().min(1).max(365).default(14),
   // Hour of day (0-23, server local time) for the automatic daily backup. Unset = manual backups only.

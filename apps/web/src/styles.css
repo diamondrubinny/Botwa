@@ -244,3 +244,9 @@ details.more[open] > summary::after { content: '▴'; }
 /* slash-command suggestions above the composer */
 .slash { display: flex; flex-direction: column; gap: .25rem; margin-bottom: .4rem; }
 .slash button { justify-content: flex-start; text-align: start; }
+
+.kb-sugg { margin: 0 .9rem .5rem; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface-2); padding: .4rem .7rem; }
+.kb-sugg summary { cursor: pointer; font-weight: 600; min-height: 32px; }
+.kb-sugg ul { list-style: none; margin: .3rem 0 0; padding: 0; max-height: 36vh; overflow-y: auto; }
+.kb-sugg li { padding: .4rem 0; border-top: 1px solid var(--border); }
+.kb-sugg li:first-child { border-top: 0; }

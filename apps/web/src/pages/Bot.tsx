@@ -5,6 +5,7 @@ import { usePoll } from '../hooks';
 interface BotCfg {
   enabled: boolean; welcome: string; items: { title: string; answer: string }[]; humanOption: boolean; humanLabel: string;
   humanKeywords: string[]; humanMessage: string; invalidMessage: string; invalidRetries: number; footer: string; preview?: string;
+  kb: { enabled: boolean; minScore: number; maxChars: number; showSource: boolean; intro: string };
 }
 
 const menuText = (b: BotCfg) =>
@@ -106,6 +107,30 @@ export function Bot({ me }: { me: Me }) {
           <div className="field">
             <label htmlFor="b-ft">שורת תחתית אחרי כל תשובה (אופציונלי)</label>
             <input id="b-ft" maxLength={300} value={b.footer} onChange={(e) => set({ footer: e.target.value })} />
+          </div>
+        </fieldset>
+
+        <fieldset className="card" disabled={!canEdit}>
+          <legend>מענה ממאגר הידע</legend>
+          <p className="hint">הבוט עונה על שאלה חופשית מתוך המסמכים, הקישורים והשאלות והתשובות שב<a href="#/kb">מאגר הידע</a>. זה חיפוש מילים בשרת שלכם, בלי בינה מלאכותית ובלי לשלוח מידע החוצה. כשאין התאמה טובה הבוט ממשיך כרגיל (תפריט, ואז העברה לנציג).</p>
+          <div className="field">
+            <label><input type="checkbox" style={{ width: 'auto', minHeight: 'auto' }} checked={b.kb.enabled} onChange={(e) => set({ kb: { ...b.kb, enabled: e.target.checked } })} /> לאפשר מענה ממאגר הידע</label>
+          </div>
+          <div className="field">
+            <label htmlFor="b-kms">רמת ביטחון מינימלית ({Math.round(b.kb.minScore * 100)}%)</label>
+            <input id="b-kms" type="range" min={0.3} max={1} step={0.05} value={b.kb.minScore} onChange={(e) => set({ kb: { ...b.kb, minScore: Number(e.target.value) } })} />
+            <p className="hint">גבוה יותר = פחות תשובות אבל בטוחות יותר. מומלץ 60% ומעלה. אפשר לבדוק ב"בדיקת חיפוש" במאגר.</p>
+          </div>
+          <div className="field">
+            <label htmlFor="b-kin">פתיח לפני התשובה</label>
+            <input id="b-kin" maxLength={120} value={b.kb.intro} onChange={(e) => set({ kb: { ...b.kb, intro: e.target.value } })} />
+          </div>
+          <div className="field">
+            <label htmlFor="b-kmc">אורך תשובה מרבי (תווים)</label>
+            <input id="b-kmc" type="number" min={200} max={1500} step={50} value={b.kb.maxChars} onChange={(e) => set({ kb: { ...b.kb, maxChars: Number(e.target.value) } })} />
+          </div>
+          <div className="field">
+            <label><input type="checkbox" style={{ width: 'auto', minHeight: 'auto' }} checked={b.kb.showSource} onChange={(e) => set({ kb: { ...b.kb, showSource: e.target.checked } })} /> להציג את המקור (כתובת או שם המסמך) מתחת לתשובה</label>
           </div>
         </fieldset>
 

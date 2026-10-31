@@ -16,6 +16,15 @@ export const botSchema = z.object({
   /** how many unrecognised messages are answered with the menu before handing over (0 = hand over at once) */
   invalidRetries: z.number().int().min(0).max(3),
   footer: z.string().trim().max(300),
+  /** answer free-text questions from the knowledge base (no AI: keyword search over the documents, links and FAQ staff added) */
+  kb: z.object({
+    enabled: z.boolean(),
+    /** minimum match score (0-1); higher = fewer but safer answers */
+    minScore: z.number().min(0.3).max(1),
+    maxChars: z.number().int().min(200).max(1500),
+    showSource: z.boolean(),
+    intro: z.string().trim().max(120),
+  }).default({ enabled: false, minScore: 0.6, maxChars: 700, showSource: true, intro: 'מצאתי את זה במאגר המידע שלנו:' }),
 });
 export type BotConfig = z.infer<typeof botSchema>;
 
@@ -33,6 +42,7 @@ export const DEFAULT_BOT: BotConfig = {
   invalidMessage: 'לא הבנתי את הבחירה.',
   invalidRetries: 1,
   footer: 'לחזרה לתפריט שלחו "תפריט". לנציג שלחו "נציג".',
+  kb: { enabled: false, minScore: 0.6, maxChars: 700, showSource: true, intro: 'מצאתי את זה במאגר המידע שלנו:' },
 };
 
 export async function loadBot(db: Db): Promise<BotConfig> {
@@ -67,7 +77,8 @@ export interface Decision { replies: string[]; next: BotState; handoff?: Handoff
 const MENU_WORDS = new Set(['תפריט', 'menu', 'תפריט ראשי', 'start', 'התחלה']);
 
 /** Pure decision function: what the bot answers to one customer message, and the next state. */
-export function decide(bot: BotConfig, st: BotState, text: string | null): Decision {
+/** `kbAnswer`: a confident answer from the knowledge base for this text (computed by the caller; the function itself stays pure). */
+export function decide(bot: BotConfig, st: BotState, text: string | null, kbAnswer: string | null = null): Decision {
   if (!bot.enabled || st.state === 'human') return { replies: [], next: st };
   const handoff = (reason: HandoffReason): Decision => ({ replies: [], next: { state: 'human', invalid: 0 }, handoff: reason });
   if (text === null) return handoff('media'); // files, stickers, locations... need a person
@@ -76,7 +87,12 @@ export function decide(bot: BotConfig, st: BotState, text: string | null): Decis
   if ((bot.humanOption && t === '0') || bot.humanKeywords.some((k) => t.includes(normalize(k)))) return handoff('requested');
 
   const menu = (invalid: number, prefix = ''): Decision => ({ replies: [`${prefix}${formatMenu(bot)}`], next: { state: 'menu', invalid } });
-  if (st.state === null || MENU_WORDS.has(t)) return menu(0);
+  if (MENU_WORDS.has(t)) return menu(0);
+  // a free-text question the knowledge base can answer is answered at once, even as the very first message
+  if (kbAnswer && !/^\d{1,2}$/.test(t) && !bot.items.some((it) => normalize(it.title) === t)) {
+    return { replies: [bot.footer ? `${kbAnswer}\n\n${bot.footer}` : kbAnswer], next: { state: 'menu', invalid: 0 } };
+  }
+  if (st.state === null) return menu(0);
 
   let item = /^\d{1,2}$/.test(t) ? bot.items[Number(t) - 1] : undefined;
   item ??= bot.items.find((it) => normalize(it.title) === t);
