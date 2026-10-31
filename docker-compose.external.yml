@@ -1,0 +1,6 @@
+# Use together with docker-compose.yml when an existing web server (e.g. nginx) already owns :80/:443 and
+# reverse-proxies to Botwa. The wizard sets COMPOSE_FILE=docker-compose.yml:docker-compose.external.yml in that case.
+# The app is published ONLY on loopback, so nothing but the local proxy can reach it (TRUST_PROXY=true is safe).
+services:
+  server:
+    ports: ["127.0.0.1:3000:3000"]

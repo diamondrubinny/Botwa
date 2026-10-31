@@ -46,6 +46,8 @@ services:
 
   caddy:
     image: caddy:2
+    # Built-in HTTPS reverse proxy. Skipped (not in COMPOSE_PROFILES) when an existing nginx fronts Botwa: see docker-compose.external.yml
+    profiles: ["caddy"]
     restart: unless-stopped
     environment:
       DOMAIN: ${DOMAIN:?set DOMAIN in .env}
