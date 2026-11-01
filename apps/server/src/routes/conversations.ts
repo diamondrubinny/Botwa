@@ -148,6 +148,7 @@ export function conversationRoutes(app: FastifyInstance, db: Db, mgr: ChannelMan
        RETURNING id, direction, body, created_at AS "createdAt"`,
       [conv.id, b.data.text, sent.externalMessageId ?? null, u.id],
     );
+    mgr.notifyMessage(conv.channel_id, conv.id, rows[0].id);
     // Replying claims an unassigned conversation.
     await db.query(
       `UPDATE conversations SET last_message_at = now(), assigned_to = COALESCE(assigned_to, $2), bot_state = 'human' WHERE id = $1`,

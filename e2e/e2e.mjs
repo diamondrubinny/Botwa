@@ -5,6 +5,7 @@ import { createRequire } from 'node:module';
 import { execSync } from 'node:child_process';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
+import { createServer } from 'node:http';
 
 const BASE = 'http://localhost:3077';
 const axeSrc = readFileSync(createRequire(import.meta.url).resolve('axe-core/axe.min.js'), 'utf8');
@@ -204,6 +205,75 @@ await page.click('button:has-text("הפעלת התרשים כמצב הבוט")')
 await page.waitForSelector('text=הבוט עובד כעת לפי התרשים.');
 await page.click('button:has-text("חזרה לתפריט הממוספר")');
 await page.waitForSelector('text=הבוט עובד כעת לפי התפריט הממוספר.');
+
+// website chat widget: configure, embed on a "customer site", chat both ways, blocked on an unlisted site
+await page.click('aside.sidebar nav >> text=ערוצים');
+await page.fill('#ch-label', 'האתר שלנו'); await page.selectOption('#ch-type', 'webchat'); await page.click('button:has-text("יצירה")');
+await page.waitForSelector('li.card:has-text("צ׳אט באתר")');
+await page.click('li.card:has-text("האתר שלנו") >> button:has-text("הגדרת הוויגיט וקוד ההטמעה")');
+await page.waitForSelector('textarea[id^="wc-code-"]');
+const embed = await page.inputValue('textarea[id^="wc-code-"]');
+check('widget: embed code shown', /<script src="http:\/\/localhost:3077\/widget\.js" data-key="wc_[\w-]+" async><\/script>/.test(embed), embed);
+await page.fill('textarea[id^="wc-org-"]', 'http://localhost:4010');
+await page.selectOption('select[id^="wc-askName-"]', 'required');
+await page.fill('input[id^="wc-cons-"]', 'אני מאשר את מדיניות הפרטיות');
+await axe('widget settings panel');
+await page.click('button:has-text("שמירה והפעלה")');
+await page.waitForSelector('text=נשמר, והערוץ פעיל.');
+check('widget: settings saved and channel started', true);
+await page.waitForSelector('iframe[title^="תצוגה מקדימה"]');
+const frameBox = await (await page.$('iframe[title^="תצוגה מקדימה"]')).contentFrame();
+await frameBox.waitForSelector('form.pre');
+check('widget: admin preview renders inside the panel', true);
+
+const visitorCtx = await browser.newContext({ locale: 'he-IL' });
+const wcKey = /data-key="(wc_[\w-]+)"/.exec(embed)[1];
+const hostPage = (title, extra = '') => `<!doctype html><html lang="he"><head><meta charset="utf-8"><title>${title}</title></head><body><main><h1>${title}</h1></main>${embed}${extra}</body></html>`;
+const hosts = await Promise.all([[4010, 'האתר של הלקוח'], [4011, 'אתר אחר']].map(([port, title]) => new Promise((resolve) => { const srv = createServer((_q, res) => { res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }); res.end(hostPage(title, port === 4011 ? `<iframe id="direct" title="direct" src="http://localhost:3077/w/${wcKey}"></iframe>` : '')); }); srv.listen(port, '127.0.0.1', () => resolve(srv)); })));
+const vp = await visitorCtx.newPage();
+vp.on('pageerror', (e) => { console.log('VISITOR PAGEERROR', e.message); failures++; });
+await vp.goto('http://localhost:4010/');
+await vp.waitForSelector('[data-botwa-widget] button[aria-label]');
+check('widget: launcher appears on the allowed site', true);
+await vp.click('[data-botwa-widget] button[aria-label]');
+const chat = vp.frameLocator('iframe[title="צ׳אט עם הצוות"]');
+await chat.locator('input#f-name').fill('דנה מהאתר');
+await chat.locator('button.primary').click();
+check('widget: consent is required before chatting', (await chat.locator('#consent-e').textContent()).length > 0);
+await chat.locator('input#consent').check();
+await chat.locator('button.primary').click();
+await chat.locator('textarea').fill('שלום, יש לי שאלה על הזמנה');
+await chat.locator('button.send').click();
+await chat.locator('.msg.me:has-text("יש לי שאלה על הזמנה")').waitFor();
+check('widget: visitor message shown', true);
+const vframe = vp.frames().find((f) => f.url().includes('/w/wc_'));
+await vframe.evaluate(axeSrc);
+const vax = await vframe.evaluate(() => axe.run(document, { runOnly: ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'] }));
+check('axe: widget chat window', vax.violations.length === 0, vax.violations.map((v) => `${v.id}: ${v.nodes[0].html.slice(0, 80)}`).join(' | '));
+
+// the conversation arrives in the inbox; a staff reply reaches the visitor
+await page.click('aside.sidebar nav >> text=שיחות');
+await page.click('.conv-list button:has-text("דנה מהאתר")');
+await page.fill('#reply', 'שלום דנה, אנחנו בודקים');
+await page.click('button:has-text("שליחה")');
+await chat.locator('.msg.them:has-text("אנחנו בודקים")').waitFor({ timeout: 15000 });
+check('widget: staff reply reaches the visitor', true);
+
+// a site that is not on the list gets no launcher (the config call is refused cross-origin) and cannot frame the chat page either
+const bp = await visitorCtx.newPage();
+await bp.goto('http://localhost:4011/');
+await bp.waitForTimeout(2500);
+check('widget: no launcher on an unlisted site', (await bp.locator('[data-botwa-widget]').count()) === 0);
+const direct = bp.frames().find((f) => f !== bp.mainFrame() && (f.url().includes('/w/wc_') || f.url().startsWith('chrome-error')));
+check('widget: an unlisted site cannot frame the chat page directly', !!direct && direct.url().startsWith('chrome-error'), direct?.url() ?? 'no frame');
+await visitorCtx.close();
+hosts.forEach((h) => h.close());
+
+// clean up so later steps are unaffected
+await page.click('aside.sidebar nav >> text=ערוצים');
+await page.click('li.card:has-text("האתר שלנו") >> button:has-text("מחיקת ערוץ")');
+await page.click('dialog[open] button:has-text("אישור")');
+await page.waitForFunction(() => !document.body.textContent?.includes('האתר שלנו'));
 
 // canned replies page
 await page.click('aside.sidebar nav >> text=תשובות ותגיות');

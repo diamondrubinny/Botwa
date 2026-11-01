@@ -130,3 +130,10 @@ Lawyer (privacy, ToS risk, employee monitoring/notice) · Privacy officer (if re
 - [ ] Test with real customer phrasings in "בדיקת חיפוש": tune the bot's confidence threshold. The model separates topics well but cannot tell "unanswerable" by itself; keep the threshold conservative.
 - [ ] Flow chart: run the "בדיקה בשיחה" for every branch (open/closed hours, each channel, unknown input, files) before switching the bot mode.
 - [ ] Flow questions collect personal data (name, phone, email): state the purpose in the privacy policy draft; the answers are stored as an internal note on the conversation (retention follows message retention).
+
+## Website chat widget (P25)
+- [ ] The server is reachable from the public internet over HTTPS (widget.js, /w/*, /widget/* are public by design). A reverse proxy must not add `X-Frame-Options` to `/w/*` (the app sets frame-ancestors itself) and must pass the `Authorization` header.
+- [ ] List only the real site origins in "אתרים מורשים". Avoid "any site".
+- [ ] Test the widget on the real site in Chrome, Firefox and Safari/iOS (only Chromium was tested). Check storage partitioning and any CSP on the host site (it needs `script-src` for this server and `frame-src` for this server).
+- [ ] Privacy: wording of the consent line, what the form collects, retention, and the localStorage token in the site's cookie/storage policy (lawyer).
+- [ ] If the site has signed-in customers and identity is used: the signature is computed on the site's server only; rotate the secret if it leaks.

@@ -19,6 +19,7 @@ await mgr.startAll();
 void mgr.kb?.resumePending().catch((err) => app.log.error({ err }, 'kb resume failed'));
 setInterval(() => void mgr.kb?.embedMissing().catch((err) => app.log.error({ err }, 'kb embed failed')), 600_000).unref();
 setInterval(() => void mgr.kb?.refreshDue().catch((err) => app.log.error({ err }, 'kb refresh failed')), 3600_000).unref();
+setInterval(() => void db.query(`DELETE FROM webchat_visitors WHERE last_seen_at < now() - interval '90 days'`).catch((err) => app.log.error({ err }, 'webchat purge failed')), 24 * 3600_000).unref();
 setInterval(() => void mgr.kb?.purgeOldQueries(cfg.KB_QUERY_RETENTION_DAYS).catch((err) => app.log.error({ err }, 'kb purge failed')), 24 * 3600_000).unref();
 
 const purge = () => purgeOldMessages(db, cfg.MESSAGE_RETENTION_DAYS, media).catch((err) => app.log.error({ err }, 'retention purge failed'));

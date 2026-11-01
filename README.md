@@ -34,6 +34,7 @@ Automated checks do not replace manual screen-reader testing (NVDA/VoiceOver) an
 See [docs/DEPLOY.md](docs/DEPLOY.md) (Compose: Postgres + app + Caddy with automatic HTTPS, backups, restore).
 
 ## Documentation
+- docs/WEBCHAT.he.md: website chat widget (embed code, security, identity)
 - docs/BOT_FLOW.he.md: bot flow chart
 - docs/KNOWLEDGE_BASE.he.md: knowledge base for the bot and agents
 - docs/WHATSAPP_OFFICIAL.he.md: official WhatsApp channel (Cloud API) setup
@@ -87,6 +88,10 @@ Agents see only conversations assigned to them or unassigned; supervisors/admins
 
 ## API (P24: flow chart, meaning search)
 - `GET/PUT /flow`, `GET /flow/refs`, `POST /flow/from-menu`, `POST /flow/simulate`, `PUT /flow/mode` (bot.view / bot.manage). `GET /kb/semantic` (status of the local model).
+
+## API (P25: website chat)
+- Admin (`channels.manage`): `GET/PUT /channels/:id/webchat`, `POST /channels/:id/webchat/identity-secret`.
+- Public: `GET /widget.js`, `GET /w/:key` (chat page), `GET /widget/config`, `POST /widget/session`, `GET/POST /widget/messages` (Bearer visitor token).
 
 ## Attachments (images, PDF, Word/Excel, audio, MP4)
 Disabled unless an antivirus daemon is configured (`CLAMAV_HOST`; Docker: `docker compose --profile media up -d` and `CLAMAV_HOST=clamav`). Fail-closed pipeline: file type decided by **content** allowlist (not name/MIME; SVG/HTML/exe/archives blocked) -> stored under a random id in `MEDIA_DIR/quarantine` (0600, outside any web root) -> ClamAV INSTREAM scan -> moved to `clean/` only if OK; infected files are deleted and audited. Files are served only when `clean`, behind login + the conversation's access rules, with `nosniff`, `CSP: sandbox`, and `attachment` disposition for everything except images. Staff uploads are scanned *before* being sent to the customer. If the scanner is down, inbound files stay pending (retried every minute) and uploads return 503.

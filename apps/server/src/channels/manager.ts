@@ -19,6 +19,7 @@ import { ChannelSender, loadSending as loadSendingRaw, SendError, TEST_SENDING, 
 import type { AdapterFactory, ChannelAdapter, ChannelStatus, ChannelType, OutboundMedia, StartOptions } from './types.js';
 import { TelegramAdapter } from './telegram.js';
 import { CLOUD_CREDS_KEY, newVerifyToken, WhatsAppCloudAdapter, type CloudCreds } from './whatsapp-cloud.js';
+import { WebChatAdapter } from './webchat.js';
 import { WhatsAppAdapter } from './whatsapp.js';
 
 export type BusEvent =
@@ -30,6 +31,7 @@ export type BusEvent =
 export function createDefaultFactory(cfg: Config): AdapterFactory {
   return (type, ctx) => {
     if (type === 'whatsapp') return new WhatsAppAdapter(ctx);
+    if (type === 'webchat') return new WebChatAdapter(ctx);
     if (type === 'whatsapp_cloud') return new WhatsAppCloudAdapter(ctx, undefined, cfg.WHATSAPP_GRAPH_VERSION);
     if (type === 'telegram' && cfg.TELEGRAM_API_ID && cfg.TELEGRAM_API_HASH) {
       return new TelegramAdapter(ctx, { apiId: cfg.TELEGRAM_API_ID, apiHash: cfg.TELEGRAM_API_HASH });
@@ -233,7 +235,7 @@ export class ChannelManager {
 
   /** The official API needs no human-like pacing or warm-up (Meta enforces its own limits); the per-minute/day caps still apply. */
   private effective(channelId: string, s: SendingSettings): SendingSettings {
-    return this.types.get(channelId) === 'whatsapp_cloud' ? { ...s, warmup: false, typing: false, minDelayMs: 0, maxDelayMs: Math.min(s.maxDelayMs, 300) } : s;
+    return ['whatsapp_cloud', 'webchat'].includes(this.types.get(channelId) ?? '') ? { ...s, warmup: false, typing: false, minDelayMs: 0, maxDelayMs: Math.min(s.maxDelayMs, 300) } : s;
   }
 
   // ---- Official WhatsApp (Cloud API) -------------------------------------------------------------------------------
@@ -241,6 +243,17 @@ export class ChannelManager {
   cloudAdapter(channelId: string): WhatsAppCloudAdapter | null {
     const a = this.adapters.get(channelId);
     return a instanceof WhatsAppCloudAdapter ? a : null;
+  }
+
+  /** The running website-chat adapter, for the public widget API (null when the channel is not started or is another type). */
+  webchatAdapter(channelId: string): WebChatAdapter | null {
+    const a = this.adapters.get(channelId);
+    return a instanceof WebChatAdapter ? a : null;
+  }
+
+  /** Wake long-polling widgets: a message (from staff, the bot or the customer) was stored for this conversation. */
+  notifyMessage(channelId: string, conversationId: string, messageId: string): void {
+    this.emit({ channelId, type: 'message', conversationId, messageId });
   }
 
   async getCloudConfig(channelId: string): Promise<{ configured: boolean; phoneNumberId?: string; verifyToken?: string }> {

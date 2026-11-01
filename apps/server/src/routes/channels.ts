@@ -5,6 +5,7 @@ import { loadSession, requireAuth } from '../auth.js';
 import { can } from '../permissions.js';
 import type { ChannelManager, BusEvent } from '../channels/manager.js';
 import type { Config } from '../config.js';
+import { createDefaultWebchat } from './webchat.js';
 import type { Db } from '../db.js';
 import { warmupCap } from '../channels/sender.js';
 
@@ -58,7 +59,7 @@ export function channelRoutes(app: FastifyInstance, db: Db, mgr: ChannelManager,
       const pausedRow = (await db.query('SELECT paused FROM channels WHERE id = $1', [ch.id])).rows[0];
       const autoPausedUntil = mgr.isAutoPausedUntil(ch.id);
       const recentAutoPauses = (await db.query(`SELECT count(*)::int AS n FROM channel_events WHERE channel_id = $1 AND kind = 'auto_paused' AND created_at > now() - interval '24 hours'`, [ch.id])).rows[0].n as number;
-      const risk = ch.type === 'whatsapp_cloud' ? { level: 'low' as const, reasons: [] as string[] } : assessRisk({ status, day: u.day, cap, inbound24h: inb, ageDays: u.ageDays, recentAutoPauses });
+      const risk = ['whatsapp_cloud', 'webchat'].includes(ch.type) ? { level: 'low' as const, reasons: [] as string[] } : assessRisk({ status, day: u.day, cap, inbound24h: inb, ageDays: u.ageDays, recentAutoPauses });
       out.push({
         id: ch.id, label: ch.label, type: ch.type, status, sentLast24h: u.day, inboundLast24h: inb, sentLastMinute: u.minute, dailyCap: cap, ageDays: Math.floor(u.ageDays),
         paused: !!pausedRow?.paused, autoPausedUntil: autoPausedUntil > Date.now() ? new Date(autoPausedUntil).toISOString() : null,
@@ -69,13 +70,14 @@ export function channelRoutes(app: FastifyInstance, db: Db, mgr: ChannelManager,
   });
 
   app.post('/channels', { preHandler: adminOnly }, async (req, reply) => {
-    const b = z.object({ type: z.enum(['whatsapp', 'whatsapp_cloud', 'telegram']), label: z.string().min(1).max(80) }).safeParse(req.body);
+    const b = z.object({ type: z.enum(['whatsapp', 'whatsapp_cloud', 'telegram', 'webchat']), label: z.string().min(1).max(80) }).safeParse(req.body);
     if (!b.success) return reply.code(400).send({ error: 'bad_request' });
     if (!mgr.supports(b.data.type)) return reply.code(501).send({ error: 'unsupported_channel_type' });
     const { rows } = await db.query(
       'INSERT INTO channels (type, label, created_by) VALUES ($1,$2,$3) RETURNING id, type, label, status',
       [b.data.type, b.data.label, req.user!.id],
     );
+    if (b.data.type === 'webchat') await createDefaultWebchat(db, cfg, rows[0].id);
     await audit(db, { actorId: req.user!.id, action: 'channel.create', target: rows[0].id, ip: req.ip, meta: { type: b.data.type } });
     return reply.code(201).send(rows[0]);
   });

@@ -20,6 +20,8 @@ import { PushService } from './push.js';
 import { KnowledgeBase } from './kb/service.js';
 import { kbRoutes } from './routes/kb.js';
 import { flowRoutes } from './routes/flow.js';
+import { widgetRoutes } from './routes/widget.js';
+import { webchatAdminRoutes } from './routes/webchat.js';
 import { LocalEmbedder } from './semantic/embedder.js';
 import { contactRoutes } from './routes/contacts.js';
 import { tagRoutes } from './routes/tags.js';
@@ -101,5 +103,7 @@ export async function buildApp(cfg: Config, db: Db, mgr: ChannelManager, media: 
   kb.setEmbedder(new LocalEmbedder(cfg, () => void kb.embedMissing().catch(() => undefined)));
   kbRoutes(app, db, kb);
   flowRoutes(app, db, kb);
+  widgetRoutes(app, db, mgr, cfg);
+  webchatAdminRoutes(app, db, mgr, cfg);
   return app;
 }
