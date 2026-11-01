@@ -7,6 +7,7 @@ COPY e2e/package.json e2e/
 RUN npm ci
 COPY apps/server apps/server
 COPY apps/web apps/web
+COPY wordpress-plugin wordpress-plugin
 RUN npm run build -w @botwa/server && npm run build -w @botwa/web
 
 FROM node:22-slim

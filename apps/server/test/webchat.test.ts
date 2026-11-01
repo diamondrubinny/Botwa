@@ -95,6 +95,26 @@ describe('website chat widget', () => {
     (globalThis as { __secret?: string }).__secret = sec;
   });
 
+  it('packages the WordPress plugin for this chat (admins only), pre-filled and without test files', async () => {
+    const JSZip = (await import('jszip')).default;
+    expect((await staff('GET', `/channels/${channelId}/webchat/wordpress-plugin.zip`, 'a1@t.io')).statusCode).toBe(403);
+    expect((await staff('GET', '/channels/00000000-0000-4000-8000-000000000000/webchat/wordpress-plugin.zip', 'admin@t.io')).statusCode).toBe(404);
+    const r = await staff('GET', `/channels/${channelId}/webchat/wordpress-plugin.zip`, 'admin@t.io');
+    expect(r.statusCode).toBe(200);
+    expect(r.headers['content-type']).toBe('application/zip');
+    const z = await JSZip.loadAsync(r.rawPayload);
+    const names = Object.keys(z.files);
+    expect(names).toContain('botwa-chat/botwa-chat.php');
+    expect(names).toContain('botwa-chat/includes/class-botwa-chat-frontend.php');
+    expect(names).toContain('botwa-chat/languages/botwa-chat-he_IL.mo');
+    expect(names.some((n) => n.includes('/tests/'))).toBe(false);
+    const defaults = await z.file('botwa-chat/botwa-chat-defaults.php')!.async('string');
+    expect(defaults).toContain(`'server' => "${ORIGIN}"`);
+    expect(defaults).toContain(`'key' => "${key}"`);
+    expect(defaults).not.toMatch(/secret/i);
+    expect((await db.query(`SELECT 1 FROM audit_log WHERE action = 'channel.webchat_plugin_download'`)).rowCount).toBe(1);
+  });
+
   it('serves the loader and the chat page with the right isolation headers', async () => {
     const js = await app.inject({ url: '/widget.js' });
     expect(js.statusCode).toBe(200);

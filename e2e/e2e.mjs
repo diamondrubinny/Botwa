@@ -222,6 +222,9 @@ check('widget: allowed site is still in the field before saving', (await page.in
 await page.click('button:has-text("שמירה והפעלה")');
 await page.waitForSelector('text=נשמר, והערוץ פעיל.');
 check('widget: settings saved and channel started', true);
+await page.waitForSelector('a:has-text("הורדת תוסף וורדפרס")');
+const zipRes = await page.evaluate(async () => { const r = await fetch(document.querySelector('a[href$="wordpress-plugin.zip"]').getAttribute('href'), { credentials: 'same-origin' }); return { status: r.status, type: r.headers.get('content-type'), size: (await r.arrayBuffer()).byteLength }; });
+check('widget: WordPress plugin package downloads from the panel', zipRes.status === 200 && zipRes.type === 'application/zip' && zipRes.size > 5000, JSON.stringify(zipRes));
 await page.waitForSelector('iframe[title^="תצוגה מקדימה"]');
 const frameBox = await (await page.$('iframe[title^="תצוגה מקדימה"]')).contentFrame();
 await frameBox.waitForSelector('form.pre');

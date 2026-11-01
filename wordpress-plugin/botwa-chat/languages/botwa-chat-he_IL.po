@@ -1,0 +1,171 @@
+# Hebrew translation for Botwa Chat
+msgid ""
+msgstr ""
+"Project-Id-Version: Botwa Chat 1.0.0\n"
+"Language: he_IL\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+
+msgid "A \"chat with us\" button"
+msgstr "כפתור \"דברו איתנו\""
+
+msgid "Add to \"allowed sites\" in Botwa: %1$s (and %2$s if visitors can reach the site that way)."
+msgstr "יש להוסיף ל\"אתרים מורשים\" ב-Botwa: %1$s (וגם %2$s אם אפשר להגיע לאתר גם בצורה הזו)."
+
+msgid "Administrators"
+msgstr "מנהלים"
+
+msgid "Botwa Chat"
+msgstr "צ׳אט Botwa"
+
+msgid "Chat server address"
+msgstr "כתובת שרת הצ׳אט"
+
+msgid "Chat with us"
+msgstr "דברו איתנו"
+
+msgid "Check"
+msgstr "בדיקה"
+
+msgid "Connected, but this site (%s) is not in the allowed sites list of the chat in Botwa, so visitors will not see the chat. Add it there and test again."
+msgstr "החיבור הצליח, אבל האתר הזה (%s) אינו ברשימת האתרים המורשים של הצ׳אט ב-Botwa, ולכן הגולשים לא יראו את הצ׳אט. יש להוסיף אותו שם ולבדוק שוב."
+
+msgid "Connected. Chat: \"%1$s\". Available now: %2$s."
+msgstr "החיבור הצליח. צ׳אט: \"%1$s\". זמין כעת: %2$s."
+
+msgid "Connection"
+msgstr "חיבור"
+
+msgid "Could not reach the server: %s"
+msgstr "לא ניתן להגיע לשרת: %s"
+
+msgid "Create it in Botwa: widget settings > \"Recognize a logged-in customer\" > new secret."
+msgstr "יוצרים ב-Botwa: הגדרות הוויגיט ← \"זיהוי לקוח מחובר\" ← יצירת סוד חדש."
+
+msgid "Delete the saved secret"
+msgstr "מחיקת הסוד השמור"
+
+msgid "Do not show to logged-in administrators"
+msgstr "לא להציג למנהלים מחוברים"
+
+msgid "Enabled"
+msgstr "פעיל"
+
+msgid "Enter a valid server address and site key first."
+msgstr "יש להזין קודם כתובת שרת ומפתח אתר תקינים."
+
+msgid "Enter the server address and the site key, otherwise the chat cannot appear."
+msgstr "יש להזין כתובת שרת ומפתח אתר, אחרת הצ׳אט לא יופיע."
+
+msgid "For sites that must not contact other servers before the visitor agrees. Your cookie or consent plugin should call window.botwaChatLoad() once consent is given."
+msgstr "לאתרים שאסור להם לפנות לשרתים אחרים לפני הסכמת הגולש. תוסף העוגיות או ההסכמה צריך לקרוא ל-window.botwaChatLoad() אחרי שניתנה הסכמה."
+
+msgid "Front page only"
+msgstr "עמוד הבית בלבד"
+
+msgid "Hide on these pages"
+msgstr "להסתיר בעמודים אלה"
+
+msgid "Identity secret"
+msgstr "סוד זיהוי"
+
+msgid "Link the chat to the logged-in WordPress user"
+msgstr "לקשור את הצ׳אט למשתמש וורדפרס המחובר"
+
+msgid "Load the chat only after your consent tool calls botwaChatLoad()"
+msgstr "לטעון את הצ׳אט רק אחרי שכלי ההסכמה קורא ל-botwaChatLoad()"
+
+msgid "Not allowed."
+msgstr "אין הרשאה."
+
+msgid "One path per line. Everything that starts with the path is excluded."
+msgstr "נתיב בכל שורה. כל מה שמתחיל בנתיב יוחרג."
+
+msgid "Place this shortcode anywhere, or give any link the address #botwa-chat, or any element the class botwa-open:"
+msgstr "אפשר להניח את קוד הקיצור הזה בכל מקום, או לתת לכל קישור את הכתובת #botwa-chat, או לכל אלמנט את המחלקה botwa-open:"
+
+msgid "Privacy"
+msgstr "פרטיות"
+
+msgid "Public identifier of the chat. It is visible in your page source by design; it is not a secret."
+msgstr "מזהה ציבורי של הצ׳אט. הוא גלוי בקוד העמוד מטבעו ואינו סוד."
+
+msgid "Recognition"
+msgstr "זיהוי"
+
+msgid "Recognize logged-in customers (optional)"
+msgstr "זיהוי לקוחות מחוברים (אופציונלי)"
+
+msgid "Remove secret"
+msgstr "הסרת סוד"
+
+msgid "Saved. Leave empty to keep it."
+msgstr "נשמר. השאירו ריק כדי לשמור אותו."
+
+msgid "Settings"
+msgstr "הגדרות"
+
+msgid "Show only on the home page"
+msgstr "להציג רק בעמוד הבית"
+
+msgid "Show the chat"
+msgstr "הצגת הצ׳אט"
+
+msgid "Shows your Botwa website chat on this site. In Botwa: Channels > your website chat > widget settings, copy the site key from the embed code (data-key=\"wc_…\") and add this site to the allowed sites."
+msgstr "מציג באתר הזה את צ׳אט האתר של Botwa. ב-Botwa: ערוצים ← צ׳אט האתר ← הגדרות הוויגיט, מעתיקים את מפתח האתר מקוד ההטמעה (data-key=\"wc_…\") ומוסיפים את האתר הזה לאתרים המורשים."
+
+msgid "Site key"
+msgstr "מפתח אתר"
+
+msgid "Suggested text, to be reviewed for your situation:"
+msgstr "נוסח מוצע, יש לבדוק אותו לפי מצבכם:"
+
+msgid "Test connection"
+msgstr "בדיקת חיבור"
+
+msgid "Testing…"
+msgstr "בודק…"
+
+msgid "The address of your Botwa server, without a path."
+msgstr "כתובת שרת ה-Botwa שלכם, בלי נתיב."
+
+msgid "The identity secret looks wrong and was not saved."
+msgstr "סוד הזיהוי נראה שגוי ולא נשמר."
+
+msgid "The same customer then sees the same conversation on every device. The signature is computed on this server; the secret never reaches the browser."
+msgstr "כך אותו לקוח רואה את אותה שיחה בכל מכשיר. החתימה מחושבת בשרת הזה והסוד לא מגיע לדפדפן."
+
+msgid "The server address must be an https address such as https://chat.example.com. The previous value was kept."
+msgstr "כתובת השרת חייבת להיות כתובת https, למשל https://chat.example.com. הערך הקודם נשמר."
+
+msgid "The server answer was not what a Botwa chat server returns."
+msgstr "תשובת השרת אינה תשובה של שרת צ׳אט Botwa."
+
+msgid "The server answered with status %d."
+msgstr "השרת ענה בסטטוס %d."
+
+msgid "The server answered, but there is no chat with this site key."
+msgstr "השרת ענה, אבל אין צ׳אט עם מפתח האתר הזה."
+
+msgid "The site key looks wrong. It starts with wc_ and is shown in the embed code in Botwa. The previous value was kept."
+msgstr "מפתח האתר נראה שגוי. הוא מתחיל ב-wc_ ומופיע בקוד ההטמעה ב-Botwa. הערך הקודם נשמר."
+
+msgid "The test could not be completed."
+msgstr "לא ניתן היה להשלים את הבדיקה."
+
+msgid "This site offers a chat with our team. When you open the chat, a connection is made to our chat server and a random identifier is stored in your browser so that your conversation can continue. If you write to us, we store your messages and the details you enter (such as name, email or phone) to answer you."
+msgstr "באתר זה אפשר לנהל צ׳אט עם הצוות שלנו. כשפותחים את הצ׳אט נוצר חיבור לשרת הצ׳אט שלנו, ומזהה אקראי נשמר בדפדפן כדי שהשיחה תוכל להמשיך. אם תכתבו לנו, נשמור את ההודעות ואת הפרטים שתזינו (כגון שם, אימייל או טלפון) כדי להשיב לכם."
+
+msgid "Wait for consent"
+msgstr "המתנה להסכמה"
+
+msgid "Where it appears"
+msgstr "היכן זה מופיע"
+
+msgid "no (start the channel in Botwa)"
+msgstr "לא (יש להפעיל את הערוץ ב-Botwa)"
+
+msgid "yes"
+msgstr "כן"

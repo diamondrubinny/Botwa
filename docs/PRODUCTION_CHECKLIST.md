@@ -143,3 +143,9 @@ Lawyer (privacy, ToS risk, employee monitoring/notice) · Privacy officer (if re
 - [ ] Webhook receivers must verify the signature and the timestamp and tolerate duplicates.
 - [ ] Message text sent to webhooks is personal data: decide per endpoint (`includeText`), record the receiving system in the data map and privacy policy (lawyer).
 - [ ] The server needs outbound HTTPS for webhooks; private addresses are blocked on purpose.
+
+## WordPress plugin (P27)
+- [ ] Install on a staging WordPress site first: the plugin was verified with a PHP test harness that stands in for WordPress, not on a real installation. Check: activation, settings save, "test connection", button visible, shortcode, logged-in recognition (if used), caching/optimisation plugins.
+- [ ] Add every site (with and without www) to the chat's allowed sites in Botwa.
+- [ ] Docker image: the build copies `wordpress-plugin/` (the download endpoint needs it); the Docker build itself was not run here.
+- [ ] Privacy: the plugin's suggested privacy text and the consent mode need a legal review for each site.

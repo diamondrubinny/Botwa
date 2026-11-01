@@ -379,6 +379,11 @@ function WebChatPanel({ channel, onSaved }: { channel: Channel; onSaved: () => v
         <label htmlFor={id('code')} className="sr-only">קוד ההטמעה</label>
         <textarea id={id('code')} dir="ltr" readOnly rows={3} value={c.embedCode} onFocus={(e) => e.currentTarget.select()} />
         <div className="row"><button type="button" onClick={() => copy(c.embedCode)}>העתקת הקוד</button></div>
+        <div className="card">
+          <h5 style={{ margin: '0 0 .4rem' }}>אתר וורדפרס?</h5>
+          <p className="hint">אפשר להתקין תוסף שמוסיף את הצ׳אט בלי לגעת בקוד: הורידו את התוסף (כבר מוגדר עם כתובת השרת ומפתח האתר של הצ׳אט הזה), בוורדפרס: תוספים ← הוספת תוסף ← העלאה, והפעילו. אל תשכחו להוסיף את כתובת האתר ל"אתרים מורשים" למטה. פירוט: docs/WORDPRESS.he.md.</p>
+          <a className="btn" href={`/channels/${channel.id}/webchat/wordpress-plugin.zip`} download>הורדת תוסף וורדפרס</a>
+        </div>
         {c.allowedOrigins.length === 0 && !c.allowAnyOrigin && <p className="error" role="status">עדיין לא הוגדר אתר מורשה: הוויגיט לא יוצג באף אתר עד שתוסיפו כתובת בסעיף 3.</p>}
       </section>
 
