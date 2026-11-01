@@ -149,6 +149,7 @@ export function conversationRoutes(app: FastifyInstance, db: Db, mgr: ChannelMan
       [conv.id, b.data.text, sent.externalMessageId ?? null, u.id],
     );
     mgr.notifyMessage(conv.channel_id, conv.id, rows[0].id);
+    mgr.hookMessage('message.sent', conv.id, rows[0].id);
     // Replying claims an unassigned conversation.
     await db.query(
       `UPDATE conversations SET last_message_at = now(), assigned_to = COALESCE(assigned_to, $2), bot_state = 'human' WHERE id = $1`,
@@ -181,6 +182,7 @@ export function conversationRoutes(app: FastifyInstance, db: Db, mgr: ChannelMan
     if (!upd.rowCount) return reply.code(409).send({ error: 'conflict' });
     if (target) await db.query(`UPDATE conversations SET bot_state = 'human' WHERE id = $1`, [conv.id]);
     await audit(db, { actorId: u.id, action: 'conversation.assign', target: conv.id, ip: req.ip, meta: { to: target } });
+    mgr.hookConversation('conversation.assigned', conv.id);
     return { ok: true };
   });
 
@@ -193,6 +195,7 @@ export function conversationRoutes(app: FastifyInstance, db: Db, mgr: ChannelMan
       `UPDATE conversations SET status = $2, bot_state = CASE WHEN $2 = 'closed' THEN NULL ELSE bot_state END, bot_invalid = CASE WHEN $2 = 'closed' THEN 0 ELSE bot_invalid END WHERE id = $1`,
       [p.data.id, b.data.status],
     );
+    mgr.hookConversation('conversation.status_changed', p.data.id);
     return { ok: true };
   });
 

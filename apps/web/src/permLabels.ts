@@ -4,5 +4,5 @@ export const PERM_GROUPS: { title: string; items: [string, string][] }[] = [
   { title: 'תוכן ותפעול', items: [['canned.manage', 'לנהל תשובות מוכנות'], ['tags.manage', 'לנהל תגיות'], ['reports.view', 'לצפות בדוחות'], ['bot.view', 'לצפות בהגדרות הבוט'], ['bot.manage', 'לערוך את הבוט'], ['kb.manage', 'לנהל את מאגר הידע (מסמכים, קישורים, שאלות ותשובות)']] },
   { title: 'ערוצים והגדרות', items: [['channels.view', 'לצפות בערוצים ובבריאותם, ועצירת חירום'], ['channels.manage', 'ליצור/לקשר/לנתק/למחוק ערוצים'], ['settings.view', 'לצפות בהגדרות'], ['settings.manage', 'לשנות הגדרות (שעות, ניתוב, מגבלות שליחה)']] },
   { title: 'אנשים ואבטחה', items: [['users.view', 'לצפות ברשימת הצוות'], ['users.manage', 'ליצור/לערוך/להשבית משתמשים ולאפס MFA'], ['roles.manage', 'לנהל תפקידים'], ['audit.view', 'לצפות ביומן הביקורת']] },
-  { title: 'פרטיות וגיבוי', items: [['privacy.manage', 'לייצא ולמחוק מידע של לקוח'], ['backups.manage', 'לנהל גיבויים']] },
+  { title: 'פרטיות וגיבוי', items: [['api.manage', 'לנהל מפתחות API ו-Webhooks (אינטגרציות)'], ['privacy.manage', 'לייצא ולמחוק מידע של לקוח'], ['backups.manage', 'לנהל גיבויים']] },
 ];

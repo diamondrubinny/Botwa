@@ -137,3 +137,9 @@ Lawyer (privacy, ToS risk, employee monitoring/notice) · Privacy officer (if re
 - [ ] Test the widget on the real site in Chrome, Firefox and Safari/iOS (only Chromium was tested). Check storage partitioning and any CSP on the host site (it needs `script-src` for this server and `frame-src` for this server).
 - [ ] Privacy: wording of the consent line, what the form collects, retention, and the localStorage token in the site's cookie/storage policy (lawyer).
 - [ ] If the site has signed-in customers and identity is used: the signature is computed on the site's server only; rotate the secret if it leaks.
+
+## API and webhooks (P26)
+- [ ] Create keys per integration with the minimum scope; revoke unused ones. Keys are secrets.
+- [ ] Webhook receivers must verify the signature and the timestamp and tolerate duplicates.
+- [ ] Message text sent to webhooks is personal data: decide per endpoint (`includeText`), record the receiving system in the data map and privacy policy (lawyer).
+- [ ] The server needs outbound HTTPS for webhooks; private addresses are blocked on purpose.

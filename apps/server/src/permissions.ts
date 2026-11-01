@@ -18,6 +18,7 @@ export const PERMISSIONS = [
   'audit.view',
   'privacy.manage',            // export / erase a customer's data
   'backups.manage',
+  'api.manage',                // API keys and outgoing webhooks (integrations)
   'kb.manage',                 // knowledge base: add/edit documents, links and FAQ, synonyms, search tests
 ] as const;
 export type Permission = (typeof PERMISSIONS)[number];

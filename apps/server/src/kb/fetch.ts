@@ -42,6 +42,20 @@ const lookup: net.LookupFunction = (hostname, options, cb) => {
 
 const agent = new Agent({ connect: { lookup, timeout: 10_000 }, headersTimeout: 15_000, bodyTimeout: 20_000 });
 
+/** Outgoing POST for webhooks: same SSRF protection as fetching documents (connect-time address check), no redirects, small response read. */
+export async function safePost(raw: string, body: string, headers: Record<string, string>, opts: { timeoutMs?: number; allowHttp?: boolean } = {}): Promise<{ status: number }> {
+  const url = checkUrl(raw);
+  if (url.protocol !== 'https:' && !opts.allowHttp) throw new FetchError('https_required');
+  let res;
+  try {
+    res = await undiciFetch(url, { method: 'POST', dispatcher: agent, redirect: 'manual', body, headers, signal: AbortSignal.timeout(opts.timeoutMs ?? 8000) });
+  } catch (e) {
+    throw new FetchError((e as { cause?: Error }).cause?.message === 'blocked_address' ? 'blocked_address' : 'fetch_failed');
+  }
+  await res.body?.cancel().catch(() => undefined);
+  return { status: res.status };
+}
+
 export interface Fetched { url: string; contentType: string; body: Buffer }
 export class FetchError extends Error {}
 

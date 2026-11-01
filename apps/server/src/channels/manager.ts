@@ -10,6 +10,8 @@ import { autoAssign } from '../routing.js';
 import { audit } from '../audit.js';
 import { MediaService } from '../media/store.js';
 import type { KnowledgeBase } from '../kb/service.js';
+import { conversationEventData, messageEventData } from '../integrations/events.js';
+import type { EventType, WebhookService } from '../integrations/webhooks.js';
 import { runFlow, type Effect, type FlowContext, type FlowState } from '../flow/engine.js';
 import { loadFlow } from '../flow/store.js';
 import { loadBusinessHours } from '../routes/settings.js';
@@ -79,6 +81,17 @@ export class ChannelManager {
 
   snapshot(channelId: string): { status: ChannelStatus; qr?: string; code?: string } {
     return { status: this.statuses.get(channelId) ?? 'stopped', qr: this.lastQr.get(channelId), code: this.lastCode.get(channelId) };
+  }
+
+  /** Set by the app: outgoing webhooks. All hook* calls are fire-and-forget and can never break message handling. */
+  webhooks?: WebhookService;
+  hookMessage(type: 'message.received' | 'message.sent', conversationId: string, messageId: string): void {
+    const w = this.webhooks;
+    if (w) void messageEventData(this.db, conversationId, messageId).then((d) => (d ? w.enqueue(type, d) : undefined)).catch(() => undefined);
+  }
+  hookConversation(type: Exclude<EventType, 'message.received' | 'message.sent'>, conversationId: string, extra: Record<string, unknown> = {}): void {
+    const w = this.webhooks;
+    if (w) void conversationEventData(this.db, conversationId).then((d) => (d ? w.enqueue(type, { ...d, ...extra }) : undefined)).catch(() => undefined);
   }
 
   /** Set by the app: lets the menu bot answer free-text questions from the knowledge base. */
@@ -165,7 +178,7 @@ export class ChannelManager {
             await this.maybeAway(channelId, r.conversationId, m.externalContactId).catch(() => undefined);
           }
           if (r.messageId) this.emit({ channelId, type: 'message', conversationId: r.conversationId, messageId: r.messageId });
-          if (r.messageId && !r.blocked) this.onInbound?.(r.conversationId);
+          if (r.messageId && !r.blocked) { this.onInbound?.(r.conversationId); this.hookMessage('message.received', r.conversationId, r.messageId); }
         },
       },
     });
@@ -313,7 +326,8 @@ export class ChannelManager {
 
   private async botSay(channelId: string, convId: string, ext: string, text: string): Promise<void> {
     const sent = await this.sendText(channelId, ext, text, { background: true });
-    await this.db.query(`INSERT INTO messages (conversation_id, direction, body, external_id, auto) VALUES ($1,'out',$2,$3,true) ON CONFLICT DO NOTHING`, [convId, text, sent.externalMessageId ?? null]);
+    const ins = await this.db.query(`INSERT INTO messages (conversation_id, direction, body, external_id, auto) VALUES ($1,'out',$2,$3,true) ON CONFLICT DO NOTHING RETURNING id`, [convId, text, sent.externalMessageId ?? null]);
+    if (ins.rows[0]) { this.notifyMessage(channelId, convId, ins.rows[0].id); this.hookMessage('message.sent', convId, ins.rows[0].id); }
   }
 
   /** Menu bot: answer, or hand over to a person (assign via routing, leave a note, away notice outside hours). */

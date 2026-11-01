@@ -34,6 +34,7 @@ Automated checks do not replace manual screen-reader testing (NVDA/VoiceOver) an
 See [docs/DEPLOY.md](docs/DEPLOY.md) (Compose: Postgres + app + Caddy with automatic HTTPS, backups, restore).
 
 ## Documentation
+- docs/INTEGRATIONS.he.md: API keys, REST API, webhooks
 - docs/WEBCHAT.he.md: website chat widget (embed code, security, identity)
 - docs/BOT_FLOW.he.md: bot flow chart
 - docs/KNOWLEDGE_BASE.he.md: knowledge base for the bot and agents

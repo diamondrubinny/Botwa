@@ -21,6 +21,9 @@ import { KnowledgeBase } from './kb/service.js';
 import { kbRoutes } from './routes/kb.js';
 import { flowRoutes } from './routes/flow.js';
 import { widgetRoutes } from './routes/widget.js';
+import { apiRoutes } from './routes/api.js';
+import { integrationRoutes } from './routes/integrations.js';
+import { WebhookService, type Sender } from './integrations/webhooks.js';
 import { webchatAdminRoutes } from './routes/webchat.js';
 import { LocalEmbedder } from './semantic/embedder.js';
 import { contactRoutes } from './routes/contacts.js';
@@ -34,7 +37,7 @@ import type { ChannelManager } from './channels/manager.js';
 import type { Config } from './config.js';
 import type { Db } from './db.js';
 
-export async function buildApp(cfg: Config, db: Db, mgr: ChannelManager, media: MediaService = new MediaService(db, cfg)): Promise<FastifyInstance> {
+export async function buildApp(cfg: Config, db: Db, mgr: ChannelManager, media: MediaService = new MediaService(db, cfg), webhookSender?: Sender): Promise<FastifyInstance> {
   const app = Fastify({
     logger: {
       level: cfg.NODE_ENV === 'test' ? 'silent' : 'info',
@@ -57,7 +60,7 @@ export async function buildApp(cfg: Config, db: Db, mgr: ChannelManager, media: 
   const allowedOrigins = cfg.APP_ORIGIN.split(',').map((o) => o.trim().replace(/\/$/, ''));
   // CSRF defence in depth (cookie is already SameSite=Strict): mutating requests must come from our origin.
   app.addHook('onRequest', async (req, reply) => {
-    if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method) && !req.url.startsWith('/webhooks/')) { // webhooks authenticate by HMAC signature instead
+    if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method) && !req.url.startsWith('/webhooks/') && !req.url.startsWith('/api/v1/')) { // webhooks authenticate by HMAC, the API by bearer key (neither uses the cookie session)
       const origin = req.headers.origin;
       if (!origin || !allowedOrigins.includes(origin)) return reply.code(403).send({ error: 'bad_origin' });
     }
@@ -104,6 +107,12 @@ export async function buildApp(cfg: Config, db: Db, mgr: ChannelManager, media: 
   kbRoutes(app, db, kb);
   flowRoutes(app, db, kb);
   widgetRoutes(app, db, mgr, cfg);
+  const hooks = new WebhookService(db, cfg, webhookSender);
+  mgr.webhooks = hooks;
+  if (cfg.NODE_ENV !== 'test') hooks.start();
+  apiRoutes(app, db, mgr);
+  integrationRoutes(app, db, cfg, hooks);
+  app.addHook('onClose', async () => hooks.stop());
   webchatAdminRoutes(app, db, mgr, cfg);
   return app;
 }

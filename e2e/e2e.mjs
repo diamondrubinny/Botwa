@@ -218,6 +218,7 @@ await page.fill('textarea[id^="wc-org-"]', 'http://localhost:4010');
 await page.selectOption('select[id^="wc-askName-"]', 'required');
 await page.fill('input[id^="wc-cons-"]', 'אני מאשר את מדיניות הפרטיות');
 await axe('widget settings panel');
+check('widget: allowed site is still in the field before saving', (await page.inputValue('textarea[id^="wc-org-"]')) === 'http://localhost:4010');
 await page.click('button:has-text("שמירה והפעלה")');
 await page.waitForSelector('text=נשמר, והערוץ פעיל.');
 check('widget: settings saved and channel started', true);
@@ -274,6 +275,36 @@ await page.click('aside.sidebar nav >> text=ערוצים');
 await page.click('li.card:has-text("האתר שלנו") >> button:has-text("מחיקת ערוץ")');
 await page.click('dialog[open] button:has-text("אישור")');
 await page.waitForFunction(() => !document.body.textContent?.includes('האתר שלנו'));
+
+// integrations: API key (shown once), webhook (secret shown once), documentation
+await page.click('aside.sidebar nav >> text=אינטגרציות');
+await page.waitForSelector('h1:has-text("אינטגרציות")');
+await page.fill('#k-name', 'מערכת CRM');
+await page.click('button:has-text("יצירת מפתח")');
+await page.waitForSelector('[role=status] code');
+const apiKey = await page.textContent('[role=status] code');
+check('integrations: API key created and shown once', /^bk_[\w-]{8}_[\w-]{30,}$/.test(apiKey ?? ''), apiKey ?? '');
+const me = await fetch('http://localhost:3077/api/v1/me', { headers: { authorization: `Bearer ${apiKey}` } });
+check('integrations: the key works against the public API', me.status === 200 && (await me.json()).name === 'מערכת CRM');
+await axe('integrations: API keys');
+await page.click('.chips >> text=Webhooks');
+await page.fill('#h-name', 'CRM'); await page.fill('#h-url', 'https://example.org/botwa-hook');
+await page.click('button:has-text("יצירה")');
+await page.waitForSelector('[role=status] code:has-text("whsec_")');
+check('integrations: webhook created, secret shown once', true);
+await page.fill('#h-url', 'http://example.org/x'); await page.fill('#h-name', 'x');
+await page.click('button:has-text("יצירה")');
+await page.waitForSelector('text=נדרשת כתובת https.');
+await axe('integrations: webhooks');
+await page.click('.chips >> text=תיעוד');
+await page.waitForTimeout(500); // colour transition
+await axe('integrations: docs');
+await page.click('.chips >> text=מפתחות API');
+await page.click('table button.danger:has-text("ביטול")');
+await page.click('dialog[open] button:has-text("אישור")');
+await page.waitForSelector('text=בוטל');
+const revoked = await fetch('http://localhost:3077/api/v1/me', { headers: { authorization: `Bearer ${apiKey}` } });
+check('integrations: a revoked key stops working at once', revoked.status === 401);
 
 // canned replies page
 await page.click('aside.sidebar nav >> text=תשובות ותגיות');
@@ -573,7 +604,7 @@ await page.click('button[aria-label="חזרה לרשימה"]');
 await page.waitForSelector('.list-pane');
 const small = await page.evaluate(() => [...document.querySelectorAll('.chip, .bn-item, .conv-item')].filter((e) => { const r = e.getBoundingClientRect(); return r.width > 0 && Math.min(r.width, r.height) < 44; }).map((e) => e.className));
 check('phone: chips, tabs and list rows are all >= 44px touch targets', small.length === 0, JSON.stringify(small));
-for (const route of ['settings', 'team', 'channels', 'reports', 'roles', 'bot', 'kb', 'flow']) {
+for (const route of ['settings', 'team', 'channels', 'reports', 'roles', 'bot', 'kb', 'flow', 'integrations']) {
   await page.goto(BASE + '/#/' + route);
   await page.waitForSelector('main h1');
   await page.waitForLoadState('networkidle').catch(() => {});

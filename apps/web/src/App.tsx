@@ -14,6 +14,7 @@ import { Inbox } from './pages/Inbox';
 import { Accessibility, Privacy } from './pages/Legal';
 import { Login } from './pages/Login';
 import { FlowEditor } from './pages/FlowEditor';
+import { Integrations } from './pages/Integrations';
 import { KnowledgeBase } from './pages/KnowledgeBase';
 import { Reports } from './pages/Reports';
 import { Roles } from './pages/Roles';
@@ -34,6 +35,7 @@ const NAV: NavItem[] = [
   { r: 'channels', label: t.nav.channels, icon: 'plug', allowed: (m) => can(m, 'channels.view') },
   { r: 'team', label: t.nav.team, icon: 'users', allowed: (m) => can(m, 'users.view') },
   { r: 'roles', label: 'תפקידים', icon: 'shield', allowed: (m) => can(m, 'roles.manage') },
+  { r: 'integrations', label: 'אינטגרציות', icon: 'plug', allowed: (m) => can(m, 'api.manage') },
   { r: 'audit', label: 'יומן ביקורת', icon: 'list', allowed: (m) => can(m, 'audit.view') },
   { r: 'settings', label: 'הגדרות', icon: 'gear', allowed: (m) => can(m, 'settings.view') || can(m, 'backups.manage') },
   { r: 'account', label: t.nav.account, icon: 'user', allowed: () => true },
@@ -136,6 +138,7 @@ function Shell({ me, reloadMe, onLogout }: { me: Me; reloadMe: () => Promise<voi
           {page === 'inbox' && <Inbox me={me} />}
           {page === 'bot' && can(me, 'bot.view') && <Bot me={me} />}
           {page === 'flow' && can(me, 'bot.view') && <FlowEditor me={me} />}
+          {page === 'integrations' && can(me, 'api.manage') && <Integrations />}
           {page === 'kb' && can(me, 'kb.manage') && <KnowledgeBase />}
           {page === 'reports' && can(me, 'reports.view') && <Reports />}
           {page === 'canned' && (can(me, 'canned.manage') || can(me, 'tags.manage')) && <CannedReplies me={me} />}
