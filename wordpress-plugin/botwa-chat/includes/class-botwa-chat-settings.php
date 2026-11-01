@@ -129,11 +129,20 @@ class Botwa_Chat_Settings {
 		}
 		$server = Botwa_Chat_Options::clean_server( isset( $_POST['server'] ) ? wp_unslash( $_POST['server'] ) : '' );
 		$key    = Botwa_Chat_Options::clean_key( isset( $_POST['key'] ) ? wp_unslash( $_POST['key'] ) : '' );
-		if ( '' === $key && isset( $_POST['key'] ) && '' !== Botwa_Chat_Options::wrong_key_kind( wp_unslash( $_POST['key'] ) ) ) {
-			wp_send_json_error( array( 'message' => self::wrong_key_message( Botwa_Chat_Options::wrong_key_kind( wp_unslash( $_POST['key'] ) ) ) ) );
+		$raw_server = isset( $_POST['server'] ) ? trim( (string) wp_unslash( $_POST['server'] ) ) : '';
+		$raw_key    = isset( $_POST['key'] ) ? trim( (string) wp_unslash( $_POST['key'] ) ) : '';
+		// say exactly which field is the problem, instead of one message for both
+		if ( '' === $raw_server ) {
+			wp_send_json_error( array( 'message' => __( 'Enter the chat server address first.', 'botwa-chat' ) ) );
 		}
-		if ( '' === $server || '' === $key ) {
-			wp_send_json_error( array( 'message' => __( 'Enter a valid server address and site key first.', 'botwa-chat' ) ) );
+		if ( '' === $server ) {
+			wp_send_json_error( array( 'message' => __( 'The server address is not valid. Use an https address such as https://chat.example.com.', 'botwa-chat' ) ) );
+		}
+		if ( '' === $raw_key ) {
+			wp_send_json_error( array( 'message' => __( 'Enter the site key first (it starts with wc_).', 'botwa-chat' ) ) );
+		}
+		if ( '' === $key ) {
+			wp_send_json_error( array( 'message' => self::wrong_key_message( Botwa_Chat_Options::wrong_key_kind( $raw_key ) ) ) );
 		}
 		$origin = Botwa_Chat_Options::site_origin();
 		// wp_safe_remote_get refuses private and loopback addresses, so this helper cannot be pointed at the internal network.

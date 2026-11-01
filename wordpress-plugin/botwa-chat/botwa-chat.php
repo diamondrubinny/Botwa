@@ -2,7 +2,7 @@
 /**
  * Plugin Name:       Botwa Chat
  * Description:       Adds your Botwa website chat widget to this WordPress site: one setting, optional logged-in customer recognition, and a shortcode for a "chat with us" button.
- * Version:           1.0.0
+ * Version:           1.0.1
  * Requires at least: 5.8
  * Requires PHP:      7.4
  * Author:            Botwa
@@ -16,7 +16,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
 
-define( 'BOTWA_CHAT_VERSION', '1.0.0' );
+define( 'BOTWA_CHAT_VERSION', '1.0.1' );
 define( 'BOTWA_CHAT_FILE', __FILE__ );
 define( 'BOTWA_CHAT_DIR', plugin_dir_path( __FILE__ ) );
 define( 'BOTWA_CHAT_URL', plugin_dir_url( __FILE__ ) );

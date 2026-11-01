@@ -4,7 +4,7 @@ Tags: chat, live chat, support, widget, whatsapp
 Requires at least: 5.8
 Tested up to: 6.6
 Requires PHP: 7.4
-Stable tag: 1.0.0
+Stable tag: 1.0.1
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -45,6 +45,9 @@ No. It is in your page source by design. Who may show the chat is controlled by 
 The plugin adds suggested text to Settings > Privacy. When a visitor opens the chat, their browser connects to your Botwa server and stores a random identifier for the conversation. Review the wording for your jurisdiction.
 
 == Changelog ==
+
+= 1.0.1 =
+* Clearer connection test: says which field is wrong, accepts the key or server pasted with quotes, invisible direction marks, the data-key attribute or the whole embed code, and recognises a webhook secret or API key pasted by mistake.
 
 = 1.0.0 =
 * First release.

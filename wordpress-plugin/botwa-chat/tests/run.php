@@ -178,6 +178,19 @@ eq( Botwa_Chat_Options::wrong_key_kind( 'whsec_abc' ) . '/' . Botwa_Chat_Options
 $j = run_test( array( 'server' => 'https://chat.example.com', 'key' => 'whsec_EXAMPLEEXAMPLEEXAMPLEEXAMPLE000' ) );
 ok( ! $j[0] && strpos( $j[1]['message'], 'webhook secret' ) !== false, 'connection test names the mistake' );
 
+// ---- forgiving paste handling, specific messages ----
+eq( Botwa_Chat_Options::clean_key( "\u{200F}wc_abcDEF123-_xyz\u{200E} " ), 'wc_abcDEF123-_xyz', 'key: direction marks from a right-to-left page are ignored' );
+eq( Botwa_Chat_Options::clean_key( '"wc_abcDEF123-_xyz"' ), 'wc_abcDEF123-_xyz', 'key: quotes are ignored' );
+eq( Botwa_Chat_Options::clean_key( 'data-key="wc_abcDEF123-_xyz"' ), 'wc_abcDEF123-_xyz', 'key: the data-key attribute can be pasted' );
+eq( Botwa_Chat_Options::clean_key( '<script src="https://chat.example.com/widget.js" data-key="wc_abcDEF123-_xyz" async></script>' ), 'wc_abcDEF123-_xyz', 'key: the whole embed code can be pasted' );
+eq( Botwa_Chat_Options::clean_key( 'whsec_xxxxxxxxwc_abcDEF123-_xyzxxxx' ), '', 'key: a webhook secret is never accepted, even if it contains wc_' );
+eq( Botwa_Chat_Options::clean_server( '<script src="https://chat.example.com/widget.js" data-key="wc_x"></script>' ), 'https://chat.example.com', 'server: the embed code can be pasted' );
+eq( Botwa_Chat_Options::clean_server( "\u{200E}https://chat.example.com/widget.js" ), 'https://chat.example.com', 'server: a full widget.js address is reduced to the origin' );
+$j = run_test( array( 'server' => '', 'key' => 'wc_abcdefghijk1' ) ); ok( ! $j[0] && strpos( $j[1]['message'], 'server address first' ) !== false, 'test message: missing server' );
+$j = run_test( array( 'server' => 'http://chat.example.com', 'key' => 'wc_abcdefghijk1' ) ); ok( ! $j[0] && strpos( $j[1]['message'], 'not valid' ) !== false, 'test message: invalid server' );
+$j = run_test( array( 'server' => 'https://chat.example.com', 'key' => '' ) ); ok( ! $j[0] && strpos( $j[1]['message'], 'site key first' ) !== false, 'test message: missing key' );
+$j = run_test( array( 'server' => 'https://chat.example.com', 'key' => 'abc-123' ) ); ok( ! $j[0] && strpos( $j[1]['message'], 'looks wrong' ) !== false, 'test message: invalid key' );
+
 // ---- packaged defaults (plugin downloaded from Botwa for one chat) ----
 $f = dirname( __DIR__ ) . '/botwa-chat-defaults.php';
 file_put_contents( $f, "<?php return array( 'server' => 'https://chat.example.com/', 'key' => 'wc_packagedkey123' );" );

@@ -1,7 +1,7 @@
 # Hebrew translation for Botwa Chat
 msgid ""
 msgstr ""
-"Project-Id-Version: Botwa Chat 1.0.0\n"
+"Project-Id-Version: Botwa Chat 1.0.1\n"
 "Language: he_IL\n"
 "MIME-Version: 1.0\n"
 "Content-Type: text/plain; charset=UTF-8\n"
@@ -181,3 +181,12 @@ msgstr "מפתח האתר נראה שגוי. הוא מתחיל ב-wc_ ומופי
 
 msgid "The previous value was kept."
 msgstr "הערך הקודם נשמר."
+
+msgid "Enter the chat server address first."
+msgstr "יש להזין קודם את כתובת שרת הצ׳אט."
+
+msgid "The server address is not valid. Use an https address such as https://chat.example.com."
+msgstr "כתובת השרת אינה תקינה. יש להשתמש בכתובת https, למשל https://chat.example.com."
+
+msgid "Enter the site key first (it starts with wc_)."
+msgstr "יש להזין קודם את מפתח האתר (הוא מתחיל ב-wc_)."

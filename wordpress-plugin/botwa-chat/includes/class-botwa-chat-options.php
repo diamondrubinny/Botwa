@@ -52,7 +52,11 @@ class Botwa_Chat_Options {
 	 * @return string Empty string when the value is not acceptable.
 	 */
 	public static function clean_server( $value ) {
-		$value = trim( (string) $value );
+		$value = trim( self::strip_invisible( $value ), " \t\n\r\"'`" );
+		// the whole embed code pasted in: take the address of widget.js
+		if ( preg_match( '#src\s*=\s*["\']?(https?://[^"\'\s>]+)#i', $value, $m ) ) {
+			$value = $m[1];
+		}
 		if ( '' === $value ) {
 			return '';
 		}
@@ -88,7 +92,7 @@ class Botwa_Chat_Options {
 	 * Lets the screens say "this is a webhook secret" instead of a vague "wrong key".
 	 */
 	public static function wrong_key_kind( $value ) {
-		$value = trim( (string) $value );
+		$value = trim( self::strip_invisible( $value ), " \t\n\r\"'`" );
 		if ( 0 === strpos( $value, 'whsec_' ) ) {
 			return 'webhook';
 		}
@@ -98,9 +102,25 @@ class Botwa_Chat_Options {
 		return '';
 	}
 
+	/** Removes what copy and paste adds invisibly: direction marks, zero-width characters, non-breaking spaces, BOM. */
+	public static function strip_invisible( $value ) {
+		return trim( (string) preg_replace( '/[\x{200B}-\x{200F}\x{202A}-\x{202E}\x{2060}-\x{2069}\x{FEFF}\x{00A0}]/u', '', (string) $value ) );
+	}
+
+	/**
+	 * The site key (wc_...). Tolerant of how people copy it: with quotes, with the whole data-key="wc_..." attribute or the
+	 * whole embed code pasted in, and with invisible characters. Other Botwa secrets are never accepted.
+	 */
 	public static function clean_key( $value ) {
-		$value = trim( (string) $value );
-		return preg_match( '/^wc_[\w-]{10,60}$/', $value ) ? $value : '';
+		$value = self::strip_invisible( $value );
+		if ( '' !== self::wrong_key_kind( $value ) ) {
+			return '';
+		}
+		if ( preg_match( '/data-key\s*=\s*["\']?(wc_[A-Za-z0-9_-]{10,60})/', $value, $m ) ) {
+			return $m[1];
+		}
+		$value = trim( $value, " \t\n\r\"'`" );
+		return preg_match( '/^wc_[A-Za-z0-9_-]{10,60}$/', $value ) ? $value : '';
 	}
 
 	public static function clean_secret( $value ) {
