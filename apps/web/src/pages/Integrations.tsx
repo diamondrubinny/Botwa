@@ -10,6 +10,19 @@ interface Delivery { id: string; event: string; status: string; attempts: number
 
 const SCOPE_LABEL: Record<string, string> = { read: 'קריאה (שיחות, הודעות, תגיות)', send: 'שליחת תשובות בשיחות קיימות', manage: 'ניהול (סטטוס, שיוך, תגיות)' };
 const EVENT_LABEL: Record<string, string> = { 'message.received': 'הודעה נכנסת מלקוח', 'message.sent': 'הודעה יוצאת (נציג, בוט או API)', 'conversation.status_changed': 'שינוי סטטוס שיחה', 'conversation.assigned': 'שיוך שיחה' };
+const DELIVERY_ERR: Record<string, string> = {
+  dns_failed: 'הכתובת לא נמצאה (בעיית DNS). בדקו את שם האתר, ושהשרת של Botwa מגיע לאינטרנט.',
+  connection_refused: 'השרת המקבל סירב לחיבור (הפורט סגור או השירות כבוי).',
+  timeout: 'השרת המקבל לא ענה בזמן (8 שניות).',
+  connection_reset: 'החיבור נותק על ידי השרת המקבל.',
+  tls_error: 'בעיה בתעודת ה-HTTPS של השרת המקבל (פגה, לא מהימנה או לא תואמת לשם).',
+  unreachable: 'אין ניתוב לשרת המקבל מהשרת של Botwa.',
+  blocked_address: 'הכתובת חסומה מטעמי אבטחה (כתובת פנימית).',
+  https_required: 'נדרשת כתובת https.',
+  fetch_failed: 'לא ניתן להתחבר לכתובת. בדקו שהיא נכונה ופתוחה מהאינטרנט.',
+  webhook_disabled: 'ה-Webhook מושבת.',
+};
+const deliveryError = (e: string | null) => (!e ? '' : DELIVERY_ERR[e] ?? (/^http_3\d\d$/.test(e) ? 'השרת המקבל ביקש הפניה (' + e.slice(5) + '). הפניות אינן נתמכות: השתמשו בכתובת הסופית.' : /^http_\d+$/.test(e) ? 'השרת המקבל ענה ' + e.slice(5) + ' (נדרש קוד 2xx).' : e));
 const fmt = (s: string | null) => (s ? new Date(s).toLocaleString('he-IL', { dateStyle: 'short', timeStyle: 'short' }) : '—');
 
 export function Integrations() {
@@ -134,7 +147,7 @@ function Hooks() {
                 <td>{h.events.map((e) => EVENT_LABEL[e] ?? e).join(', ')}</td>
                 <td>{h.enabled ? <span className="ok">פעיל</span> : <span className="error">מושבת{h.disabledReason === 'too_many_failures' ? ' (יותר מדי כשלונות)' : ''}</span>}{h.pending > 0 && <div className="hint">{h.pending} ממתינים</div>}</td>
                 <td><div className="row">
-                  <button onClick={async () => { setMsg(null); try { const r = await api<{ status: string; responseCode: number | null; lastError: string | null }>('POST', `/integrations/webhooks/${h.id}/test`); setMsg({ ok: r.status === 'delivered', text: r.status === 'delivered' ? `נשלח בהצלחה (${r.responseCode}).` : `השליחה נכשלה: ${r.lastError ?? ''}` }); await load(); } catch (er) { fail(er); } }}>בדיקה<span className="sr-only"> {h.name}</span></button>
+                  <button onClick={async () => { setMsg(null); try { const r = await api<{ status: string; responseCode: number | null; lastError: string | null }>('POST', `/integrations/webhooks/${h.id}/test`); setMsg({ ok: r.status === 'delivered', text: r.status === 'delivered' ? `נשלח בהצלחה (${r.responseCode}).` : `השליחה נכשלה: ${deliveryError(r.lastError)} (הניסיון יחזור אוטומטית)` }); await load(); } catch (er) { fail(er); } }}>בדיקה<span className="sr-only"> {h.name}</span></button>
                   <button onClick={async () => setLog({ id: h.id, rows: await api<Delivery[]>('GET', `/integrations/webhooks/${h.id}/deliveries`).catch(() => []) })}>יומן שליחות<span className="sr-only"> {h.name}</span></button>
                   <button onClick={async () => { await api('PATCH', `/integrations/webhooks/${h.id}`, { enabled: !h.enabled }).catch(() => undefined); await load(); }}>{h.enabled ? 'השבתה' : 'הפעלה'}<span className="sr-only"> {h.name}</span></button>
                   <button onClick={async () => { const r = await api<{ secret: string }>('POST', `/integrations/webhooks/${h.id}/rotate-secret`).catch(() => null); if (r) setSecret(r.secret); }}>סוד חדש<span className="sr-only"> {h.name}</span></button>
@@ -149,7 +162,7 @@ function Hooks() {
             <h3>יומן שליחות אחרונות</h3>
             <table><caption className="sr-only">שליחות אחרונות</caption>
               <thead><tr><th scope="col">אירוע</th><th scope="col">מצב</th><th scope="col">ניסיונות</th><th scope="col">תגובה</th><th scope="col">זמן</th></tr></thead>
-              <tbody>{log.rows.length === 0 && <tr><td colSpan={5}>אין שליחות.</td></tr>}{log.rows.map((d) => <tr key={d.id}><th scope="row" dir="ltr">{d.event}</th><td>{d.status === 'delivered' ? 'נמסר' : d.status === 'failed' ? 'נכשל' : 'ממתין'}</td><td>{d.attempts}</td><td>{d.responseCode ?? d.lastError ?? '—'}</td><td>{fmt(d.createdAt)}</td></tr>)}</tbody></table>
+              <tbody>{log.rows.length === 0 && <tr><td colSpan={5}>אין שליחות.</td></tr>}{log.rows.map((d) => <tr key={d.id}><th scope="row" dir="ltr">{d.event}</th><td>{d.status === 'delivered' ? 'נמסר' : d.status === 'failed' ? 'נכשל' : 'ממתין'}</td><td>{d.attempts}</td><td>{d.responseCode ?? (deliveryError(d.lastError) || '—')}</td><td>{fmt(d.createdAt)}</td></tr>)}</tbody></table>
           </div>
         )}
       </section>

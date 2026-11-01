@@ -83,6 +83,21 @@ class Botwa_Chat_Options {
 		return $origin;
 	}
 
+	/**
+	 * Which Botwa value was pasted by mistake into the site key field (webhook secret, API key, channel id...), or ''.
+	 * Lets the screens say "this is a webhook secret" instead of a vague "wrong key".
+	 */
+	public static function wrong_key_kind( $value ) {
+		$value = trim( (string) $value );
+		if ( 0 === strpos( $value, 'whsec_' ) ) {
+			return 'webhook';
+		}
+		if ( 0 === strpos( $value, 'bk_' ) ) {
+			return 'api';
+		}
+		return '';
+	}
+
 	public static function clean_key( $value ) {
 		$value = trim( (string) $value );
 		return preg_match( '/^wc_[\w-]{10,60}$/', $value ) ? $value : '';

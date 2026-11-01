@@ -170,6 +170,14 @@ ok( strpos( $page, '<script>alert(1)' ) === false, 'settings page escapes stored
 ok( strpos( $page, 'https://shop.test' ) !== false && strpos( $page, 'https://www.shop.test' ) !== false, 'settings page shows this site with and without www' );
 ok( strpos( $page, 'value="wc_abcdefghijk1"' ) !== false, 'settings page shows the key' );
 
+// ---- the wrong Botwa value pasted into the key field is recognised ----
+reset_t(); set_opts( array( 'server' => 'https://chat.example.com', 'key' => 'wc_goodkeygoodkey1' ) );
+$r = Botwa_Chat_Settings::sanitize( array( 'server' => 'https://chat.example.com', 'key' => 'whsec_EXAMPLEEXAMPLEEXAMPLEEXAMPLE000' ) );
+eq( $r['key'], 'wc_goodkeygoodkey1', 'webhook secret in the key field is refused and the old key kept' );
+eq( Botwa_Chat_Options::wrong_key_kind( 'whsec_abc' ) . '/' . Botwa_Chat_Options::wrong_key_kind( 'bk_abc_def' ) . '/' . Botwa_Chat_Options::wrong_key_kind( 'wc_ok' ), 'webhook/api/', 'wrong_key_kind' );
+$j = run_test( array( 'server' => 'https://chat.example.com', 'key' => 'whsec_EXAMPLEEXAMPLEEXAMPLEEXAMPLE000' ) );
+ok( ! $j[0] && strpos( $j[1]['message'], 'webhook secret' ) !== false, 'connection test names the mistake' );
+
 // ---- packaged defaults (plugin downloaded from Botwa for one chat) ----
 $f = dirname( __DIR__ ) . '/botwa-chat-defaults.php';
 file_put_contents( $f, "<?php return array( 'server' => 'https://chat.example.com/', 'key' => 'wc_packagedkey123' );" );

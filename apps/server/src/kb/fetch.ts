@@ -30,7 +30,7 @@ export function isPublicIp(ip: string): boolean {
   return false;
 }
 
-const lookup: net.LookupFunction = (hostname, options, cb) => {
+export const lookup: net.LookupFunction = (hostname, options, cb) => {
   dns.lookup(hostname, { ...(options as object), all: true }, (err, addrs) => {
     if (err) return (cb as (e: Error) => void)(err);
     const list = addrs as dns.LookupAddress[];
@@ -50,7 +50,7 @@ export async function safePost(raw: string, body: string, headers: Record<string
   try {
     res = await undiciFetch(url, { method: 'POST', dispatcher: agent, redirect: 'manual', body, headers, signal: AbortSignal.timeout(opts.timeoutMs ?? 8000) });
   } catch (e) {
-    throw new FetchError((e as { cause?: Error }).cause?.message === 'blocked_address' ? 'blocked_address' : 'fetch_failed');
+    throw new FetchError(classifyNetworkError(e));
   }
   await res.body?.cancel().catch(() => undefined);
   return { status: res.status };
@@ -58,6 +58,20 @@ export async function safePost(raw: string, body: string, headers: Record<string
 
 export interface Fetched { url: string; contentType: string; body: Buffer }
 export class FetchError extends Error {}
+
+/** Why a request failed, in a form the operator can act on (the raw undici message is just "fetch failed"). */
+export function classifyNetworkError(e: unknown): string {
+  const cause = (e as { cause?: { code?: string; message?: string; name?: string } }).cause;
+  const code = cause?.code ?? '';
+  if (cause?.message === 'blocked_address') return 'blocked_address';
+  if (['ENOTFOUND', 'EAI_AGAIN', 'EAI_NODATA'].includes(code)) return 'dns_failed';
+  if (code === 'ECONNREFUSED') return 'connection_refused';
+  if (['ETIMEDOUT', 'UND_ERR_CONNECT_TIMEOUT', 'UND_ERR_HEADERS_TIMEOUT', 'UND_ERR_BODY_TIMEOUT'].includes(code) || (e as Error).name === 'TimeoutError' || (e as Error).name === 'AbortError') return 'timeout';
+  if (code === 'ECONNRESET' || code === 'UND_ERR_SOCKET') return 'connection_reset';
+  if (/CERT|TLS|SSL|SELF_SIGNED|UNABLE_TO_VERIFY|ERR_SSL/i.test(code)) return 'tls_error';
+  if (code === 'ENETUNREACH' || code === 'EHOSTUNREACH') return 'unreachable';
+  return 'fetch_failed';
+}
 
 export function checkUrl(raw: string): URL {
   let u: URL;
@@ -81,7 +95,7 @@ export async function safeGet(raw: string, opts: { maxBytes?: number } = {}): Pr
     try {
       res = await undiciFetch(url, { dispatcher: agent, redirect: 'manual', signal: AbortSignal.timeout(25_000), headers: { 'user-agent': 'BotwaKnowledgeBase/1.0', accept: 'text/html,text/plain,application/pdf;q=0.9,*/*;q=0.1' } });
     } catch (e) {
-      throw new FetchError((e as { cause?: Error }).cause?.message === 'blocked_address' ? 'blocked_address' : 'fetch_failed');
+      throw new FetchError(classifyNetworkError(e));
     }
     if (res.status >= 300 && res.status < 400 && res.headers.get('location')) {
       await res.body?.cancel().catch(() => undefined);

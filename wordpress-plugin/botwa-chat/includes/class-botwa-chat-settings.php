@@ -61,7 +61,8 @@ class Botwa_Chat_Settings {
 
 		$key = Botwa_Chat_Options::clean_key( isset( $in['key'] ) ? $in['key'] : '' );
 		if ( '' === $key && ! empty( $in['key'] ) ) {
-			add_settings_error( BOTWA_CHAT_OPTION, 'botwa_key', __( 'The site key looks wrong. It starts with wc_ and is shown in the embed code in Botwa. The previous value was kept.', 'botwa-chat' ) );
+			$kind = Botwa_Chat_Options::wrong_key_kind( $in['key'] );
+			add_settings_error( BOTWA_CHAT_OPTION, 'botwa_key', self::wrong_key_message( $kind ) . ' ' . __( 'The previous value was kept.', 'botwa-chat' ) );
 			$key = $old['key'];
 		}
 		$new['key'] = $key;
@@ -85,6 +86,17 @@ class Botwa_Chat_Settings {
 			add_settings_error( BOTWA_CHAT_OPTION, 'botwa_incomplete', __( 'Enter the server address and the site key, otherwise the chat cannot appear.', 'botwa-chat' ), 'warning' );
 		}
 		return $new;
+	}
+
+	/** Explains what is wrong with the site key field; "webhook" / "api" mean another Botwa secret was pasted by mistake. */
+	private static function wrong_key_message( $kind ) {
+		if ( 'webhook' === $kind ) {
+			return __( 'This is a webhook secret (it starts with whsec_), not the site key. The site key starts with wc_ and is in the embed code of the website chat in Botwa: data-key="wc_…". Keep the webhook secret private.', 'botwa-chat' );
+		}
+		if ( 'api' === $kind ) {
+			return __( 'This is an API key (it starts with bk_), not the site key. The site key starts with wc_ and is in the embed code of the website chat in Botwa: data-key="wc_…". Keep the API key private.', 'botwa-chat' );
+		}
+		return __( 'The site key looks wrong. It starts with wc_ and is shown in the embed code in Botwa.', 'botwa-chat' );
 	}
 
 	public static function assets( $hook ) {
@@ -117,6 +129,9 @@ class Botwa_Chat_Settings {
 		}
 		$server = Botwa_Chat_Options::clean_server( isset( $_POST['server'] ) ? wp_unslash( $_POST['server'] ) : '' );
 		$key    = Botwa_Chat_Options::clean_key( isset( $_POST['key'] ) ? wp_unslash( $_POST['key'] ) : '' );
+		if ( '' === $key && isset( $_POST['key'] ) && '' !== Botwa_Chat_Options::wrong_key_kind( wp_unslash( $_POST['key'] ) ) ) {
+			wp_send_json_error( array( 'message' => self::wrong_key_message( Botwa_Chat_Options::wrong_key_kind( wp_unslash( $_POST['key'] ) ) ) ) );
+		}
 		if ( '' === $server || '' === $key ) {
 			wp_send_json_error( array( 'message' => __( 'Enter a valid server address and site key first.', 'botwa-chat' ) ) );
 		}

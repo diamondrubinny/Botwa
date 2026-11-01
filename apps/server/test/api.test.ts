@@ -223,3 +223,25 @@ describe('API keys, REST API and webhooks', () => {
     expect((await db.query('SELECT count(*)::int AS n FROM webhook_deliveries')).rows[0].n).toBe(0); // deliveries go with the endpoint
   });
 });
+
+describe('network failures are explained', () => {
+  it('maps low-level errors to actionable codes, and the address guard answers in both lookup call styles', async () => {
+    const { classifyNetworkError, lookup } = await import('../src/kb/fetch.js');
+    const e = (code: string, name = 'TypeError') => Object.assign(new Error('fetch failed'), { name, cause: { code } });
+    expect(classifyNetworkError(e('ENOTFOUND'))).toBe('dns_failed');
+    expect(classifyNetworkError(e('ECONNREFUSED'))).toBe('connection_refused');
+    expect(classifyNetworkError(e('UND_ERR_CONNECT_TIMEOUT'))).toBe('timeout');
+    expect(classifyNetworkError(Object.assign(new Error('x'), { name: 'TimeoutError' }))).toBe('timeout');
+    expect(classifyNetworkError(e('DEPTH_ZERO_SELF_SIGNED_CERT'))).toBe('tls_error');
+    expect(classifyNetworkError(e('ECONNRESET'))).toBe('connection_reset');
+    expect(classifyNetworkError(Object.assign(new Error('x'), { cause: new Error('blocked_address') }))).toBe('blocked_address');
+    expect(classifyNetworkError(new Error('weird'))).toBe('fetch_failed');
+    // a public address literal passes the guard in the "all addresses" style and the single-address style
+    const all = await new Promise<unknown>((res) => (lookup as unknown as (h: string, o: object, cb: (...a: unknown[]) => void) => void)('8.8.8.8', { all: true }, (err, list) => res(err ?? list)));
+    expect(all).toEqual([{ address: '8.8.8.8', family: 4 }]);
+    const one = await new Promise<unknown[]>((res) => (lookup as unknown as (h: string, o: object, cb: (...a: unknown[]) => void) => void)('8.8.8.8', {}, (...a) => res(a)));
+    expect(one).toEqual([null, '8.8.8.8', 4]);
+    const bad = await new Promise<unknown>((res) => (lookup as unknown as (h: string, o: object, cb: (...a: unknown[]) => void) => void)('127.0.0.1', { all: true }, (err) => res(err)));
+    expect((bad as Error).message).toBe('blocked_address');
+  });
+});

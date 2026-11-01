@@ -169,3 +169,15 @@ msgstr "לא (יש להפעיל את הערוץ ב-Botwa)"
 
 msgid "yes"
 msgstr "כן"
+
+msgid "This is a webhook secret (it starts with whsec_), not the site key. The site key starts with wc_ and is in the embed code of the website chat in Botwa: data-key=\"wc_…\". Keep the webhook secret private."
+msgstr "זה סוד של Webhook (הוא מתחיל ב-whsec_) ולא מפתח האתר. מפתח האתר מתחיל ב-wc_ ונמצא בקוד ההטמעה של צ׳אט האתר ב-Botwa: data-key=\"wc_…\". את סוד ה-Webhook יש לשמור בסוד."
+
+msgid "This is an API key (it starts with bk_), not the site key. The site key starts with wc_ and is in the embed code of the website chat in Botwa: data-key=\"wc_…\". Keep the API key private."
+msgstr "זה מפתח API (הוא מתחיל ב-bk_) ולא מפתח האתר. מפתח האתר מתחיל ב-wc_ ונמצא בקוד ההטמעה של צ׳אט האתר ב-Botwa: data-key=\"wc_…\". את מפתח ה-API יש לשמור בסוד."
+
+msgid "The site key looks wrong. It starts with wc_ and is shown in the embed code in Botwa."
+msgstr "מפתח האתר נראה שגוי. הוא מתחיל ב-wc_ ומופיע בקוד ההטמעה ב-Botwa."
+
+msgid "The previous value was kept."
+msgstr "הערך הקודם נשמר."
