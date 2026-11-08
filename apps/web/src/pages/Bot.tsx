@@ -8,6 +8,7 @@ interface BotCfg {
   kb: { enabled: boolean; minScore: number; maxChars: number; showSource: boolean; intro: string };
   reactions?: { enabled: boolean; working: string; done: string; noAnswer: string; handoff: string };
   catchupHours?: number;
+  interactiveMenus?: boolean;
 }
 
 const RX = { enabled: false, working: '👀', done: '✅', noAnswer: '🤔', handoff: '🙋' };
@@ -148,6 +149,12 @@ export function Bot({ me }: { me: Me }) {
         </fieldset>
 
         <p className="card">מצב הבוט כעת: <strong>{b.mode === 'flow' ? 'תרשים זרימה' : 'תפריט ממוספר (העמוד הזה)'}</strong>. לבניית שיחה מתקדמת עם שאלות, תנאים והפניות: <a href="#/flow">תרשים זרימה</a>.</p>
+
+        <fieldset disabled={!canEdit}>
+          <legend>תפריט ככפתורים (ווצאפ רשמי)</legend>
+          <div className="field"><label><input type="checkbox" style={{ width: 'auto', minHeight: 'auto' }} checked={b.interactiveMenus !== false} onChange={(e) => set({ interactiveMenus: e.target.checked })} /> בערוץ הרשמי, לשלוח את התפריט ככפתורים או כרשימה לבחירה</label>
+            <p className="hint">עד שלוש אפשרויות קצרות (עד 20 תווים) נשלחות ככפתורים, עד עשר כרשימה, ותפריט ארוך מזה נשלח כטקסט ממוספר. לחיצה של הלקוח נקראת כמו מספר שהקליד. אם Meta דוחה את ההודעה, נשלח הטקסט הממוספר. בערוצים האחרים התפריט נשאר טקסט ממוספר. מגבלות והפורמט אצל Meta צריכים אימות מול התיעוד הרשמי.</p></div>
+        </fieldset>
 
         <fieldset disabled={!canEdit}>
           <legend>תשובה אחרי ניתוק החיבור</legend>

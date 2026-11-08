@@ -69,6 +69,8 @@ export function Inbox({ me }: { me: Me }) {
   const [bump, setBump] = useState(0); // local refetch trigger after an action
   const [targets, setTargets] = useState<{ id: string; name: string; groupName: string }[]>([]);
   const [fwd, setFwd] = useState<{ rule: string; note: string; msg: string } | null>(null);
+  const [tpls, setTpls] = useState<{ name: string; language: string; body: string; params: number; category: string }[]>([]);
+  const [tp, setTp] = useState<{ key: string; values: string[]; msg: string } | null>(null);
   // list preferences, kept in this browser: sort order, channel, and "only unread / only waiting for an answer"
   const [lp, setLp] = useState<{ sort: 'recent' | 'waiting' | 'unread'; channel: string; unreadOnly: boolean; waitingOnly: boolean }>(() => {
     try { const v = JSON.parse(localStorage.getItem('botwa_inbox_prefs') ?? '{}') as Partial<{ sort: string; channel: string; unreadOnly: boolean; waitingOnly: boolean }>; return { sort: v.sort === 'waiting' || v.sort === 'unread' ? v.sort : 'recent', channel: v.channel ?? '', unreadOnly: !!v.unreadOnly, waitingOnly: !!v.waitingOnly }; } catch { return { sort: 'recent', channel: '', unreadOnly: false, waitingOnly: false }; }
@@ -82,6 +84,15 @@ export function Inbox({ me }: { me: Me }) {
       : lp.sort === 'unread' ? (b.unreadCount > 0 ? 1 : 0) - (a.unreadCount > 0 ? 1 : 0) || new Date(b.lastMessageAt).getTime() - new Date(a.lastMessageAt).getTime()
       : 0);
   const advActive = lp.sort !== 'recent' || !!lp.channel || lp.unreadOnly || lp.waitingOnly;
+  // approved message templates, for the official WhatsApp channel (the way to write to someone after the 24-hour window)
+  useEffect(() => {
+    setTpls([]); setTp(null);
+    const c = convs.find((x) => x.id === selId) ?? (pinned && pinned.id === selId ? pinned : null);
+    if (!selId || c?.channelType !== 'whatsapp_cloud') return;
+    let live = true;
+    void api<typeof tpls>('GET', `/conversations/${selId}/templates`).then((d) => { if (live) setTpls(d); }).catch(() => undefined);
+    return () => { live = false; };
+  }, [selId]); // eslint-disable-line react-hooks/exhaustive-deps
   const sel = convs.find((c) => c.id === selId) ?? (pinned && pinned.id === selId ? pinned : null);
   // lets the shell hide floating widgets while a conversation fills the phone screen
   useEffect(() => { document.body.classList.toggle('chat-open', !!sel); return () => document.body.classList.remove('chat-open'); }, [sel]);
@@ -324,12 +335,34 @@ export function Inbox({ me }: { me: Me }) {
                   <option value="10080">שבוע</option>
                   {sel.snoozedUntil && <option value="0">ביטול דחייה</option>}
                 </select>
+                {tpls.length > 0 && <button type="button" aria-expanded={!!tp} onClick={() => setTp(tp ? null : { key: `${tpls[0]!.name}|${tpls[0]!.language}`, values: Array(tpls[0]!.params).fill(''), msg: '' })}>שליחת תבנית</button>}
                 {targets.length > 0 && <button type="button" aria-expanded={!!fwd} onClick={() => setFwd(fwd ? null : { rule: targets[0]!.id, note: '', msg: '' })}>העברה לקבוצה</button>}
                 <button onClick={() => act(async () => { await api('POST', `/conversations/${sel.id}/unread`); setSelId(null); })}>סימון כלא נקראה</button>
                 <button onClick={() => act(() => api('POST', `/conversations/${sel.id}/status`, { status: sel.status === 'open' ? 'closed' : 'open' }))}>
                   {sel.status === 'open' ? 'סגירת שיחה' : 'פתיחה מחדש'}
                 </button>
               </div>
+
+              {tp && sel && (() => {
+                const t = tpls.find((x) => `${x.name}|${x.language}` === tp.key) ?? tpls[0]!;
+                const preview = t.body.replace(/\{\{(\d+)\}\}/g, (_m, n: string) => tp.values[Number(n) - 1] || `{{${n}}}`);
+                return (
+                  <form className="card" style={{ margin: '.6rem .9rem 0' }} aria-labelledby="tp-h" onSubmit={async (e) => {
+                    e.preventDefault(); setTp({ ...tp, msg: '' });
+                    try { await api('POST', `/conversations/${sel.id}/send-template`, { name: t.name, language: t.language, params: tp.values }); setTp(null); setBump((n) => n + 1); }
+                    catch (er) { setTp({ ...tp, msg: errText(er instanceof ApiError ? er.code : 'generic') }); }
+                  }}>
+                    <h3 id="tp-h">שליחת תבנית הודעה</h3>
+                    <p className="hint">תבנית מאושרת אפשר לשלוח גם אחרי שעברו 24 שעות מהודעת הלקוח האחרונה. שיווקית עשויה להיות בתשלום.</p>
+                    <div className="field"><label htmlFor="tp-s">תבנית</label>
+                      <select id="tp-s" value={tp.key} onChange={(e) => { const n = tpls.find((x) => `${x.name}|${x.language}` === e.target.value)!; setTp({ key: e.target.value, values: Array(n.params).fill(''), msg: '' }); }}>{tpls.map((x) => <option key={`${x.name}|${x.language}`} value={`${x.name}|${x.language}`}>{x.name} ({x.language})</option>)}</select></div>
+                    {tp.values.map((v, i) => <div className="field" key={i}><label htmlFor={`tp-v${i}`}>ערך עבור {`{{${i + 1}}}`}</label><input id={`tp-v${i}`} required maxLength={200} value={v} onChange={(e) => setTp({ ...tp, values: tp.values.map((x, k) => (k === i ? e.target.value : x)) })} /></div>)}
+                    <p><strong>כך זה ייראה ללקוח:</strong></p><p style={{ whiteSpace: 'pre-wrap' }}>{preview}</p>
+                    <div className="row"><button className="primary" type="submit">שליחה</button><button type="button" onClick={() => setTp(null)}>ביטול</button></div>
+                    <p role="alert" className="error">{tp.msg}</p>
+                  </form>
+                );
+              })()}
 
               {fwd && sel && (
                 <form className="card" style={{ margin: '.6rem .9rem 0' }} aria-labelledby="fwd-h" onSubmit={async (e) => {

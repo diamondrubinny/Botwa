@@ -16,6 +16,7 @@ import { runFlow, type Effect, type FlowContext, type FlowInput, type FlowState 
 import { resolveArea } from '../safety/areas.js';
 import { contactText, officerNote, officersForTopic, pickOfficer } from '../safety/officers.js';
 import { forwardText, type ForwardRule } from './forward.js';
+import { parseNumberedMenu, type CloudTemplate, type TemplateSend } from './cloud-messages.js';
 import { loadFlow } from '../flow/store.js';
 import { loadBusinessHours } from '../routes/settings.js';
 import { sendAlert } from '../alerts.js';
@@ -156,6 +157,44 @@ export class ChannelManager {
       if (rule.tag_ids.length && !rule.tag_ids.some((t) => tags.includes(t))) continue;
       const text = await forwardText(this.db, convId, rule, this.cfg.APP_ORIGIN);
       if (text) await this.forwardToGroup({ ruleId: rule.id, convId, channelId: rule.channel_id, jid: rule.group_jid, text, trigger: 'handoff', by: null });
+    }
+  }
+
+  private templateCache = new Map<string, { at: number; list: CloudTemplate[] }>();
+  /** The templates of an official-WhatsApp channel (cached for 5 minutes unless refreshed). */
+  async cloudTemplates(channelId: string, refresh = false): Promise<CloudTemplate[]> {
+    const a = this.cloudAdapter(channelId);
+    if (!a || !a.isActive()) throw new Error('channel_not_connected');
+    const c = this.templateCache.get(channelId);
+    if (!refresh && c && Date.now() - c.at < 300_000) return c.list;
+    const list = await a.listTemplates();
+    this.templateCache.set(channelId, { at: Date.now(), list });
+    return list;
+  }
+  async createCloudTemplate(channelId: string, t: Parameters<WhatsAppCloudAdapter['createTemplate']>[0]) {
+    const a = this.cloudAdapter(channelId);
+    if (!a || !a.isActive()) throw new Error('channel_not_connected');
+    const r = await a.createTemplate(t);
+    this.templateCache.delete(channelId);
+    return r;
+  }
+  /** Send an approved template to a customer through the channel's normal lane. */
+  async sendTemplate(channelId: string, externalContactId: string, t: TemplateSend): Promise<{ externalMessageId?: string }> {
+    const a = this.cloudAdapter(channelId);
+    if (!a || this.statuses.get(channelId) !== 'connected') throw new Error('channel_not_connected');
+    await this.assertNotPaused(channelId);
+    const settings = this.effective(channelId, await this.loadSending());
+    return this.sender.run(channelId, settings, async () => a.sendTemplate(externalContactId, t), { maxWaitMs: 8_000 });
+  }
+  /** A menu as buttons or a list. Returns false when the channel cannot, or the menu does not fit, or Meta refuses it: the caller then sends the numbered text. */
+  async sendMenu(channelId: string, externalContactId: string, body: string, options: { id: string; title: string }[]): Promise<{ externalMessageId?: string } | null> {
+    const a = this.adapters.get(channelId);
+    if (!a?.sendInteractive || this.statuses.get(channelId) !== 'connected') return null;
+    await this.assertNotPaused(channelId);
+    const settings = this.effective(channelId, await this.loadSending());
+    try { return await this.sender.run(channelId, settings, async () => a.sendInteractive!(externalContactId, body, options), { maxWaitMs: 45_000 }); } catch (e) {
+      if (e instanceof SendError) throw e;
+      return null;
     }
   }
 
@@ -399,19 +438,21 @@ export class ChannelManager {
     this.emit({ channelId, type: 'message', conversationId, messageId });
   }
 
-  async getCloudConfig(channelId: string): Promise<{ configured: boolean; phoneNumberId?: string; verifyToken?: string }> {
+  async getCloudConfig(channelId: string): Promise<{ configured: boolean; phoneNumberId?: string; verifyToken?: string; wabaId?: string }> {
     const raw = await createAuthStore(this.db, channelId, this.cfg.ENCRYPTION_KEY).get(CLOUD_CREDS_KEY);
     if (!raw) return { configured: false };
     const c = JSON.parse(raw) as CloudCreds;
-    return { configured: true, phoneNumberId: c.phoneNumberId, verifyToken: c.verifyToken };
+    return { configured: true, phoneNumberId: c.phoneNumberId, verifyToken: c.verifyToken, wabaId: c.wabaId };
   }
 
   /** Save the official-API credentials (encrypted at rest) and restart the channel so they take effect. The verify token is kept across edits. */
-  async setCloudCredentials(channelId: string, c: { phoneNumberId: string; accessToken: string; appSecret: string }): Promise<void> {
+  async setCloudCredentials(channelId: string, c: { phoneNumberId: string; accessToken: string; appSecret: string; wabaId?: string }): Promise<void> {
     const store = createAuthStore(this.db, channelId, this.cfg.ENCRYPTION_KEY);
     const prev = await store.get(CLOUD_CREDS_KEY);
-    const verifyToken = prev ? (JSON.parse(prev) as CloudCreds).verifyToken : newVerifyToken();
-    await store.set(CLOUD_CREDS_KEY, JSON.stringify({ ...c, verifyToken } satisfies CloudCreds));
+    const old = prev ? (JSON.parse(prev) as CloudCreds) : null;
+    const verifyToken = old?.verifyToken ?? newVerifyToken();
+    await store.set(CLOUD_CREDS_KEY, JSON.stringify({ ...c, wabaId: c.wabaId ?? old?.wabaId, verifyToken } satisfies CloudCreds));
+    this.templateCache.delete(channelId);
     const a = this.adapters.get(channelId);
     if (a) await a.stop().catch(() => undefined);
     await this.start(channelId);
@@ -458,6 +499,23 @@ export class ChannelManager {
     const sent = await this.sendText(channelId, ext, text, { background: true });
     const ins = await this.db.query(`INSERT INTO messages (conversation_id, direction, body, external_id, auto) VALUES ($1,'out',$2,$3,true) ON CONFLICT DO NOTHING RETURNING id`, [convId, text, sent.externalMessageId ?? null]);
     if (ins.rows[0]) { this.notifyMessage(channelId, convId, ins.rows[0].id); this.hookMessage('message.sent', convId, ins.rows[0].id); }
+  }
+
+  /** The bot's replies of one step; when the last is its menu and the channel can show buttons or a list, send the menu that way (the text is kept in the conversation either way). */
+  private async botSayAll(channelId: string, convId: string, ext: string, bot: BotConfig, replies: string[], menu: boolean | undefined): Promise<void> {
+    for (let i = 0; i < replies.length; i++) {
+      const reply = replies[i]!;
+      if (menu && i === replies.length - 1 && bot.interactiveMenus) {
+        const parsed = parseNumberedMenu(reply);
+        const sent = parsed ? await this.sendMenu(channelId, ext, parsed.body, parsed.options).catch((e) => { if (e instanceof SendError) throw e; return null; }) : null;
+        if (sent) {
+          const ins = await this.db.query(`INSERT INTO messages (conversation_id, direction, body, external_id, auto) VALUES ($1,'out',$2,$3,true) ON CONFLICT DO NOTHING RETURNING id`, [convId, reply, sent.externalMessageId ?? null]);
+          if (ins.rows[0]) { this.notifyMessage(channelId, convId, ins.rows[0].id); this.hookMessage('message.sent', convId, ins.rows[0].id); }
+          continue;
+        }
+      }
+      await this.botSay(channelId, convId, ext, reply);
+    }
   }
 
   /** Menu bot: answer, or hand over to a person (assign via routing, leave a note, away notice outside hours). */
@@ -545,7 +603,7 @@ export class ChannelManager {
     let searched = false;
     const kbText = c.bot_state === 'area' ? null : await this.kbAnswer(bot, c.bot_state, text, false, async () => { searched = true; await rx.set('working'); });
     const d = decide(bot, { state: c.bot_state, invalid: c.bot_invalid, item: c.bot_item }, text, kbText);
-    for (const reply of d.replies) await this.botSay(channelId, convId, ext, reply);
+    await this.botSayAll(channelId, convId, ext, bot, d.replies, d.menu);
     await this.db.query('UPDATE conversations SET bot_state = $2, bot_invalid = $3, bot_item = $4 WHERE id = $1', [convId, d.next.state, d.next.invalid, d.next.state === 'area' ? d.next.item ?? null : null]);
 
     if (d.handoff) await rx.set('handoff');
@@ -597,7 +655,7 @@ export class ChannelManager {
       matchOption: async (t, options) => this.kb?.matchOption(t, options) ?? null,
     };
     const r = await runFlow(flow, st, input, ctx, bot.humanLabel);
-    for (const reply of r.replies) await this.botSay(channelId, convId, ext, reply);
+    await this.botSayAll(channelId, convId, ext, bot, r.replies, r.menu);
     const handoff = r.effects.find((e): e is Extract<Effect, { kind: 'handoff' }> => e.kind === 'handoff');
     if (handoff) await rx.set('handoff'); else if (searched) await rx.set(found ? 'done' : 'noAnswer');
     await this.db.query('UPDATE conversations SET flow_state = $2, bot_state = $3 WHERE id = $1', [convId, JSON.stringify(r.state), handoff ? 'human' : 'menu']);

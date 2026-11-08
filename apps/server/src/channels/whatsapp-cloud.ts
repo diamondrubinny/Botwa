@@ -1,4 +1,5 @@
 import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
+import { buildInteractive, buildTemplate, buildTemplateCreate, summarizeTemplate, type CloudTemplate, type MenuOption, type TemplateSend } from './cloud-messages.js';
 import { PolicyRejected } from './sender.js';
 import type { AdapterContext, ChannelAdapter, InboundMessage, OutboundMedia } from './types.js';
 
@@ -7,7 +8,7 @@ import type { AdapterContext, ChannelAdapter, InboundMessage, OutboundMedia } fr
  * and a webhook. Messages arrive by webhook (signed with the app secret) and go out through the Graph API.
  * Platform rules (24h customer-service window, templates, versions, error codes) must be verified against Meta's current docs.
  */
-export interface CloudCreds { phoneNumberId: string; accessToken: string; appSecret: string; verifyToken: string }
+export interface CloudCreds { phoneNumberId: string; accessToken: string; appSecret: string; verifyToken: string; /** WhatsApp Business Account id: needed to read and create message templates */ wabaId?: string }
 export const CLOUD_CREDS_KEY = 'cloud';
 
 type FetchLike = (url: string, init?: RequestInit) => Promise<Response>;
@@ -40,7 +41,7 @@ interface WaMessage {
   text?: { body?: string };
   image?: { id?: string; caption?: string }; document?: { id?: string; caption?: string; filename?: string };
   audio?: { id?: string }; video?: { id?: string; caption?: string }; sticker?: { id?: string };
-  button?: { text?: string }; interactive?: { button_reply?: { title?: string }; list_reply?: { title?: string } };
+  button?: { text?: string }; interactive?: { button_reply?: { id?: string; title?: string }; list_reply?: { id?: string; title?: string } };
 }
 interface WaValue { messages?: WaMessage[]; contacts?: { wa_id?: string; profile?: { name?: string } }[] }
 export interface WaWebhook { object?: string; entry?: { changes?: { field?: string; value?: WaValue }[] }[] }
@@ -106,7 +107,10 @@ export class WhatsAppCloudAdapter implements ChannelAdapter {
   private toInbound(m: WaMessage, name?: string): InboundMessage {
     const media = m.image ?? m.document ?? m.audio ?? m.video ?? m.sticker;
     const caption = m.image?.caption ?? m.document?.caption ?? m.video?.caption;
-    const text = m.text?.body ?? m.button?.text ?? m.interactive?.button_reply?.title ?? m.interactive?.list_reply?.title ?? caption ?? (media ? '' : '[unsupported message type]');
+    // a tap on a menu button or list row arrives as the option number we put in its id (titles are shortened), so the bot reads it like a typed number
+    const picked = m.interactive?.button_reply ?? m.interactive?.list_reply;
+    const pickedText = picked ? (/^\d{1,2}$/.test(picked.id ?? '') ? picked.id : picked.title) : undefined;
+    const text = m.text?.body ?? m.button?.text ?? pickedText ?? caption ?? (media ? '' : '[unsupported message type]');
     return {
       externalContactId: `${m.from}@s.whatsapp.net`,
       contactName: name,
@@ -147,6 +151,44 @@ export class WhatsAppCloudAdapter implements ChannelAdapter {
   async sendText(externalContactId: string, text: string): Promise<{ externalMessageId?: string }> {
     const out = await this.post(`${this.creds?.phoneNumberId}/messages`, { messaging_product: 'whatsapp', recipient_type: 'individual', to: externalContactId.split('@')[0], type: 'text', text: { body: text, preview_url: false } });
     return { externalMessageId: out.messages?.[0]?.id };
+  }
+
+  /** A menu as reply buttons (up to 3) or a list (up to 10 rows). Throws 'menu_not_supported' when it does not fit, so the caller sends the numbered text. */
+  async sendInteractive(externalContactId: string, body: string, options: MenuOption[]): Promise<{ externalMessageId?: string }> {
+    const payload = buildInteractive(externalContactId.split('@')[0]!, body, options);
+    if (!payload) throw new Error('menu_not_supported');
+    const out = await this.post(`${this.creds?.phoneNumberId}/messages`, payload);
+    return { externalMessageId: out.messages?.[0]?.id };
+  }
+
+  /** A pre-approved template message: allowed outside the 24-hour window. */
+  async sendTemplate(externalContactId: string, t: TemplateSend): Promise<{ externalMessageId?: string }> {
+    const out = await this.post(`${this.creds?.phoneNumberId}/messages`, buildTemplate(externalContactId.split('@')[0]!, t));
+    return { externalMessageId: out.messages?.[0]?.id };
+  }
+
+  private waba(): string {
+    if (!this.creds || !this.active) throw new Error('channel_not_connected');
+    if (!this.creds.wabaId) throw new Error('waba_not_configured');
+    return this.creds.wabaId;
+  }
+
+  /** The templates of the business account, with their approval status. */
+  async listTemplates(): Promise<CloudTemplate[]> {
+    const waba = this.waba();
+    const res = await this.fetchImpl(this.url(`${waba}/message_templates?fields=name,language,status,category,rejected_reason,components&limit=200`), { headers: this.auth(), signal: AbortSignal.timeout(15_000) });
+    if (!res.ok) throw new Error(`templates_failed_${res.status}`);
+    const json = (await res.json().catch(() => ({}))) as { data?: Parameters<typeof summarizeTemplate>[0][] };
+    return (json.data ?? []).map(summarizeTemplate).filter((t): t is CloudTemplate => !!t);
+  }
+
+  /** Submit a new template for Meta's approval. */
+  async createTemplate(t: Parameters<typeof buildTemplateCreate>[0]): Promise<{ id?: string; status?: string }> {
+    const waba = this.waba();
+    const res = await this.fetchImpl(this.url(`${waba}/message_templates`), { method: 'POST', headers: { ...this.auth(), 'content-type': 'application/json' }, body: JSON.stringify(buildTemplateCreate(t)), signal: AbortSignal.timeout(15_000) });
+    const json = (await res.json().catch(() => ({}))) as { id?: string; status?: string; error?: { message?: string; error_user_msg?: string } };
+    if (!res.ok) throw new Error(`template_rejected:${(json.error?.error_user_msg ?? json.error?.message ?? String(res.status)).slice(0, 200)}`);
+    return { id: json.id, status: json.status };
   }
 
   async sendMedia(externalContactId: string, media: OutboundMedia): Promise<{ externalMessageId?: string }> {

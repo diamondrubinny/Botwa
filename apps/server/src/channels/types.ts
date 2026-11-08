@@ -59,6 +59,8 @@ export interface ChannelAdapter {
   markRead?(externalContactId: string, externalMessageIds: string[]): Promise<void>;
   /** React to a customer's message with an emoji (empty string removes our reaction). Best effort; not every platform has it. */
   react?(externalContactId: string, externalMessageId: string, emoji: string): Promise<void>;
+  /** A menu as tappable buttons or a list (official WhatsApp only). Throws when it does not fit: the caller sends the numbered text instead. */
+  sendInteractive?(externalContactId: string, body: string, options: { id: string; title: string }[]): Promise<{ externalMessageId?: string }>;
   /** WhatsApp groups this number is a member of (id like 1203630...@g.us). */
   listGroups?(): Promise<{ id: string; name: string; size: number }[]>;
   sendMedia?(externalContactId: string, media: OutboundMedia): Promise<{ externalMessageId?: string }>;

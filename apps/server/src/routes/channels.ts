@@ -116,6 +116,8 @@ export function channelRoutes(app: FastifyInstance, db: Db, mgr: ChannelManager,
       phoneNumberId: z.string().regex(/^\d{5,32}$/),
       accessToken: z.string().min(20).max(1000).regex(/^[\w.\-~+/=]+$/),
       appSecret: z.string().min(16).max(200).regex(/^[\w.\-~+/=]+$/),
+      /** WhatsApp Business Account id (to read and create message templates); optional */
+      wabaId: z.string().regex(/^\d{5,32}$/).optional(),
     }).safeParse(req.body);
     if (!p.success || !b.success) return reply.code(400).send({ error: 'bad_request' });
     if ((await db.query(`SELECT 1 FROM channels WHERE id=$1 AND type='whatsapp_cloud'`, [p.data.id])).rowCount !== 1) return reply.code(404).send({ error: 'not_found' });

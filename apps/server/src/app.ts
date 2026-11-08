@@ -22,6 +22,7 @@ import { kbRoutes } from './routes/kb.js';
 import { flowRoutes } from './routes/flow.js';
 import { brandingRoutes } from './routes/branding.js';
 import { forwardRoutes } from './routes/forward.js';
+import { templateRoutes } from './routes/templates.js';
 import { BrowserRenderer, RemoteRenderer } from './kb/browser.js';
 import { safetyRoutes } from './routes/safety.js';
 import { widgetRoutes } from './routes/widget.js';
@@ -117,6 +118,7 @@ export async function buildApp(cfg: Config, db: Db, mgr: ChannelManager, media: 
   safetyRoutes(app, db, kb);
   brandingRoutes(app, db, kb);
   forwardRoutes(app, db, mgr, cfg);
+  templateRoutes(app, db, mgr);
   widgetRoutes(app, db, mgr, cfg);
   const hooks = new WebhookService(db, cfg, webhookSender);
   mgr.webhooks = hooks;

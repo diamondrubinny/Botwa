@@ -277,19 +277,20 @@ function LinkPanel({ channel, onClose }: { channel: Channel; onClose: () => void
 
 /** Credentials for the official WhatsApp channel, plus the webhook details to paste into Meta's app dashboard. */
 function CloudPanel({ channel, onSaved }: { channel: Channel; onSaved: () => void }) {
-  const [info, setInfo] = useState<{ configured: boolean; phoneNumberId?: string; verifyToken?: string; webhookUrl: string } | null>(null);
+  const [info, setInfo] = useState<{ configured: boolean; phoneNumberId?: string; verifyToken?: string; wabaId?: string; webhookUrl: string } | null>(null);
   const [phoneNumberId, setPhoneNumberId] = useState('');
+  const [wabaId, setWabaId] = useState('');
   const [accessToken, setAccessToken] = useState('');
   const [appSecret, setAppSecret] = useState('');
   const [msg, setMsg] = useState('');
   const [busy, setBusy] = useState(false);
-  useEffect(() => { void api<typeof info>('GET', `/channels/${channel.id}/cloud`).then((d) => { setInfo(d); if (d?.phoneNumberId) setPhoneNumberId(d.phoneNumberId); }).catch(() => undefined); }, [channel.id]);
+  useEffect(() => { void api<typeof info>('GET', `/channels/${channel.id}/cloud`).then((d) => { setInfo(d); if (d?.phoneNumberId) setPhoneNumberId(d.phoneNumberId); if (d?.wabaId) setWabaId(d.wabaId); }).catch(() => undefined); }, [channel.id]);
 
   async function save(e: FormEvent) {
     e.preventDefault();
     setBusy(true); setMsg('');
     try {
-      const r = await api<{ status: string }>('PUT', `/channels/${channel.id}/cloud`, { phoneNumberId, accessToken, appSecret });
+      const r = await api<{ status: string }>('PUT', `/channels/${channel.id}/cloud`, { phoneNumberId, accessToken, appSecret, ...(wabaId.trim() ? { wabaId: wabaId.trim() } : {}) });
       setAccessToken(''); setAppSecret('');
       setMsg(r.status === 'connected' ? 'החיבור הצליח.' : 'הפרטים נשמרו אך החיבור ל-Meta נכשל. בדקו את מזהה המספר ואת האסימון.');
       onSaved();
@@ -319,9 +320,12 @@ function CloudPanel({ channel, onSaved }: { channel: Channel; onSaved: () => voi
         <div className="field"><label htmlFor={`pn-${channel.id}`}>Phone number ID</label><input id={`pn-${channel.id}`} required inputMode="numeric" dir="ltr" pattern="\d{5,32}" value={phoneNumberId} onChange={(e) => setPhoneNumberId(e.target.value.replace(/\D/g, ''))} /></div>
         <div className="field"><label htmlFor={`tk-${channel.id}`}>אסימון גישה (Access token)</label><input id={`tk-${channel.id}`} required type="password" autoComplete="off" dir="ltr" minLength={20} value={accessToken} onChange={(e) => setAccessToken(e.target.value.trim())} /></div>
         <div className="field"><label htmlFor={`as-${channel.id}`}>App secret</label><input id={`as-${channel.id}`} required type="password" autoComplete="off" dir="ltr" minLength={16} value={appSecret} onChange={(e) => setAppSecret(e.target.value.trim())} /></div>
+        <div className="field"><label htmlFor={`wb-${channel.id}`}>WhatsApp Business Account ID (אופציונלי: לתבניות הודעה)</label><input id={`wb-${channel.id}`} inputMode="numeric" dir="ltr" pattern="\d{5,32}" value={wabaId} onChange={(e) => setWabaId(e.target.value)} aria-describedby={`wbh-${channel.id}`} />
+          <p id={`wbh-${channel.id}`} className="hint">נדרש כדי לראות תבניות הודעה ולהגיש חדשות. נמצא ב-WhatsApp ← API Setup אצל Meta (שונה מ-Phone number ID). יש לאמת מול התיעוד הרשמי.</p></div>
         <button className="primary" type="submit" disabled={busy}>{info?.configured ? 'עדכון ופתיחת חיבור' : 'שמירה וחיבור'}</button>
         <p role="status" className={msg.startsWith('החיבור הצליח') ? 'ok' : 'error'}>{msg}</p>
       </form>
+      {info?.configured && <TemplatesPanel channelId={channel.id} hasWaba={!!info.wabaId} />}
     </div>
   );
 }
@@ -456,5 +460,61 @@ BotwaChat.on('newMessage', function (e) { /* e.unread */ });`}</pre>
         </details>
       </section>
     </div>
+  );
+}
+
+
+interface Tpl { name: string; language: string; status: string; category: string; body: string; params: number; rejectedReason: string | null }
+const TPL_STATUS: Record<string, string> = { APPROVED: 'מאושרת', PENDING: 'ממתינה לאישור', REJECTED: 'נדחתה', PAUSED: 'מושהית', DISABLED: 'מושבתת' };
+const TPL_CAT: Record<string, string> = { UTILITY: 'שירותית', MARKETING: 'שיווקית', AUTHENTICATION: 'אימות' };
+
+/** Message templates of the official channel: the list with their approval status, and a form to submit a new one for Meta's approval. */
+function TemplatesPanel({ channelId, hasWaba }: { channelId: string; hasWaba: boolean }) {
+  const [list, setList] = useState<Tpl[] | null>(null);
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const [f, setF] = useState({ name: '', language: 'he', category: 'UTILITY', body: '', examples: '' });
+  const [busy, setBusy] = useState(false);
+  const fail = (e: unknown) => setMsg({ ok: false, text: e instanceof ApiError && e.code === 'template_rejected' ? `Meta דחתה את הבקשה${e.detail ? `: ${e.detail}` : ''}.` : errText(e instanceof ApiError ? e.code : 'generic') });
+  async function load(refresh = false) { setMsg(null); try { setList(await api<Tpl[]>('GET', `/channels/${channelId}/templates${refresh ? '?refresh=1' : ''}`)); } catch (e) { setList(null); fail(e); } }
+  useEffect(() => { if (hasWaba) void load(); }, [channelId, hasWaba]); // eslint-disable-line react-hooks/exhaustive-deps
+  async function create(e: FormEvent) {
+    e.preventDefault(); setBusy(true); setMsg(null);
+    try {
+      await api('POST', `/channels/${channelId}/templates`, { name: f.name.trim(), language: f.language, category: f.category, body: f.body.trim(), examples: f.examples.split('\n').map((x) => x.trim()).filter(Boolean) });
+      setMsg({ ok: true, text: 'התבנית הוגשה לאישור של Meta. בדרך כלל התשובה מגיעה תוך דקות עד שעות; רעננו את הרשימה.' });
+      setF({ name: '', language: 'he', category: 'UTILITY', body: '', examples: '' }); await load(true);
+    } catch (er) { fail(er); }
+    setBusy(false);
+  }
+  return (
+    <section aria-labelledby={`tp-h-${channelId}`}>
+      <h3 id={`tp-h-${channelId}`}>תבניות הודעה</h3>
+      <p className="hint">תבנית היא הודעה שאושרה מראש על ידי Meta. רק בעזרתה אפשר לכתוב ללקוח אחרי שעברו 24 שעות מהודעתו האחרונה (בשיחה: "שליחת תבנית"). הגשת תבנית חדשה כפופה לאישור של Meta, והמחיר והמדיניות שלה (שיווקית או שירותית) נקבעים אצלם. יש לאמת את הכללים מול התיעוד הרשמי.</p>
+      {!hasWaba ? <p className="hint">כדי לראות ולהגיש תבניות, הוסיפו למעלה את WhatsApp Business Account ID ושמרו.</p> : (
+        <>
+          <div className="row"><button type="button" onClick={() => void load(true)}>רענון הרשימה</button></div>
+          {list && (list.length === 0 ? <p className="empty">אין תבניות בחשבון.</p> : (
+            <table>
+              <caption className="sr-only">תבניות ההודעה של החשבון</caption>
+              <thead><tr><th scope="col">שם</th><th scope="col">שפה</th><th scope="col">סוג</th><th scope="col">מצב</th><th scope="col">נוסח</th></tr></thead>
+              <tbody>{list.map((t) => <tr key={`${t.name}-${t.language}`}><th scope="row" dir="ltr">{t.name}</th><td>{t.language}</td><td>{TPL_CAT[t.category] ?? t.category}</td>
+                <td>{TPL_STATUS[t.status] ?? t.status}{t.rejectedReason ? ` (${t.rejectedReason})` : ''}</td><td style={{ whiteSpace: 'pre-wrap' }}>{t.body}</td></tr>)}</tbody>
+            </table>
+          ))}
+          <form onSubmit={create}>
+            <h4>הגשת תבנית חדשה</h4>
+            <div className="row">
+              <div className="field"><label htmlFor={`tn-${channelId}`}>שם (אותיות אנגליות קטנות, מספרים וקו תחתון)</label><input id={`tn-${channelId}`} required dir="ltr" maxLength={60} pattern="[a-z0-9_]+" value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} /></div>
+              <div className="field"><label htmlFor={`tl-${channelId}`}>שפה</label><select id={`tl-${channelId}`} value={f.language} onChange={(e) => setF({ ...f, language: e.target.value })}><option value="he">עברית</option><option value="en">אנגלית</option><option value="ar">ערבית</option><option value="ru">רוסית</option></select></div>
+              <div className="field"><label htmlFor={`tc-${channelId}`}>סוג</label><select id={`tc-${channelId}`} value={f.category} onChange={(e) => setF({ ...f, category: e.target.value })}><option value="UTILITY">שירותית (עדכון על פנייה או הזמנה)</option><option value="MARKETING">שיווקית</option></select></div>
+            </div>
+            <div className="field"><label htmlFor={`tb-${channelId}`}>נוסח ההודעה (אפשר {'{{1}}'}, {'{{2}}'} למשתנים, לא בתחילת הנוסח ולא בסופו)</label><textarea id={`tb-${channelId}`} required rows={3} maxLength={1024} value={f.body} onChange={(e) => setF({ ...f, body: e.target.value })} /></div>
+            <div className="field"><label htmlFor={`te-${channelId}`}>דוגמה לכל משתנה (שורה לכל משתנה, לפי הסדר)</label><textarea id={`te-${channelId}`} rows={2} value={f.examples} onChange={(e) => setF({ ...f, examples: e.target.value })} /></div>
+            <button className="primary" type="submit" disabled={busy}>הגשה לאישור</button>
+          </form>
+        </>
+      )}
+      <p role="status" className={msg?.ok ? 'ok' : 'error'}>{msg?.text}</p>
+    </section>
   );
 }

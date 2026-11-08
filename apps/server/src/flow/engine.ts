@@ -45,7 +45,7 @@ export interface FlowContext {
   resolveArea?: (text: string) => Promise<string | null>;
 }
 
-export interface FlowResult { replies: string[]; state: FlowState; effects: Effect[] }
+export interface FlowResult { replies: string[]; state: FlowState; effects: Effect[]; /** the last reply is a menu node's numbered menu */ menu?: boolean }
 const MAX_STEPS = 60;
 export const RESTART_AFTER_MS = 30 * 60_000;
 const MENU_WORDS = new Set(['תפריט', 'menu', 'start', 'התחלה', 'תפריט ראשי']);
@@ -130,8 +130,8 @@ export async function runFlow(flow: Flow, prev: FlowState | null, input: FlowInp
         if (!cursor) return finished();
       } else {
         const a = w.kbOnFreeText && !/^\d{1,2}$/.test(t) ? await ctx.kbAnswer(inp.text!).catch(() => null) : null;
-        if (a) { replies.push(a); replies.push(menuText(w, ctx.humanOption, humanLabel)); return { replies, state: { ...state, invalid: 0 }, effects }; }
-        if (state.invalid < ctx.invalidRetries) { replies.push(`${ctx.invalidMessage}\n\n${menuText(w, ctx.humanOption, humanLabel)}`); return { replies, state: { ...state, invalid: state.invalid + 1 }, effects }; }
+        if (a) { replies.push(a); replies.push(menuText(w, ctx.humanOption, humanLabel)); return { replies, state: { ...state, invalid: 0 }, effects, menu: true }; }
+        if (state.invalid < ctx.invalidRetries) { replies.push(`${ctx.invalidMessage}\n\n${menuText(w, ctx.humanOption, humanLabel)}`); return { replies, state: { ...state, invalid: state.invalid + 1 }, effects, menu: true }; }
         return handoff('unrecognized');
       }
     } else if (w.type === 'question') {
@@ -201,7 +201,7 @@ export async function runFlow(flow: Flow, prev: FlowState | null, input: FlowInp
     const first = nodes.get(flow.start);
     if (first?.type === 'menu' && hasText && first.kbOnFreeText && !/^\d{1,2}$/.test(t) && !MENU_WORDS.has(t)) {
       const a = await ctx.kbAnswer(inp.text!).catch(() => null);
-      if (a) { replies.push(a, menuText(first, ctx.humanOption, humanLabel)); return { replies, state: { ...state, node: first.id }, effects }; }
+      if (a) { replies.push(a, menuText(first, ctx.humanOption, humanLabel)); return { replies, state: { ...state, node: first.id }, effects, menu: true }; }
     }
   }
 
@@ -233,7 +233,7 @@ export async function runFlow(flow: Flow, prev: FlowState | null, input: FlowInp
         cursor = a ? n.found : n.notFound;
         break;
       }
-      case 'menu': replies.push(menuText(n, ctx.humanOption, humanLabel)); return { replies, state: { ...state, node: n.id, invalid: 0 }, effects };
+      case 'menu': replies.push(menuText(n, ctx.humanOption, humanLabel)); return { replies, state: { ...state, node: n.id, invalid: 0 }, effects, menu: true };
       case 'question': case 'media': replies.push(n.text); return { replies, state: { ...state, node: n.id, invalid: 0 }, effects };
       case 'list': replies.push(n.text); return { replies, state: { ...state, node: n.id, invalid: 0, list: { items: [], phase: 'item' } }, effects };
       case 'handoff': {

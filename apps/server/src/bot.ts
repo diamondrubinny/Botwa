@@ -59,6 +59,8 @@ export const botSchema = z.object({
   reactions: z.object({ enabled: z.boolean(), working: emoji, done: emoji, noAnswer: emoji, handoff: emoji }).default(() => ({ ...DEFAULT_REACTIONS })),
   /** a customer message the bot could not answer (channel down, sending failed) is answered when the channel is back, up to this many hours later (0 = never) */
   catchupHours: z.number().int().min(0).max(72).default(12),
+  /** on the official WhatsApp channel, send menus as tappable buttons or lists (falls back to the numbered text) */
+  interactiveMenus: z.boolean().default(true),
 });
 export type BotConfig = z.infer<typeof botSchema>;
 
@@ -80,6 +82,7 @@ export const DEFAULT_BOT: BotConfig = {
   kb: { enabled: false, minScore: 0.6, maxChars: 700, showSource: true, intro: 'מצאתי את זה במאגר המידע שלנו:' },
   reactions: { ...DEFAULT_REACTIONS },
   catchupHours: 12,
+  interactiveMenus: true,
 };
 
 export async function loadBot(db: Db): Promise<BotConfig> {
@@ -121,7 +124,7 @@ export function normalize(s: string): string {
 
 export interface BotState { state: 'menu' | 'human' | 'area' | null; invalid: number; /** index of the menu item waiting for a place (state 'area') */ item?: number | null }
 export type HandoffReason = 'requested' | 'unrecognized' | 'media' | 'topic';
-export interface Decision { replies: string[]; next: BotState; handoff?: HandoffReason; /** topic hand-over: the menu item chosen and the person responsible */ topic?: { title: string; userId: string; /** the place the customer wrote, when the topic is routed by area ('' = skipped) */ place?: string } }
+export interface Decision { replies: string[]; /** the last reply is the numbered menu (so a channel that can may send it as buttons) */ menu?: boolean; next: BotState; handoff?: HandoffReason; /** topic hand-over: the menu item chosen and the person responsible */ topic?: { title: string; userId: string; /** the place the customer wrote, when the topic is routed by area ('' = skipped) */ place?: string } }
 
 const MENU_WORDS = new Set(['תפריט', 'menu', 'תפריט ראשי', 'start', 'התחלה']);
 
@@ -139,7 +142,7 @@ export function decide(bot: BotConfig, st: BotState, text: string | null, kbAnsw
   const t = normalize(text);
   if ((bot.humanOption && t === '0') || bot.humanKeywords.some((k) => t.includes(normalize(k)))) return handoff('requested');
 
-  const menu = (invalid: number, prefix = ''): Decision => ({ replies: [`${prefix}${formatMenu(bot)}`], next: { state: 'menu', invalid } });
+  const menu = (invalid: number, prefix = ''): Decision => ({ replies: [`${prefix}${formatMenu(bot)}`], menu: true, next: { state: 'menu', invalid } });
   if (MENU_WORDS.has(t)) return menu(0);
   // waiting for the place of a topic routed by area
   if (st.state === 'area') {
