@@ -256,3 +256,23 @@ describe('menu bot end to end', () => {
     await call('PUT', '/settings/bot', 'admin@t.io', { ...bot, enabled: false });
   });
 });
+
+describe('topics routed by area (numbered menu)', () => {
+  const U1 = '11111111-1111-4111-8111-111111111111';
+  const bot: BotConfig = { ...DEFAULT_BOT, enabled: true, items: [{ title: 'מפגע', answer: 'תודה על הדיווח.', route: { userId: U1, byArea: true } }, { title: 'שעות', answer: 'א׳-ה׳' }] };
+  it('asks for the place, then hands over with the place and the fallback officer', () => {
+    const a = decide(bot, { state: 'menu', invalid: 0 }, '1');
+    expect(a.next).toEqual({ state: 'area', invalid: 0, item: 0 });
+    expect(a.replies[0]).toContain('באיזה בניין או מקום');
+    expect(a.handoff).toBeUndefined();
+    const b = decide(bot, { state: 'area', invalid: 0, item: 0 }, 'מעבדה 214 בניין 12');
+    expect(b).toMatchObject({ handoff: 'topic', next: { state: 'human' }, topic: { title: 'מפגע', userId: U1, place: 'מעבדה 214 בניין 12' }, replies: [] });
+    expect(decide(bot, { state: 'area', invalid: 0, item: 0 }, 'דלג').topic?.place).toBe('');
+    expect(decide(bot, { state: 'area', invalid: 0, item: 0 }, null).topic).toMatchObject({ userId: U1, place: '' });   // a photo instead of a place
+    expect(decide(bot, { state: 'area', invalid: 0, item: 0 }, '0').handoff).toBe('requested');                         // "talk to a person" still works
+    expect(decide(bot, { state: 'area', invalid: 0, item: 0 }, 'תפריט').next.state).toBe('menu');
+  });
+  it('the schema accepts byArea', () => {
+    expect(botSchema.safeParse({ ...DEFAULT_BOT, items: bot.items }).success).toBe(true);
+  });
+});

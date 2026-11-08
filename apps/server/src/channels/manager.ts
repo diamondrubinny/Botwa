@@ -346,7 +346,7 @@ export class ChannelManager {
 
   private async runBot(channelId: string, convId: string, ext: string, bot: BotConfig, rawText: string | null, hasMedia = false): Promise<void> {
     let text: string | null = hasMedia ? null : rawText;
-    const { rows } = await this.db.query('SELECT bot_state, bot_invalid, assigned_to FROM conversations WHERE id = $1', [convId]);
+    const { rows } = await this.db.query('SELECT bot_state, bot_invalid, bot_item, assigned_to FROM conversations WHERE id = $1', [convId]);
     const c = rows[0];
     if (!c || c.assigned_to) return; // a person already owns this conversation
     if (text !== null && text.trim() === '[unsupported message type]') text = null;
@@ -365,13 +365,19 @@ export class ChannelManager {
       if (flow) { await this.runFlowStep(channelId, convId, ext, bot, flow, { text: rawText !== null && rawText.trim() === '[unsupported message type]' ? null : rawText, media: hasMedia }); return; }
     }
 
-    const d = decide(bot, { state: c.bot_state, invalid: c.bot_invalid }, text, await this.kbAnswer(bot, c.bot_state, text));
+    const d = decide(bot, { state: c.bot_state, invalid: c.bot_invalid, item: c.bot_item }, text, c.bot_state === 'area' ? null : await this.kbAnswer(bot, c.bot_state, text));
     for (const reply of d.replies) await this.botSay(channelId, convId, ext, reply);
-    await this.db.query('UPDATE conversations SET bot_state = $2, bot_invalid = $3 WHERE id = $1', [convId, d.next.state, d.next.invalid]);
+    await this.db.query('UPDATE conversations SET bot_state = $2, bot_invalid = $3, bot_item = $4 WHERE id = $1', [convId, d.next.state, d.next.invalid, d.next.state === 'area' ? d.next.item ?? null : null]);
 
     if (d.handoff) {
       const why = { requested: 'הלקוח ביקש נציג', unrecognized: 'הלקוח שלח הודעה שהבוט לא זיהה', media: 'הלקוח שלח קובץ או תוכן שאינו טקסט', topic: `הלקוח בחר בנושא "${d.topic?.title ?? ''}"` }[d.handoff];
-      await this.handoffNow(channelId, convId, ext, bot, why, d.topic ? { userId: d.topic.userId, topic: d.topic.title } : undefined);
+      let userId = d.topic?.userId;
+      if (d.topic && d.topic.place) {
+        // routed by area: the officer responsible for the place the customer wrote, else the topic's own officer
+        userId = (await resolveArea(this.db, d.topic.place).catch(() => null)) ?? userId;
+        await this.db.query(`INSERT INTO conversation_notes (conversation_id, body) VALUES ($1, $2)`, [convId, `מיקום שנמסר: ${d.topic.place}`]).catch(() => undefined);
+      }
+      await this.handoffNow(channelId, convId, ext, bot, why, d.topic ? { userId: userId!, topic: d.topic.title } : undefined);
     }
   }
 

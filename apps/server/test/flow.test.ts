@@ -547,6 +547,22 @@ describe('safety flow live: areas, template endpoint, placeholders, profile, fil
     expect(c2.assigned_to).toBe(ids.o2);                                                     // the chemicals officer chosen in the flow
     expect((await db.query(`SELECT t.name FROM conversation_tags x JOIN tags t ON t.id = x.tag_id WHERE x.conversation_id = $1 ORDER BY t.name`, [c2.id])).rows.map((r) => r.name)).toEqual(['חומ״ס', 'כימיקלים המחייבים ניטור', 'מפגע']);  // the earlier hazard tag stays on the same thread
   });
+
+  it('numbered menu: a topic routed by area asks for the place and hands over to the officer of that place', async () => {
+    await call('PUT', '/flow/mode', 'admin@t.io', { mode: 'menu' });
+    const put = await call('PUT', '/settings/bot', 'admin@t.io', { ...DEFAULT_BOT, enabled: true, mode: 'menu', items: [{ title: 'מפגע בטיחותי', answer: 'תודה על הדיווח.', route: { userId: ids.o2, byArea: true } }] });
+    expect(put.statusCode).toBe(200);
+    const first = await say('wa9', 'שלום');
+    expect(first[0]).toContain('מפגע בטיחותי');
+    const ask = await say('wa9', '1');
+    expect(ask.join(' ')).toContain('באיזה בניין או מקום');
+    await say('wa9', 'בניין 12 קומה 3');
+    const c = await conv('wa9');
+    expect(c).toMatchObject({ assigned_to: ids.o1, bot_state: 'human' });            // building 12 belongs to o1, not the topic's fallback o2
+    // no match: the topic's own officer
+    await say('wa10', 'שלום'); await say('wa10', '1'); await say('wa10', 'מקום לא מוכר');
+    expect((await conv('wa10')).assigned_to).toBe(ids.o2);
+  });
 });
 
 describe('areas workbook import', () => {

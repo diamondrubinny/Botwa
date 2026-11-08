@@ -3,7 +3,7 @@ import { api, ApiError, can, type Me } from '../api';
 import { usePoll } from '../hooks';
 
 interface BotCfg {
-  enabled: boolean; welcome: string; items: { title: string; answer: string; contact?: { name: string; phone: string; message: string }; route?: { userId: string } }[]; humanOption: boolean; humanLabel: string;
+  enabled: boolean; welcome: string; items: { title: string; answer: string; contact?: { name: string; phone: string; message: string }; route?: { userId: string; byArea?: boolean } }[]; humanOption: boolean; humanLabel: string;
   humanKeywords: string[]; humanMessage: string; invalidMessage: string; invalidRetries: number; footer: string; preview?: string; mode?: 'menu' | 'flow';
   kb: { enabled: boolean; minScore: number; maxChars: number; showSource: boolean; intro: string };
 }
@@ -71,9 +71,11 @@ export function Bot({ me }: { me: Me }) {
                 {it.route && (
                   <div className="card" style={{ marginTop: '.5rem' }}>
                     <label htmlFor={`brt${i}`}>הנציג האחראי</label>
-                    <select id={`brt${i}`} required value={it.route.userId} onChange={(e) => setItem(i, { route: { userId: e.target.value } })}>
+                    <select id={`brt${i}`} required value={it.route.userId} onChange={(e) => setItem(i, { route: { ...it.route!, userId: e.target.value } })}>
                       {people.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
                     </select>
+                    <label><input type="checkbox" style={{ width: 'auto', minHeight: 'auto' }} checked={!!it.route.byArea} onChange={(e) => setItem(i, { route: { ...it.route!, byArea: e.target.checked || undefined } })} /> לשאול את הלקוח באיזה בניין או מקום מדובר, ולהעביר לנציג שאחראי על המקום</label>
+                    <p className="hint">האחראי על כל מקום מוגדר ב<a href="#/safety">לוח בטיחות ← אזורי אחריות</a> (ידנית או בייבוא אקסל). אם המקום לא מזוהה, הנציג שנבחר כאן מקבל את השיחה.</p>
                     <p className="hint">אחרי התשובה הלקוח מועבר לנציג הזה, והבוט שותק. אם הנציג מושבת, תופעל ההקצאה הרגילה. אפשר לשלב עם הפניה לווצאפ אישי (למטה), ואז הלקוח מקבל גם קישור וגם נציג במערכת.</p>
                   </div>
                 )}
@@ -97,6 +99,13 @@ export function Bot({ me }: { me: Me }) {
             </fieldset>
           ))}
           {b.items.length < 9 && <button type="button" onClick={() => set({ items: [...b.items, { title: '', answer: '' }] })}>הוספת פריט</button>}
+          {b.items.some((it) => it.route) && (
+            <table style={{ marginTop: '.75rem' }}>
+              <caption>מי מטפל בכל נושא</caption>
+              <thead><tr><th scope="col">נושא</th><th scope="col">נציג</th><th scope="col">לפי מקום</th></tr></thead>
+              <tbody>{b.items.filter((it) => it.route).map((it, k) => <tr key={k}><th scope="row">{it.title || '(ללא כותרת)'}</th><td>{people.find((u) => u.id === it.route!.userId)?.name ?? 'לא נבחר'}</td><td>{it.route!.byArea ? 'כן' : 'לא'}</td></tr>)}</tbody>
+            </table>
+          )}
 
           <h2 style={{ marginTop: '1.25rem' }}>מעבר לנציג</h2>
           <div className="field">

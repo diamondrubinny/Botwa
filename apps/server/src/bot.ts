@@ -19,7 +19,11 @@ export const botSchema = z.object({
       message: z.string().trim().max(200).default(''),
     }).optional(),
     /** optional routing: after the answer the conversation is handed to this staff member (stays in the system); falls back to normal routing if they are inactive */
-    route: z.object({ userId: z.string().uuid() }).optional(),
+    route: z.object({
+      userId: z.string().uuid(),
+      /** ask where the problem is and hand over to the officer responsible for that place (responsibility areas); userId is the fallback */
+      byArea: z.boolean().optional(),
+    }).optional(),
   })).max(9),
   /** option "0" = talk to a person */
   humanOption: z.boolean(),
@@ -98,9 +102,9 @@ export function normalize(s: string): string {
     .trim();
 }
 
-export interface BotState { state: 'menu' | 'human' | null; invalid: number }
+export interface BotState { state: 'menu' | 'human' | 'area' | null; invalid: number; /** index of the menu item waiting for a place (state 'area') */ item?: number | null }
 export type HandoffReason = 'requested' | 'unrecognized' | 'media' | 'topic';
-export interface Decision { replies: string[]; next: BotState; handoff?: HandoffReason; /** topic hand-over: the menu item chosen and the person responsible */ topic?: { title: string; userId: string } }
+export interface Decision { replies: string[]; next: BotState; handoff?: HandoffReason; /** topic hand-over: the menu item chosen and the person responsible */ topic?: { title: string; userId: string; /** the place the customer wrote, when the topic is routed by area ('' = skipped) */ place?: string } }
 
 const MENU_WORDS = new Set(['תפריט', 'menu', 'תפריט ראשי', 'start', 'התחלה']);
 
@@ -109,6 +113,10 @@ const MENU_WORDS = new Set(['תפריט', 'menu', 'תפריט ראשי', 'start'
 export function decide(bot: BotConfig, st: BotState, text: string | null, kbAnswer: string | null = null): Decision {
   if (!bot.enabled || st.state === 'human') return { replies: [], next: st };
   const handoff = (reason: HandoffReason): Decision => ({ replies: [], next: { state: 'human', invalid: 0 }, handoff: reason });
+  if (text === null && st.state === 'area') {
+    const it = st.item != null ? bot.items[st.item] : undefined;
+    if (it?.route) return { replies: [], next: { state: 'human', invalid: 0 }, handoff: 'topic', topic: { title: it.title, userId: it.route.userId, place: '' } }; // a photo instead of a place: the topic's own officer
+  }
   if (text === null) return handoff('media'); // files, stickers, locations... need a person
 
   const t = normalize(text);
@@ -116,6 +124,14 @@ export function decide(bot: BotConfig, st: BotState, text: string | null, kbAnsw
 
   const menu = (invalid: number, prefix = ''): Decision => ({ replies: [`${prefix}${formatMenu(bot)}`], next: { state: 'menu', invalid } });
   if (MENU_WORDS.has(t)) return menu(0);
+  // waiting for the place of a topic routed by area
+  if (st.state === 'area') {
+    const it = st.item != null ? bot.items[st.item] : undefined;
+    if (it?.route) {
+      const place = /^(דלג|דלגי|skip)$/.test(t) ? '' : text.trim().slice(0, 200);
+      return { replies: [], next: { state: 'human', invalid: 0 }, handoff: 'topic', topic: { title: it.title, userId: it.route.userId, place } };
+    }
+  }
   // a free-text question the knowledge base can answer is answered at once, even as the very first message
   if (kbAnswer && !/^\d{1,2}$/.test(t) && !bot.items.some((it) => normalize(it.title) === t)) {
     return { replies: [bot.footer ? `${kbAnswer}\n\n${bot.footer}` : kbAnswer], next: { state: 'menu', invalid: 0 } };
@@ -124,6 +140,9 @@ export function decide(bot: BotConfig, st: BotState, text: string | null, kbAnsw
 
   let item = /^\d{1,2}$/.test(t) ? bot.items[Number(t) - 1] : undefined;
   item ??= bot.items.find((it) => normalize(it.title) === t);
+  if (item?.route?.byArea) {
+    return { replies: [`${itemReply(item)}\n\nבאיזה בניין או מקום מדובר? (אפשר לכתוב "דלג")`], next: { state: 'area', invalid: 0, item: bot.items.indexOf(item) } };
+  }
   if (item?.route) {
     const body = itemReply(item);
     return { replies: [body], next: { state: 'human', invalid: 0 }, handoff: 'topic', topic: { title: item.title, userId: item.route.userId } };
