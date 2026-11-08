@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react';
+import { createPortal } from 'react-dom';
 import { Icon } from './Icon';
 import { adapt, contrast, getUserColor, onColor, setUserColor } from '../brand';
 import { ACCENTS, FONTS, useTheme, type ThemeMode } from '../theme';
@@ -13,6 +14,7 @@ export function ThemeMenu({ align = 'end' }: { align?: 'start' | 'end' }) {
   const [custom, setCustom] = useState<string | null>(getUserColor);
   const [pos, setPos] = useState<CSSProperties>({});
   const btn = useRef<HTMLButtonElement>(null);
+  const pop = useRef<HTMLDivElement>(null);
   const [open, setOpen] = useState(false);
   const [notify, setNotify] = useState(notifyEnabled);
   const [notifyMsg, setNotifyMsg] = useState('');
@@ -32,13 +34,15 @@ export function ThemeMenu({ align = 'end' }: { align?: 'start' | 'end' }) {
       setPos({ width: w, left, right: 'auto', insetInlineStart: 'auto', insetInlineEnd: 'auto', ...(up ? { bottom: vh - r.top + 6, top: 'auto', maxHeight: Math.max(160, above) } : { top: r.bottom + 6, bottom: 'auto', maxHeight: Math.max(160, below) }) });
     };
     place();
+    // the menu is attached to the end of the page (so nothing can clip or cover it): move the keyboard focus into it
+    requestAnimationFrame(() => pop.current?.querySelector<HTMLElement>('button[role=radio][aria-checked=true], button, input')?.focus());
     window.addEventListener('resize', place);
     return () => window.removeEventListener('resize', place);
   }, [open, align]);
   useEffect(() => {
     if (!open) return;
-    const onDoc = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false); };
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false); };
+    const onDoc = (e: MouseEvent) => { const t = e.target as Node; if (ref.current && !ref.current.contains(t) && !pop.current?.contains(t)) setOpen(false); };
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') { setOpen(false); btn.current?.focus(); } };
     document.addEventListener('mousedown', onDoc);
     document.addEventListener('keydown', onKey);
     return () => { document.removeEventListener('mousedown', onDoc); document.removeEventListener('keydown', onKey); };
@@ -49,8 +53,8 @@ export function ThemeMenu({ align = 'end' }: { align?: 'start' | 'end' }) {
       <button ref={btn} className="icon-btn" aria-expanded={open} aria-controls="theme-pop" onClick={() => setOpen(!open)} aria-label="מראה המערכת">
         <Icon name="palette" />
       </button>
-      {open && (
-        <div id="theme-pop" className={`popover ${align} placed`} style={pos} role="group" aria-label="מראה המערכת">
+      {open && createPortal(
+        <div id="theme-pop" ref={pop} className={`popover ${align} placed`} style={pos} role="group" aria-label="מראה המערכת">
           <p className="pop-title">מצב</p>
           <div className="seg" role="radiogroup" aria-label="מצב תצוגה">
             {MODES.map(([m, label]) => (
@@ -107,7 +111,8 @@ export function ThemeMenu({ align = 'end' }: { align?: 'start' | 'end' }) {
               <p className="hint" role="status">{notifyMsg || 'ההתראה כללית בלבד, בלי תוכן ההודעה. בנייד כדאי להתקין את האפליקציה (הוספה למסך הבית).'}</p>
             </>
           )}
-        </div>
+        </div>,
+        document.body,
       )}
     </div>
   );
