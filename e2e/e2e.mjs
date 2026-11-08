@@ -244,7 +244,7 @@ await page.click('form:has(#ar-n) button:has-text("שמירה")');
 await page.waitForSelector('td:has-text("בניין 12, בניין 13")');
 check('safety board: a responsibility area is added', true);
 await axe('safety board: management');
-await page.click('summary:has-text("ממונים ונושאים")').catch(() => undefined);
+await page.evaluate(() => document.querySelectorAll('details.card').forEach((d) => { d.open = true; }));
 await page.click('button:has-text("הוספת ממונה")');
 await page.fill('#of-n', 'ממונה לדוגמה'); await page.fill('#of-e', 'officer@example.org'); await page.fill('#of-p', '050-123-4567');
 await page.click('#of-t ~ .chips >> text=לייזרים');
