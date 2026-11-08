@@ -14,6 +14,9 @@ export function Login({ onDone }: { onDone: () => void }) {
   const [needMfa, setNeedMfa] = useState(false);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
+  // "stay signed in on this device": remembered in this browser; on by default so the panel does not sign people out while they work
+  const [remember, setRemember] = useState(() => { try { return localStorage.getItem('botwa_remember') !== '0'; } catch { return true; } });
+  const rememberChoice = (v: boolean) => { setRemember(v); try { localStorage.setItem('botwa_remember', v ? '1' : '0'); } catch { /* storage unavailable */ } };
   const passkeys = browserSupportsWebAuthn();
 
   async function submit(e: FormEvent) {
@@ -22,7 +25,7 @@ export function Login({ onDone }: { onDone: () => void }) {
     setBusy(true);
     setError('');
     try {
-      await api('POST', '/auth/login', { email, password, ...(needMfa && totp ? { totp } : {}) });
+      await api('POST', '/auth/login', { email, password, remember, ...(needMfa && totp ? { totp } : {}) });
       onDone();
     } catch (err) {
       const code = err instanceof ApiError ? err.code : 'generic';
@@ -40,7 +43,7 @@ export function Login({ onDone }: { onDone: () => void }) {
     try {
       const { challengeId, options } = await api<{ challengeId: string; options: Parameters<typeof startAuthentication>[0]['optionsJSON'] }>('POST', '/auth/passkeys/login/options');
       const response = await startAuthentication({ optionsJSON: options });
-      await api('POST', '/auth/passkeys/login/verify', { challengeId, response });
+      await api('POST', '/auth/passkeys/login/verify', { challengeId, response, remember });
       onDone();
     } catch (err) {
       // user cancelled the browser prompt => stay quiet; real failures get the generic message
@@ -78,6 +81,8 @@ export function Login({ onDone }: { onDone: () => void }) {
               <p id="totp-hint" className="hint">מתוך אפליקציית האימות שלכם.</p>
             </div>
           )}
+          <div className="field"><label><input type="checkbox" style={{ width: 'auto', minHeight: 'auto' }} checked={remember} onChange={(e) => rememberChoice(e.target.checked)} aria-describedby="rem-h" /> להישאר מחובר במכשיר הזה</label>
+            <p id="rem-h" className="hint">עד 30 יום, וממשיך כל עוד משתמשים במערכת. במחשב משותף כדאי לבטל.</p></div>
           <p role="alert" className="error">{error}</p>
           <button className={passkeys ? '' : 'primary'} style={{ width: '100%' }} type="submit" disabled={busy}>{busy ? t.loading : 'התחברות'}</button>
         </form>

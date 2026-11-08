@@ -106,9 +106,46 @@ export class ChannelManager {
     this.bus.emit('event', e);
   }
 
+  private statusSince = new Map<string, number>();
+  private revive = new Map<string, { at: number; tries: number }>();
+
+  /**
+   * Keeps linked channels connected without anybody pressing anything. A channel that was working once, is meant to run (not stopped by a
+   * person), and has dropped to "error" or "stopped" - or has been "connecting" for too long - is started again, with a growing wait between
+   * tries (30 s, 1 min, 2 min ... up to 15 min). It never touches: a channel a person stopped, one the platform logged out or restricted
+   * (those need a person), the official API (its state is the token), or a channel that was never linked.
+   */
+  async supervise(): Promise<number> {
+    let started = 0;
+    const { rows } = await this.db.query(
+      `SELECT c.id, c.type FROM channels c WHERE c.auto_start AND c.type IN ('whatsapp', 'telegram')
+          AND EXISTS (SELECT 1 FROM channel_events e WHERE e.channel_id = c.id AND e.kind = 'connected')`);
+    const now = Date.now();
+    for (const r of rows) {
+      const id = r.id as string;
+      const status = this.statuses.get(id);
+      if (status === 'connected') { this.revive.delete(id); continue; }
+      if (status && ['logged_out', 'restricted', 'password', 'qr'].includes(status)) continue;
+      const stuck = status === 'connecting' && now - (this.statusSince.get(id) ?? now) > 6 * 60_000;
+      if (!(status === undefined || status === 'error' || status === 'stopped' || stuck)) continue;
+      const st = this.revive.get(id) ?? { at: 0, tries: 0 };
+      const wait = this.cfg.NODE_ENV === 'test' ? 0 : Math.min(15 * 60_000, 30_000 * 2 ** st.tries);
+      if (now - st.at < wait) continue;
+      this.revive.set(id, { at: now, tries: st.tries + 1 });
+      try {
+        if (stuck) { const a = this.adapters.get(id); this.adapters.delete(id); await a?.stop().catch(() => undefined); }
+        await this.start(id);
+        await this.db.query('INSERT INTO channel_events (channel_id, kind) VALUES ($1,$2)', [id, 'auto_restart']).catch(() => undefined);
+        started++;
+      } catch { /* the next round tries again, later */ }
+    }
+    return started;
+  }
+
   private async setStatus(channelId: string, status: ChannelStatus) {
     const prev = this.statuses.get(channelId);
     this.statuses.set(channelId, status);
+    if (prev !== status) this.statusSince.set(channelId, Date.now());
     if (status !== 'qr') { this.lastQr.delete(channelId); this.lastCode.delete(channelId); }
     if (status === 'stopped' || status === 'logged_out' || status === 'error' || status === 'restricted') this.adapters.delete(channelId);
     // never auto-reconnect an account the platform has restricted: it must be reviewed by a person first

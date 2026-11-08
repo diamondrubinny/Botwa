@@ -21,7 +21,12 @@ const schema = z.object({
     .refine((v) => v.split(',').every((o) => z.string().url().safeParse(o.trim()).success), 'APP_ORIGIN must be one or more comma-separated URLs'),
   COOKIE_SECURE: bool('true'),
   TRUST_PROXY: bool('false'),
+  /** how long a sign-in survives without activity (it is renewed while the panel is in use) */
   SESSION_TTL_HOURS: z.coerce.number().int().min(1).max(168).default(12),
+  /** the same for "stay signed in on this device" */
+  SESSION_REMEMBER_DAYS: z.coerce.number().int().min(1).max(90).default(30),
+  /** nobody stays signed in longer than this from the moment they typed the password, however active */
+  SESSION_MAX_DAYS: z.coerce.number().int().min(1).max(365).default(90),
   /** Graph API version used by the official WhatsApp channel; check Meta's current supported versions. */
   WHATSAPP_GRAPH_VERSION: z.string().regex(/^v\d+\.\d+$/).default('v21.0'),
   // Telegram user-account login (QR). Get both from https://my.telegram.org -> API development tools.

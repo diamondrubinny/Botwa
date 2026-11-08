@@ -17,6 +17,7 @@ const app = await buildApp(cfg, db, mgr, media);
 await mgr.startAll();
 // Knowledge base: resume unfinished link imports, re-read links whose refresh time has come, drop old question logs.
 void mgr.kb?.resumePending().catch((err) => app.log.error({ err }, 'kb resume failed'));
+setInterval(() => void mgr.supervise().catch((err) => app.log.error({ err }, 'channel supervision failed')), 60_000).unref();
 setInterval(() => void mgr.catchUp().catch((err) => app.log.error({ err }, 'bot catch-up failed')), 60_000).unref();
 setInterval(() => void mgr.kb?.embedMissing().catch((err) => app.log.error({ err }, 'kb embed failed')), 600_000).unref();
 setInterval(() => void mgr.kb?.refreshDue().catch((err) => app.log.error({ err }, 'kb refresh failed')), 3600_000).unref();

@@ -114,7 +114,7 @@ export function passkeyRoutes(app: FastifyInstance, db: Db, cfg: Config) {
       await audit(db, { actorId: userId, action: 'login.fail', ip: req.ip, meta: { via: 'passkey', why } });
       return reply.code(401).send({ error: 'invalid_credentials' }); // same answer for every failure
     };
-    const body = z.object({ challengeId: z.string().uuid(), response: credentialSchema }).safeParse(req.body);
+    const body = z.object({ challengeId: z.string().uuid(), response: credentialSchema, remember: z.boolean().optional() }).safeParse(req.body);
     if (!body.success) return reply.code(400).send({ error: 'bad_request' });
     const ch = await takeChallenge(body.data.challengeId, 'login');
     if (!ch) return fail('challenge');
@@ -141,7 +141,7 @@ export function passkeyRoutes(app: FastifyInstance, db: Db, cfg: Config) {
     if (!v.verified) return fail('verification', pk.user_id);
     await db.query('UPDATE passkeys SET counter = $2, last_used_at = now(), backed_up = $3 WHERE id = $1', [pk.id, v.authenticationInfo.newCounter, v.authenticationInfo.credentialBackedUp]);
     await db.query('UPDATE users SET failed_logins = 0, locked_until = NULL WHERE id = $1', [pk.user_id]);
-    await startSession(db, cfg, req, reply, pk.user_id);
+    await startSession(db, cfg, req, reply, pk.user_id, !!body.data.remember);
     await audit(db, { actorId: pk.user_id, action: 'login.success', ip: req.ip, meta: { via: 'passkey' } });
     return { ok: true };
   });

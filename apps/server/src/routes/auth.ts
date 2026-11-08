@@ -15,6 +15,8 @@ const loginBody = z.object({
   email: z.string().email().max(254).transform((s) => s.toLowerCase()),
   password: z.string().min(1).max(256),
   totp: z.string().regex(/^\d{6}$/).optional(),
+  /** stay signed in on this device (longer, renewed while in use) */
+  remember: z.boolean().optional(),
 });
 
 export function authRoutes(app: FastifyInstance, db: Db, cfg: Config) {
@@ -61,7 +63,7 @@ export function authRoutes(app: FastifyInstance, db: Db, cfg: Config) {
     }
 
     await db.query('UPDATE users SET failed_logins = 0, locked_until = NULL WHERE id = $1', [u.id]);
-    await startSession(db, cfg, req, reply, u.id);
+    await startSession(db, cfg, req, reply, u.id, !!body.data.remember);
     await audit(db, { actorId: u.id, action: 'login.success', ip: req.ip });
     return { ok: true };
   });
