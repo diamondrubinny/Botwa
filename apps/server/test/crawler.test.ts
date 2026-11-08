@@ -164,6 +164,22 @@ describe('site crawl', () => {
     expect(urls).toEqual(['https://deep.example/s', 'https://deep.example/s/l1', 'https://deep.example/s/l2', 'https://deep.example/s/l3']);
   });
 
+  it('a ready-made site wrapped in one form still yields text, and a menu repeated on every page is not kept', async () => {
+    const menu = '<div class="mega"><p>' + 'תפריט האתר: אודות, צור קשר, מדורים מקצועיים, בטיחות חשמל, ארגונומיה, גיהות, תנאי שימוש. '.repeat(5) + '</p></div>';
+    const wrap = (title: string, body: string, links = '') => `<html><head><title>${title}</title></head><body><form id="form1" method="post">${menu}<div class="content"><h1>${title}</h1>${body}${links}</div></form></body></html>`;
+    const links = ['a', 'b', 'c', 'd'].map((x) => `<a href="/w/${x}">${x}</a>`).join('');
+    Object.assign(site, { 'https://asp.example/w': wrap('בית', long('עמוד הבית של האתר'), links) });
+    for (const x of ['a', 'b', 'c', 'd']) site[`https://asp.example/w/${x}`] = wrap(`נושא ${x}`, long(`תוכן ייחודי לדף ${x}`));
+    await call('POST', '/kb/sources/link', 'admin', { url: 'https://asp.example/w', crawlPages: 10 });
+    await mgr.kb!.idle();
+    const rows = (await db.query(`SELECT string_agg(c.body, ' ') AS t, s.url FROM kb_sources s LEFT JOIN kb_chunks c ON c.source_id = s.id WHERE s.url LIKE 'https://asp.example/w%' GROUP BY s.url ORDER BY s.url`)).rows;
+    expect(rows.map((r) => r.url)).toEqual(['https://asp.example/w', 'https://asp.example/w/a', 'https://asp.example/w/b', 'https://asp.example/w/c', 'https://asp.example/w/d']);
+    for (const r of rows) { expect(String(r.t).length).toBeGreaterThan(30); expect(r.t).not.toContain('תפריט האתר'); }
+    expect(rows[1].t).toContain('תוכן ייחודי לדף a');
+    const rep = (await db.query(`SELECT crawl_report AS rep FROM kb_sources WHERE url = 'https://asp.example/w'`)).rows[0].rep;
+    expect(rep.boilerplate).toBeGreaterThan(0);
+  });
+
   it('a content selector and removed parts decide what is indexed', async () => {
     site['https://docs.example/sel'] = '<html><head><title>עם בורר</title></head><body><div class="cookie-banner">אשרו עוגיות</div><div id="wrap"><div class="article">' + long('התוכן האמיתי של המאמר') + '</div><div class="promo">פרסומת מציקה</div></div></body></html>';
     const r = await call('POST', '/kb/sources/link', 'admin', { url: 'https://docs.example/sel', crawl: { selector: '.article', remove: ['.promo'] } });

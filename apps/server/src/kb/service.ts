@@ -189,7 +189,7 @@ export class KnowledgeBase {
   }
 
   private async readRobots(origin: string): Promise<Robots> {
-    try { return parseRobots((await this.fetcher(`${origin}/robots.txt`, { allow: /^text\//i, accept: 'text/plain', maxBytes: 200_000 })).body.toString('utf8')); } catch { return { allow: [], disallow: [], crawlDelay: null, sitemaps: [] }; }
+    try { const f = await this.fetcher(`${origin}/robots.txt`, { allow: /^text\//i, accept: 'text/plain', maxBytes: 200_000 }); if (!/^text\/plain/i.test(f.contentType)) throw new Error('not_robots'); return parseRobots(f.body.toString('utf8')); } catch { return { allow: [], disallow: [], crawlDelay: null, sitemaps: [] }; }
   }
   /** Addresses from the sitemaps the site declares (robots.txt) or the default /sitemap.xml: at most five files, one index level deep. */
   private async readSitemaps(origin: string, declared: string[]): Promise<string[]> {
@@ -212,7 +212,7 @@ export class KnowledgeBase {
     const start = normalizeUrl(startUrl) ?? startUrl;
     const origin = new URL(start).origin;
     const scope: Scope = { origin, prefix: cfg.stayInPath ? prefixOf(start) : null, include: cfg.include, exclude: cfg.exclude, files: cfg.files };
-    const rep: CrawlReport = { at: new Date().toISOString(), discovered: 0, indexed: 0, unchanged: 0, failed: 0, robots: 0, filtered: 0, duplicates: 0, thin: 0, gone: 0, limited: false, sitemap: 0 };
+    const rep: CrawlReport = { at: new Date().toISOString(), discovered: 0, indexed: 0, unchanged: 0, failed: 0, robots: 0, filtered: 0, duplicates: 0, thin: 0, gone: 0, limited: false, sitemap: 0, boilerplate: 0 };
     const robots = await this.readRobots(origin);
     const delay = this.cfg.NODE_ENV === 'test' ? 0 : Math.min(5000, Math.max(400, (robots.crawlDelay ?? 0) * 1000)); // be polite to the site
     const seen = new Set<string>([start]);
@@ -286,7 +286,27 @@ export class KnowledgeBase {
       const gone = await this.db.query(`UPDATE kb_sources SET enabled = false, status = 'error', error = 'gone' WHERE parent_id = $1 AND NOT (id = ANY($2::uuid[])) AND enabled RETURNING id`, [parentId, [...touched]]);
       rep.gone = gone.rowCount ?? 0;
     }
+    const shared = await this.pruneShared(parentId);
+    rep.boilerplate = shared.chunks; rep.thin += shared.pages;
     await this.db.query('UPDATE kb_sources SET crawl_report = $2 WHERE id = $1', [parentId, JSON.stringify(rep)]);
+  }
+
+  /**
+   * Text that repeats on many pages of one crawl (a menu or footer built from ordinary elements, which no tag rule can tell from content)
+   * would match every question and bury the real answers. Chunks whose text is identical on at least 30% of the pages (and 3+) are removed;
+   * pages left with nothing of their own are dropped.
+   */
+  private async pruneShared(parentId: string): Promise<{ chunks: number; pages: number }> {
+    const ids = (await this.db.query('SELECT id FROM kb_sources WHERE id = $1 OR parent_id = $1', [parentId])).rows.map((r) => r.id as string);
+    if (ids.length < 4) return { chunks: 0, pages: 0 };
+    const min = Math.max(3, Math.ceil(ids.length * 0.3));
+    const hashes = (await this.db.query(`SELECT md5(body) AS h FROM kb_chunks WHERE source_id = ANY($1::uuid[]) GROUP BY md5(body) HAVING count(DISTINCT source_id) >= $2`, [ids, min])).rows.map((r) => r.h as string);
+    if (!hashes.length) return { chunks: 0, pages: 0 };
+    const del = await this.db.query(`DELETE FROM kb_chunks WHERE source_id = ANY($1::uuid[]) AND md5(body) = ANY($2::text[]) RETURNING id`, [ids, hashes]);
+    await this.db.query('DELETE FROM kb_vectors WHERE chunk_id = ANY($1::bigint[])', [del.rows.map((r) => r.id)]);
+    const empty = await this.db.query(`DELETE FROM kb_sources s WHERE s.parent_id = $1 AND NOT EXISTS (SELECT 1 FROM kb_chunks c WHERE c.source_id = s.id) RETURNING id`, [parentId]);
+    this.vecs = null;
+    return { chunks: del.rowCount ?? 0, pages: empty.rowCount ?? 0 };
   }
 
   /**

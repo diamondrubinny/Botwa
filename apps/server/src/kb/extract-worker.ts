@@ -18,7 +18,9 @@ function htmlToText(html: string, opts: HtmlOpts = {}): { title: string | null; 
   // links the site asks robots not to follow are not followed
   const links = root.querySelectorAll('a[href]').filter((a) => !/nofollow/i.test(a.getAttribute('rel') ?? '')).map((a) => a.getAttribute('href') ?? '').filter(Boolean).slice(0, 1000);
   const title = root.querySelector('title')?.text.trim() || root.querySelector('h1')?.text.trim() || null;
-  root.querySelectorAll('script,style,noscript,nav,footer,header,aside,form,svg,iframe,template,button,select').forEach((n) => n.remove());
+  root.querySelectorAll('script,style,noscript,nav,footer,header,aside,svg,iframe,template,button,select,input,textarea').forEach((n) => n.remove());
+  // small forms (search, login, newsletter) are page furniture; but some sites (ASP.NET WebForms) wrap the whole page in one <form>, so a form with a lot of text is content
+  root.querySelectorAll('form').forEach((f) => { if (f.text.replace(/\s+/g, ' ').trim().length < 600) f.remove(); });
   for (const sel of opts.remove ?? []) { try { root.querySelectorAll(sel).forEach((n) => n.remove()); } catch { /* an invalid selector is ignored */ } }
   let chosen: import('node-html-parser').HTMLElement | null = null;
   if (opts.select) { try { chosen = root.querySelector(opts.select); } catch { chosen = null; } }

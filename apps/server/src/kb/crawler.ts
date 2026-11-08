@@ -26,7 +26,7 @@ export const MAX_CRAWL_PAGES = 300;
 
 export interface CrawlReport {
   at: string; discovered: number; indexed: number; unchanged: number; failed: number;
-  robots: number; filtered: number; duplicates: number; thin: number; gone: number; limited: boolean; sitemap: number;
+  robots: number; filtered: number; duplicates: number; thin: number; gone: number; limited: boolean; sitemap: number; boilerplate: number;
 }
 
 const TRACKING = /^(utm_[a-z]+|fbclid|gclid|msclkid|mc_cid|mc_eid|igshid|_ga|ref|source)$/i;
