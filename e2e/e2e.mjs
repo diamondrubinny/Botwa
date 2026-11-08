@@ -191,7 +191,8 @@ await page.waitForSelector('details.flow-form[open] fieldset');
 check('flow editor: a node opens from the keyboard', true);
 await axe('flow editor: node form');
 await page.selectOption('#fl-add', 'question'); await page.click('button:has-text("הוספה")');
-await page.waitForSelector('details.flow-form[open] select[id^="sv-"]');
+await page.waitForSelector('details.flow-form[open] input[id^="sv-"]');
+await page.click('#fn-a2 summary'); await page.fill('#tx-a2', 'אפשר ליצור איתנו קשר בטלפון 03-0000000.');
 await page.click('button:has-text("שמירה")');
 await page.waitForSelector('text=התרשים נשמר.');
 check('flow editor: saved', true);
@@ -205,6 +206,35 @@ await page.click('button:has-text("הפעלת התרשים כמצב הבוט")')
 await page.waitForSelector('text=הבוט עובד כעת לפי התרשים.');
 await page.click('button:has-text("חזרה לתפריט הממוספר")');
 await page.waitForSelector('text=הבוט עובד כעת לפי התפריט הממוספר.');
+
+// safety unit: the template, unfinished placeholders block activation, the simulator accepts a photo, areas and the board
+page.removeAllListeners('dialog'); page.once('dialog', (d) => d.accept());
+await page.click('button:has-text("יצירת תרשים בטיחות לפי האפיון")');
+await page.waitForSelector('[role="note"]:has-text("טרם הושלמו")');
+check('safety template: unfinished placeholders are listed', (await page.locator('[role="note"] li').count()) === 4);
+await page.click('button:has-text("שמירה")');
+await page.waitForSelector('text=התרשים נשמר.');
+check('safety template: activation is blocked while placeholders remain', await page.isDisabled('button:has-text("הפעלת התרשים כמצב הבוט")'));
+await axe('flow editor: safety template');
+await page.click('.chips >> text=בדיקה בשיחה');
+await page.fill('#sim-in', 'שלום'); await page.click('button:has-text("שליחה")');
+await page.waitForSelector('.sim-msg.bot:has-text("שם מלא")');
+await page.fill('#sim-in', 'דנה לוי'); await page.click('button:has-text("שליחה")');
+await page.waitForSelector('.sim-msg.bot:has-text("בניין")');
+check('safety template: identification starts in the simulator', true);
+await page.click('button:has-text("שליחת תמונה")');
+await axe('flow editor: simulator with identification');
+await page.click('aside.sidebar nav >> text=לוח בטיחות');
+await page.waitForSelector('h1:has-text("לוח בטיחות")');
+await axe('safety board');
+await page.evaluate(() => document.querySelectorAll('details.card').forEach((d) => { d.open = true; }));
+await page.waitForSelector('summary:has-text("אזורי אחריות")');
+await page.click('button:has-text("הוספת אזור")');
+await page.fill('#ar-n', 'מדעי החיים'); await page.fill('#ar-k', 'בניין 12\nבניין 13');
+await page.click('form:has(#ar-n) button:has-text("שמירה")');
+await page.waitForSelector('td:has-text("בניין 12, בניין 13")');
+check('safety board: a responsibility area is added', true);
+await axe('safety board: management');
 
 // website chat widget: configure, embed on a "customer site", chat both ways, blocked on an unlisted site
 await page.click('aside.sidebar nav >> text=ערוצים');

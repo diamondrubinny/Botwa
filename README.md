@@ -39,6 +39,7 @@ See [docs/DEPLOY.md](docs/DEPLOY.md) (Compose: Postgres + app + Caddy with autom
 - docs/WEBCHAT.he.md: website chat widget (embed code, security, identity)
 - docs/BOT_FLOW.he.md: bot flow chart
 - docs/KNOWLEDGE_BASE.he.md: knowledge base for the bot and agents
+- docs/SAFETY_UNIT.he.md: safety unit (SafetyBoard, xlsx import, WhatsApp flow template, responsibility areas)
 - docs/WHATSAPP_OFFICIAL.he.md: official WhatsApp channel (Cloud API) setup
 - docs/ROADMAP.he.md: researched feature proposals (not yet built)
 - [docs/DEPLOY.md](docs/DEPLOY.md) – install on Ubuntu (Compose + Caddy HTTPS), backup/restore
@@ -89,6 +90,7 @@ Agents see only conversations assigned to them or unassigned; supervisors/admins
 - Any signed-in staff: `GET /conversations/:id/kb-suggestions`, `POST /kb/feedback`.
 
 ## API (P24: flow chart, meaning search)
+- Safety unit (`safety.view`; import and keywords need `kb.manage`; areas need `bot.view`/`bot.manage`): `POST /kb/import/xlsx`, `GET /safety/categories`, `PUT /safety/categories/:id`, `POST /safety/categories/reapply`, `POST /safety/ask`, `GET /safety/category/:id/items`, `GET /safety/source/:id`, `GET /conversations/:id/safety-suggestions`, `GET/POST/PUT/DELETE /safety/areas`, `POST /flow/templates/safety`.
 - `GET/PUT /flow`, `GET /flow/refs`, `POST /flow/from-menu`, `POST /flow/simulate`, `PUT /flow/mode` (bot.view / bot.manage). `GET /kb/semantic` (status of the local model).
 
 ## API (P25: website chat)

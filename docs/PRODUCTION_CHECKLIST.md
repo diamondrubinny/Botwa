@@ -149,3 +149,10 @@ Lawyer (privacy, ToS risk, employee monitoring/notice) · Privacy officer (if re
 - [ ] Add every site (with and without www) to the chat's allowed sites in Botwa.
 - [ ] Docker image: the build copies `wordpress-plugin/` (the download endpoint needs it); the Docker build itself was not run here.
 - [ ] Privacy: the plugin's suggested privacy text and the consent mode need a legal review for each site.
+
+## Safety unit (P28)
+- [ ] Import both workbooks on the real server; confirm counts (regulations ~318, weekly 90) on the Safety page.
+- [ ] Fill the four `[להשלים` form links, pick officers in the handoff nodes, define responsibility areas.
+- [ ] Test the WhatsApp flow end to end from a real phone (not covered in this environment: Baileys and Cloud API were never run against real services).
+- [ ] Privacy: the identification step stores full name, faculty, PI name and status on the contact card. Add it to the privacy policy and set retention (legal review required).
+- [ ] Decide whether answers may ever be drafted by an external language model (currently retrieval only; nothing leaves the server).

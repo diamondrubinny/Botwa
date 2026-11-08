@@ -275,3 +275,4 @@ details.more[open] > summary::after { content: '▴'; }
 .sim-msg.user { align-self: flex-start; background: var(--accent-soft); }
 .sim-msg.bot { align-self: flex-end; }
 .sim-msg.sys { align-self: center; color: var(--muted); font-size: .88rem; background: transparent; border-style: dashed; }
+.linklike { background: none; border: 0; padding: 0; min-height: 44px; color: var(--accent); text-decoration: underline; cursor: pointer; font: inherit; }

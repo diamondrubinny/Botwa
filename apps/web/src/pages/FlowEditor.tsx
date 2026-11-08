@@ -4,25 +4,30 @@ import { errText } from '../strings';
 
 type Id = string | undefined;
 type Opt = { label: string; next?: string; examples: string[] };
-type Check = { kind: 'hours' } | { kind: 'variable'; name: 'name' | 'phone' | 'email' | 'text'; contains: string } | { kind: 'channel'; is: 'whatsapp' | 'whatsapp_cloud' | 'telegram' };
+type Check = { kind: 'hours' } | { kind: 'variable'; name: string; contains: string } | { kind: 'has'; name: string } | { kind: 'channel'; is: 'whatsapp' | 'whatsapp_cloud' | 'telegram' };
 type Node = { id: string; label?: string } & (
   | { type: 'message'; text: string; next?: Id }
-  | { type: 'menu'; text: string; options: Opt[]; kbOnFreeText: boolean }
-  | { type: 'question'; text: string; save: 'name' | 'phone' | 'email' | 'text'; retryText: string; next?: Id }
+  | { type: 'menu'; text: string; options: Opt[]; kbOnFreeText: boolean; save?: string }
+  | { type: 'question'; text: string; save: string; kind?: 'text' | 'name' | 'phone' | 'email'; optional?: boolean; retryText: string; next?: Id }
+  | { type: 'media'; text: string; save?: string; allowText: boolean; optional: boolean; retryText: string; next?: Id }
+  | { type: 'list'; text: string; save: string; max: number; moreText: string; optional: boolean; next?: Id }
+  | { type: 'remember'; vars: string[]; next?: Id }
   | { type: 'condition'; check: Check; yes?: Id; no?: Id }
   | { type: 'kb'; intro: string; found?: Id; notFound?: Id }
   | { type: 'referral'; text: string; contactName: string; phone: string; message: string; next?: Id }
   | { type: 'tag'; tagId: string; next?: Id }
-  | { type: 'handoff'; text: string; userId?: string }
+  | { type: 'handoff'; text: string; userId?: string; areaVars?: string[] }
   | { type: 'end'; text: string }
 );
-interface Flow { start: string; nodes: Node[] }
-interface FState { node: string | null; vars: Record<string, string>; invalid: number; done: boolean; endedAt?: number }
+interface Flow { start: string; nodes: Node[]; labels?: Record<string, string> }
+interface FState { node: string | null; vars: Record<string, string>; invalid: number; done: boolean; endedAt?: number; files?: number; list?: string[] }
 interface Refs { users: { id: string; name: string }[]; tags: { id: string; name: string }[] }
 
-const TYPE_LABEL: Record<Node['type'], string> = { message: 'הודעה', menu: 'תפריט', question: 'שאלה (איסוף פרט)', condition: 'תנאי', kb: 'מאגר ידע', referral: 'הפניה לווצאפ אישי', tag: 'הוספת תגית', handoff: 'העברה לנציג', end: 'סיום' };
-const TYPE_CLASS: Record<Node['type'], string> = { message: 'muted', menu: 'accent', question: 'accent', condition: 'warn', kb: 'ok', referral: 'ok', tag: 'muted', handoff: 'danger', end: 'muted' };
-const SAVE_LABEL = { name: 'שם', phone: 'טלפון', email: 'אימייל', text: 'טקסט חופשי' } as const;
+const TYPE_LABEL: Record<Node['type'], string> = { message: 'הודעה', menu: 'תפריט', question: 'שאלה (איסוף פרט)', media: 'קובץ, תמונה או טקסט', list: 'רשימה (הוסף עוד)', remember: 'שמירה בכרטיס איש הקשר', condition: 'תנאי', kb: 'מאגר ידע', referral: 'הפניה לווצאפ אישי', tag: 'הוספת תגית', handoff: 'העברה לנציג', end: 'סיום' };
+const TYPE_CLASS: Record<Node['type'], string> = { message: 'muted', menu: 'accent', question: 'accent', media: 'accent', list: 'accent', remember: 'muted', condition: 'warn', kb: 'ok', referral: 'ok', tag: 'muted', handoff: 'danger', end: 'muted' };
+const KIND_LABEL = { text: 'טקסט חופשי', name: 'שם (ישמש כשם איש הקשר)', phone: 'טלפון', email: 'אימייל' } as const;
+const VAR_RE = /^[a-z][a-zA-Z0-9_]{0,23}$/;
+const varsOf = (flow: Flow): string[] => [...new Set(flow.nodes.flatMap((n) => (n.type === 'question' || n.type === 'list' || n.type === 'menu' && n.save || n.type === 'media' && n.save ? [(n as { save?: string }).save!] : [])).filter(Boolean))];
 
 function edges(n: Node): { to: string; label: string }[] {
   const out: { to: string; label: string }[] = [];
@@ -36,18 +41,21 @@ function edges(n: Node): { to: string; label: string }[] {
   }
   return out;
 }
-const summary = (n: Node) => ('text' in n && n.text ? n.text : n.type === 'condition' ? (n.check.kind === 'hours' ? 'בשעות הפעילות?' : n.check.kind === 'channel' ? `ערוץ ${n.check.is}` : `${SAVE_LABEL[n.check.name]} מכיל "${n.check.contains}"`) : n.type === 'kb' ? 'מענה ממאגר הידע' : n.type === 'tag' ? 'הוספת תגית' : '');
+const summary = (n: Node) => ('text' in n && n.text ? n.text : n.type === 'condition' ? (n.check.kind === 'hours' ? 'בשעות הפעילות?' : n.check.kind === 'channel' ? `ערוץ ${n.check.is}` : n.check.kind === 'has' ? `${n.check.name} נאסף?` : `${n.check.name} מכיל "${n.check.contains}"`) : n.type === 'kb' ? 'מענה ממאגר הידע' : n.type === 'tag' ? 'הוספת תגית' : n.type === 'remember' ? `שמירת ${n.vars.join(', ')}` : '');
 const nodeName = (n: Node) => n.label || `${TYPE_LABEL[n.type]}: ${summary(n).slice(0, 24)}`;
 
 function blank(type: Node['type'], id: string): Node {
   switch (type) {
     case 'message': return { id, type, text: 'טקסט ההודעה' };
     case 'menu': return { id, type, text: 'במה אפשר לעזור?', options: [{ label: 'אפשרות 1', examples: [] }], kbOnFreeText: true };
-    case 'question': return { id, type, text: 'מה שמך?', save: 'name', retryText: 'לא הצלחתי להבין, אפשר לנסות שוב?' };
+    case 'question': return { id, type, text: 'מה שמך?', save: 'name', kind: 'name', optional: false, retryText: 'לא הצלחתי להבין, אפשר לנסות שוב?' };
     case 'condition': return { id, type, check: { kind: 'hours' } };
     case 'kb': return { id, type, intro: '' };
     case 'referral': return { id, type, text: 'לשאלות בנושא פנו אל:', contactName: '', phone: '', message: '' };
     case 'tag': return { id, type, tagId: '' };
+    case 'media': return { id, type, text: 'שלחו תמונה או תארו בכתב:', allowText: true, optional: true, retryText: 'אפשר לשלוח כאן תמונה, קובץ או הסבר בכתב.' };
+    case 'list': return { id, type, text: 'מה להוסיף לרשימה?', save: 'items', max: 10, moreText: 'להוסיף עוד?', optional: false };
+    case 'remember': return { id, type, vars: ['fullName'] };
     case 'handoff': return { id, type, text: '' };
     default: return { id, type: 'end', text: 'תודה ולהתראות!' };
   }
@@ -84,6 +92,7 @@ export function FlowEditor({ me }: { me: Me }) {
   const [mode, setMode] = useState<'menu' | 'flow'>('menu');
   const [refs, setRefs] = useState<Refs>({ users: [], tags: [] });
   const [problems, setProblems] = useState<string[]>([]);
+  const [unfin, setUnfin] = useState<string[]>([]);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [open, setOpen] = useState<string | null>(null);
   const [tab, setTab] = useState<'edit' | 'test'>('edit');
@@ -92,8 +101,8 @@ export function FlowEditor({ me }: { me: Me }) {
 
   useEffect(() => {
     void (async () => {
-      const d = await api<{ mode: 'menu' | 'flow'; flow: Flow | null; problems: string[] }>('GET', '/flow').catch(() => null);
-      if (d) { setMode(d.mode); setFlow(d.flow); setSaved(JSON.stringify(d.flow)); setProblems(d.problems); }
+      const d = await api<{ mode: 'menu' | 'flow'; flow: Flow | null; problems: string[]; unfinished?: string[] }>('GET', '/flow').catch(() => null);
+      if (d) { setMode(d.mode); setFlow(d.flow); setSaved(JSON.stringify(d.flow)); setProblems(d.problems); setUnfin(d.unfinished ?? []); }
       setRefs(await api<Refs>('GET', '/flow/refs').catch(() => ({ users: [], tags: [] })));
       loaded.current = true;
     })();
@@ -106,13 +115,24 @@ export function FlowEditor({ me }: { me: Me }) {
 
   async function save() {
     setMsg(null);
-    try { await api('PUT', '/flow', { flow }); setSaved(JSON.stringify(flow)); setProblems([]); setMsg({ ok: true, text: 'התרשים נשמר.' }); } catch (e) { fail(e); }
+    try { await api('PUT', '/flow', { flow }); setSaved(JSON.stringify(flow)); setProblems([]); setUnfin(flow ? flow.nodes.filter((n) => JSON.stringify(n).includes('[להשלים')).map((n) => n.id) : []); setMsg({ ok: true, text: 'התרשים נשמר.' }); } catch (e) { fail(e); }
   }
   async function fromMenu() {
     if (flow && !confirm('להחליף את התרשים הנוכחי בתרשים שנוצר מהתפריט הקיים?')) return;
     const d = await api<{ flow: Flow }>('POST', '/flow/from-menu').catch(() => null);
     if (d) { setFlow(d.flow); setOpen(null); setMsg({ ok: true, text: 'נוצר תרשים מהתפריט. בדקו ושמרו.' }); }
   }
+  async function safetyTemplate() {
+    if (flow && !confirm('להחליף את התרשים הנוכחי בתבנית יחידת הבטיחות? (לא נשמר עד שתלחצו על שמירה)')) return;
+    setMsg(null);
+    try {
+      const d = await api<{ flow: Flow }>('POST', '/flow/templates/safety');
+      setFlow(d.flow); setOpen(null);
+      setMsg({ ok: true, text: 'נוצרה תבנית יחידת הבטיחות. השלימו את הטקסטים המסומנים "[להשלים" ושמרו.' });
+      refreshRefs();
+    } catch (e) { fail(e); }
+  }
+  const refreshRefs = () => { void api<Refs>('GET', '/flow/refs').then(setRefs).catch(() => undefined); };
   async function setBotMode(m: 'menu' | 'flow') {
     setMsg(null);
     try { await api('PUT', '/flow/mode', { mode: m }); setMode(m); setMsg({ ok: true, text: m === 'flow' ? 'הבוט עובד כעת לפי התרשים.' : 'הבוט עובד כעת לפי התפריט הממוספר.' }); } catch (e) { fail(e); }
@@ -150,7 +170,7 @@ export function FlowEditor({ me }: { me: Me }) {
       <div className="card">
         <div className="row">
           <strong>מצב הבוט כעת: {mode === 'flow' ? 'תרשים זרימה' : 'תפריט ממוספר'}</strong>
-          {canEdit && mode !== 'flow' && <button className="primary" disabled={!flow || dirty || problems.length > 0} onClick={() => setBotMode('flow')}>הפעלת התרשים כמצב הבוט</button>}
+          {canEdit && mode !== 'flow' && <button className="primary" disabled={!flow || dirty || problems.length > 0 || unfin.length > 0} onClick={() => setBotMode('flow')}>הפעלת התרשים כמצב הבוט</button>}
           {canEdit && mode === 'flow' && <button onClick={() => setBotMode('menu')}>חזרה לתפריט הממוספר</button>}
         </div>
         <p className="hint">הבוט עצמו מופעל ב<a href="#/bot">עמוד הבוט</a>. כדי להפעיל את התרשים יש לשמור אותו קודם ושיהיה תקין.</p>
@@ -160,6 +180,12 @@ export function FlowEditor({ me }: { me: Me }) {
         <button className="chip" aria-pressed={tab === 'test'} onClick={() => setTab('test')}>בדיקה בשיחה</button>
       </div>
       <p role="status" className={msg?.ok ? 'ok' : 'error'}>{msg?.text}</p>
+      {flow && flow.nodes.some((n) => JSON.stringify(n).includes('[להשלים')) && (
+        <div className="card" role="note"><strong>יש טקסטים שטרם הושלמו</strong>
+          <p className="hint">בצמתים הבאים מופיע "[להשלים" (למשל כתובת טופס). אי אפשר להפעיל את התרשים כמצב הבוט עד שישלימו אותם ויישמרו:</p>
+          <ul>{flow.nodes.filter((n) => JSON.stringify(n).includes('[להשלים')).map((n) => <li key={n.id}><button type="button" className="linklike" onClick={() => { setTab('edit'); setOpen(n.id); setTimeout(() => document.getElementById(`fn-${n.id}`)?.scrollIntoView({ block: 'nearest' }), 0); }}>{nodeName(n)}</button></li>)}</ul>
+        </div>
+      )}
       {problems.length > 0 && <ul className="error" aria-label="בעיות בתרשים">{problems.map((p) => <li key={p}>{problemText(p)}</li>)}</ul>}
 
       {tab === 'test' && <Simulator flow={flow} />}
@@ -171,6 +197,7 @@ export function FlowEditor({ me }: { me: Me }) {
               <button className="primary" onClick={save} disabled={!flow || !dirty}>שמירה</button>
               <button onClick={() => { setFlow(saved ? (JSON.parse(saved) as Flow) : null); setMsg(null); }} disabled={!dirty}>ביטול שינויים</button>
               <button onClick={fromMenu}>יצירה מהתפריט הממוספר הקיים</button>
+              <button onClick={safetyTemplate}>יצירת תרשים בטיחות לפי האפיון</button>
               {dirty && <span className="hint">יש שינויים שלא נשמרו.</span>}
             </div>
           )}
@@ -246,7 +273,19 @@ export function FlowEditor({ me }: { me: Me }) {
 
 function problemText(p: string): string {
   const [code, rest] = p.split(':');
-  return ({ missing_start: 'צומת ההתחלה לא קיים.', duplicate_id: `מזהה כפול: ${rest}`, missing_target: `צומת מצביע על צומת שנמחק (${rest}).`, loop: 'יש מעגל של צמתים שלא ממתינים ללקוח (הוסיפו תפריט או שאלה בתוכו).' } as Record<string, string>)[code!] ?? p;
+  return ({ missing_start: 'צומת ההתחלה לא קיים.', unfinished_flow: 'יש טקסטים שטרם הושלמו.', duplicate_id: `מזהה כפול: ${rest}`, missing_target: `צומת מצביע על צומת שנמחק (${rest}).`, loop: 'יש מעגל של צמתים שלא ממתינים ללקוח (הוסיפו תפריט או שאלה בתוכו).' } as Record<string, string>)[code!] ?? p;
+}
+
+function VarInput({ id, label, value, onChange, flow, optional }: { id: string; label: string; value: string; onChange: (v: string) => void; flow: Flow; optional?: boolean }) {
+  const list = `${id}-dl`;
+  const bad = value !== '' && !VAR_RE.test(value);
+  return (
+    <div className="field"><label htmlFor={id}>{label}</label>
+      <input id={id} dir="ltr" list={list} maxLength={24} required={!optional} aria-invalid={bad} value={value} onChange={(e) => onChange(e.target.value)} />
+      <datalist id={list}>{varsOf(flow).map((v) => <option key={v} value={v} />)}</datalist>
+      {bad && <p className="error">אותיות לועזיות ומספרים בלבד, מתחיל באות קטנה.</p>}
+    </div>
+  );
 }
 
 function TargetSelect({ id, label, value, flow, onChange, disabled }: { id: string; label: string; value: Id; flow: Flow; onChange: (v: Id) => void; disabled?: boolean }) {
@@ -282,31 +321,59 @@ function NodeForm({ n, flow, refs, canEdit, upd, del, makeStart }: { n: Node; fl
               <button type="button" className="danger" disabled={n.options.length <= 1} onClick={() => set({ options: n.options.filter((_, k) => k !== i) })}>הסרת אפשרות {i + 1}</button>
             </div>
           ))}
-          {n.options.length < 9 && <button type="button" onClick={() => set({ options: [...n.options, { label: '', examples: [] }] })}>הוספת אפשרות</button>}
+          {n.options.length < 20 && <button type="button" onClick={() => set({ options: [...n.options, { label: '', examples: [] }] })}>הוספת אפשרות</button>}
+          <div className="field"><label htmlFor={f('ms')}>לשמור את האפשרות שנבחרה בפרט בשם (אופציונלי, אותיות לועזיות)</label><input id={f('ms')} dir="ltr" maxLength={24} value={n.save ?? ''} onChange={(e) => set({ save: e.target.value && VAR_RE.test(e.target.value) ? e.target.value : e.target.value ? n.save : undefined })} placeholder="status" /></div>
           <div className="field"><label><input type="checkbox" style={{ width: 'auto', minHeight: 'auto' }} checked={n.kbOnFreeText} onChange={(e) => set({ kbOnFreeText: e.target.checked })} /> אם הלקוח כותב שאלה במקום לבחור, לנסות לענות ממאגר הידע</label></div>
         </>
       )}
       {n.type === 'question' && (
         <>
-          <div className="field"><label htmlFor={f('sv')}>איזה פרט לשמור</label>
-            <select id={f('sv')} value={n.save} onChange={(e) => set({ save: e.target.value })}>{(Object.keys(SAVE_LABEL) as (keyof typeof SAVE_LABEL)[]).map((k) => <option key={k} value={k}>{SAVE_LABEL[k]}</option>)}</select>
+          <VarInput id={f('sv')} label="שם הפרט שנאסף (אותיות לועזיות, למשל fullName)" value={n.save} onChange={(v) => set({ save: v })} flow={flow} />
+          <div className="field"><label htmlFor={f('kd')}>סוג הפרט (לבדיקה)</label>
+            <select id={f('kd')} value={n.kind ?? (['name', 'phone', 'email'].includes(n.save) ? n.save : 'text')} onChange={(e) => set({ kind: e.target.value })}>{(Object.keys(KIND_LABEL) as (keyof typeof KIND_LABEL)[]).map((k) => <option key={k} value={k}>{KIND_LABEL[k]}</option>)}</select>
             <p className="hint">הפרט נבדק (אימייל/טלפון), נשמר כהערה פנימית בשיחה, ושם שנאסף משמש כשם איש הקשר.</p></div>
+          <div className="field"><label><input type="checkbox" style={{ width: 'auto', minHeight: 'auto' }} checked={!!n.optional} onChange={(e) => set({ optional: e.target.checked })} /> אפשר לדלג (הלקוח כותב "דלג")</label></div>
           <div className="field"><label htmlFor={f('rt')}>הודעה כשהתשובה לא תקינה</label><input id={f('rt')} maxLength={300} value={n.retryText} onChange={(e) => set({ retryText: e.target.value })} /></div>
         </>
+      )}
+      {n.type === 'media' && (
+        <>
+          <VarInput id={f('sv')} label="שם הפרט לטקסט שיוצג בסיכום (אופציונלי)" value={n.save ?? ''} onChange={(v) => set({ save: v || undefined })} flow={flow} optional />
+          <div className="field"><label><input type="checkbox" style={{ width: 'auto', minHeight: 'auto' }} checked={n.allowText} onChange={(e) => set({ allowText: e.target.checked })} /> מספיק גם תיאור בכתב (בלי קובץ)</label></div>
+          <div className="field"><label><input type="checkbox" style={{ width: 'auto', minHeight: 'auto' }} checked={n.optional} onChange={(e) => set({ optional: e.target.checked })} /> אפשר לדלג</label></div>
+          <div className="field"><label htmlFor={f('rt')}>הודעה כשלא התקבל קובץ או טקסט</label><input id={f('rt')} maxLength={300} value={n.retryText} onChange={(e) => set({ retryText: e.target.value })} /></div>
+          <p className="hint">קבצים עוברים סריקת וירוסים והסגר כמו בכל שיחה. מספר הקבצים נרשם בהערת הסיכום.</p>
+        </>
+      )}
+      {n.type === 'list' && (
+        <>
+          <VarInput id={f('sv')} label="שם הפרט שנאסף (אותיות לועזיות, למשל chemicals)" value={n.save} onChange={(v) => set({ save: v })} flow={flow} />
+          <div className="row">
+            <div className="field"><label htmlFor={f('mx')}>מקסימום פריטים</label><input id={f('mx')} type="number" min={2} max={20} value={n.max} onChange={(e) => set({ max: Math.min(20, Math.max(2, Number(e.target.value) || 2)) })} /></div>
+            <div className="field"><label htmlFor={f('mt')}>השאלה אחרי כל פריט</label><input id={f('mt')} maxLength={200} value={n.moreText} onChange={(e) => set({ moreText: e.target.value })} /></div>
+          </div>
+          <div className="field"><label><input type="checkbox" style={{ width: 'auto', minHeight: 'auto' }} checked={n.optional} onChange={(e) => set({ optional: e.target.checked })} /> אפשר לדלג על הרשימה</label></div>
+        </>
+      )}
+      {n.type === 'remember' && (
+        <div className="field"><label htmlFor={f('rv')}>פרטים לשמירה בכרטיס איש הקשר (מופרדים בפסיק)</label>
+          <input id={f('rv')} dir="ltr" value={n.vars.join(', ')} onChange={(e) => set({ vars: e.target.value.split(',').map((x) => x.trim()).filter((x) => VAR_RE.test(x)).slice(0, 12) })} />
+          <p className="hint">בפנייה הבאה של אותו אדם, שאלות עם אותו שם לא יישאלו שוב (בתנאי שיש תנאי "פרט נאסף" בתחילת התרשים). פרטים אישיים: יש לציין זאת במדיניות הפרטיות.</p></div>
       )}
       {n.type === 'condition' && (
         <>
           <div className="field"><label htmlFor={f('ck')}>התנאי</label>
-            <select id={f('ck')} value={n.check.kind} onChange={(e) => set({ check: e.target.value === 'hours' ? { kind: 'hours' } : e.target.value === 'channel' ? { kind: 'channel', is: 'whatsapp' } : { kind: 'variable', name: 'text', contains: '' } })}>
-              <option value="hours">עכשיו בשעות הפעילות</option><option value="channel">הלקוח פנה דרך ערוץ מסוים</option><option value="variable">פרט שנאסף מכיל טקסט</option>
+            <select id={f('ck')} value={n.check.kind} onChange={(e) => set({ check: e.target.value === 'hours' ? { kind: 'hours' } : e.target.value === 'channel' ? { kind: 'channel', is: 'whatsapp' } : e.target.value === 'has' ? { kind: 'has', name: varsOf(flow)[0] ?? 'fullName' } : { kind: 'variable', name: varsOf(flow)[0] ?? 'text', contains: '' } })}>
+              <option value="hours">עכשיו בשעות הפעילות</option><option value="channel">הלקוח פנה דרך ערוץ מסוים</option><option value="variable">פרט שנאסף מכיל טקסט</option><option value="has">פרט כבר נאסף (למשל מפנייה קודמת)</option>
             </select></div>
           {n.check.kind === 'channel' && <div className="field"><label htmlFor={f('ch')}>ערוץ</label><select id={f('ch')} value={n.check.is} onChange={(e) => set({ check: { kind: 'channel', is: e.target.value } })}><option value="whatsapp">ווצאפ (QR)</option><option value="whatsapp_cloud">ווצאפ רשמי</option><option value="telegram">טלגרם</option></select></div>}
           {n.check.kind === 'variable' && (
             <div className="row">
-              <div className="field"><label htmlFor={f('vn')}>הפרט</label><select id={f('vn')} value={n.check.name} onChange={(e) => set({ check: { ...(n.check as Extract<Check, { kind: 'variable' }>), name: e.target.value } })}>{(Object.keys(SAVE_LABEL) as (keyof typeof SAVE_LABEL)[]).map((k) => <option key={k} value={k}>{SAVE_LABEL[k]}</option>)}</select></div>
+              <VarInput id={f('vn')} label="הפרט" value={n.check.name} onChange={(v) => set({ check: { ...(n.check as Extract<Check, { kind: 'variable' }>), name: v } })} flow={flow} />
               <div className="field"><label htmlFor={f('vc')}>מכיל</label><input id={f('vc')} maxLength={60} value={n.check.contains} onChange={(e) => set({ check: { ...(n.check as Extract<Check, { kind: 'variable' }>), contains: e.target.value } })} /></div>
             </div>
           )}
+          {n.check.kind === 'has' && <VarInput id={f('hn')} label="הפרט" value={n.check.name} onChange={(v) => set({ check: { kind: 'has', name: v } })} flow={flow} />}
           <TargetSelect id={f('yes')} label="אם כן, ממשיך אל" value={n.yes} flow={flow} onChange={(v) => set({ yes: v })} />
           <TargetSelect id={f('no')} label="אם לא, ממשיך אל" value={n.no} flow={flow} onChange={(v) => set({ no: v })} />
         </>
@@ -328,6 +395,11 @@ function NodeForm({ n, flow, refs, canEdit, upd, del, makeStart }: { n: Node; fl
         </>
       )}
       {n.type === 'tag' && <div className="field"><label htmlFor={f('tg')}>תגית</label><select id={f('tg')} value={n.tagId} onChange={(e) => set({ tagId: e.target.value })}><option value="">בחרו תגית</option>{refs.tags.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}</select></div>}
+      {n.type === 'handoff' && (
+        <div className="field"><label htmlFor={f('av')}>העברה לפי אזור אחריות, מתוך הפרטים (מופרדים בפסיק, אופציונלי)</label>
+          <input id={f('av')} dir="ltr" value={(n.areaVars ?? []).join(', ')} onChange={(e) => { const v = e.target.value.split(',').map((x) => x.trim()).filter((x) => VAR_RE.test(x)).slice(0, 4); set({ areaVars: v.length ? v : undefined }); }} placeholder="where, building" />
+          <p className="hint">אם אחד הפרטים מכיל שם בניין או מקום שמוגדר ב<a href="#/safety">אזורי האחריות</a>, השיחה תועבר לאחראי עליו. אחרת לנציג שנבחר למטה.</p></div>
+      )}
       {n.type === 'handoff' && <div className="field"><label htmlFor={f('us')}>נציג אחראי</label><select id={f('us')} value={n.userId ?? ''} onChange={(e) => set({ userId: e.target.value || undefined })}><option value="">לפי הקצאה רגילה</option>{refs.users.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}</select></div>}
       {'next' in n && n.type !== 'tag' ? <TargetSelect id={f('nx')} label="ממשיך אל" value={n.next} flow={flow} onChange={(v) => set({ next: v })} /> : null}
       {n.type === 'tag' && <TargetSelect id={f('nx')} label="ממשיך אל" value={n.next} flow={flow} onChange={(v) => set({ next: v })} />}
@@ -352,13 +424,13 @@ function Simulator({ flow }: { flow: Flow | null }) {
   const end = useRef<HTMLDivElement>(null);
   useEffect(() => { end.current?.scrollIntoView({ block: 'nearest' }); }, [log]);
 
-  async function send(t: string | null) {
+  async function send(t: string | null, media = false) {
     setErr('');
     try {
-      const r = await api<{ replies: string[]; state: FState; effects: { kind: string; [k: string]: unknown }[] }>('POST', '/flow/simulate', { flow: flow ?? undefined, state, text: t, open: openNow, channel });
+      const r = await api<{ replies: string[]; state: FState; effects: { kind: string; [k: string]: unknown }[] }>('POST', '/flow/simulate', { flow: flow ?? undefined, state, text: t, media: media || undefined, open: openNow, channel });
       setState(r.state);
-      setLog((l) => [...l, ...(t !== null ? [{ who: 'user' as const, text: t }] : []), ...r.replies.map((x) => ({ who: 'bot' as const, text: x })),
-        ...r.effects.map((e) => ({ who: 'sys' as const, text: e.kind === 'handoff' ? `⇢ העברה לנציג${e.userId ? ' (נציג מסוים)' : ''}` : e.kind === 'tag' ? '⇢ נוספה תגית' : e.kind === 'note' ? `⇢ הערה פנימית: ${String(e.text)}` : e.kind === 'name' ? `⇢ שם איש הקשר: ${String(e.value)}` : '' }))]);
+      setLog((l) => [...l, ...(t !== null || media ? [{ who: 'user' as const, text: media ? `📷 תמונה${t ? `: ${t}` : ''}` : t! }] : []), ...r.replies.map((x) => ({ who: 'bot' as const, text: x })),
+        ...r.effects.map((e) => ({ who: 'sys' as const, text: e.kind === 'handoff' ? `⇢ העברה לנציג${e.userId ? ' (נציג מסוים)' : ''}` : e.kind === 'tag' ? '⇢ נוספה תגית' : e.kind === 'note' ? `⇢ הערה פנימית: ${String(e.text)}` : e.kind === 'name' ? `⇢ שם איש הקשר: ${String(e.value)}` : e.kind === 'profile' ? '⇢ הפרטים נשמרו בכרטיס איש הקשר' : '' }))]);
     } catch (e) { setErr(errText(e instanceof ApiError ? e.code : 'generic')); }
   }
   return (
@@ -371,18 +443,19 @@ function Simulator({ flow }: { flow: Flow | null }) {
         <select id="sim-ch" value={channel} onChange={(e) => setChannel(e.target.value as 'whatsapp')} style={{ maxWidth: 200 }}><option value="whatsapp">ווצאפ</option><option value="whatsapp_cloud">ווצאפ רשמי</option><option value="telegram">טלגרם</option></select>
         <button onClick={() => { setLog([]); setState(null); }}>התחלה מחדש</button>
       </div>
-      <div className="sim-log" role="log" aria-live="polite" aria-label="שיחת הבדיקה">
+      <div className="sim-log" tabIndex={0} role="log" aria-live="polite" aria-label="שיחת הבדיקה">
         {log.length === 0 && <p className="hint">כתבו הודעה ראשונה כמו לקוח.</p>}
         {log.filter((m) => m.text).map((m, i) => <div key={i} className={`sim-msg ${m.who}`}><span className="sr-only">{m.who === 'user' ? 'לקוח: ' : m.who === 'bot' ? 'בוט: ' : 'מערכת: '}</span><span style={{ whiteSpace: 'pre-wrap' }}>{m.text}</span></div>)}
         <div ref={end} />
       </div>
-      <form className="row" onSubmit={(e) => { e.preventDefault(); const t = text; setText(''); void send(t); }}>
+      <form className="row" onSubmit={(e) => { e.preventDefault(); const t = text.trim(); if (!t) return; setText(''); void send(t); }}>
         <label htmlFor="sim-in" className="sr-only">הודעת לקוח</label>
-        <input id="sim-in" required maxLength={500} value={text} onChange={(e) => setText(e.target.value)} placeholder="הודעת לקוח…" style={{ flex: 1, minWidth: 160 }} />
+        <input id="sim-in" maxLength={500} value={text} onChange={(e) => setText(e.target.value)} placeholder="הודעת לקוח…" style={{ flex: 1, minWidth: 160 }} />
         <button className="primary" type="submit" disabled={!flow}>שליחה</button>
+        <button type="button" disabled={!flow} onClick={() => { const t = text; setText(''); void send(t || null, true); }}>שליחת תמונה (דמה)</button>
       </form>
       <p role="alert" className="error">{err}</p>
-      {state && <p className="hint">מצב: {state.done ? 'הסתיים' : state.node ? `ממתין בצומת ${state.node}` : '—'}{Object.keys(state.vars).length ? ` · נאסף: ${Object.entries(state.vars).map(([k, v]) => `${SAVE_LABEL[k as keyof typeof SAVE_LABEL]}=${v}`).join(', ')}` : ''}</p>}
+      {state && <p className="hint">מצב: {state.done ? 'הסתיים' : state.node ? `ממתין בצומת ${state.node}` : '—'}{Object.keys(state.vars).length ? ` · נאסף: ${Object.entries(state.vars).map(([k, v]) => `${flow?.labels?.[k] ?? k}=${v}`).join(', ')}` : ''}</p>}
     </section>
   );
 }

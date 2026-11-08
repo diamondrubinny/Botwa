@@ -120,6 +120,7 @@ export function Safety({ me }: { me: Me }) {
       )}
 
       {manage && <Manage cats={cats} onChanged={loadCats} stats={stats} />}
+      {can(me, 'bot.view') && <Areas canEdit={can(me, 'bot.manage')} />}
     </>
   );
 }
@@ -177,6 +178,59 @@ function Manage({ cats, onChanged, stats }: { cats: Cat[]; onChanged: () => Prom
           <button type="button" onClick={async () => { setMsg(null); try { const r = await api<{ sources: number; categorized: number }>('POST', '/safety/categories/reapply'); setMsg({ ok: true, text: `עודכן: ${r.categorized} מתוך ${r.sources} רשומות שויכו לנושא.` }); await onChanged(); } catch (er) { setMsg({ ok: false, text: errText(er instanceof ApiError ? er.code : 'generic') }); } }}>החלה מחדש על כל הרשומות</button>
         </div>
       </section>
+    </details>
+  );
+}
+
+interface Area { id: string; name: string; keywords: string[]; userId: string; userName: string; userActive: boolean }
+
+function Areas({ canEdit }: { canEdit: boolean }) {
+  const [areas, setAreas] = useState<Area[]>([]);
+  const [users, setUsers] = useState<{ id: string; name: string }[]>([]);
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const [editId, setEditId] = useState<string | null>(null); // '' = new
+  const [name, setName] = useState('');
+  const [kw, setKw] = useState('');
+  const [userId, setUserId] = useState('');
+  const load = async () => {
+    setAreas(await api<Area[]>('GET', '/safety/areas').catch(() => []));
+    setUsers((await api<{ users: { id: string; name: string }[] }>('GET', '/flow/refs').catch(() => ({ users: [] }))).users);
+  };
+  useEffect(() => { void load(); }, []);
+  const start = (a?: Area) => { setEditId(a?.id ?? ''); setName(a?.name ?? ''); setKw(a?.keywords.join('\n') ?? ''); setUserId(a?.userId ?? users[0]?.id ?? ''); setMsg(null); };
+  async function submit(e: FormEvent) {
+    e.preventDefault(); setMsg(null);
+    const body = { name: name.trim(), keywords: kw.split(/[\n,]/).map((x) => x.trim()).filter(Boolean), userId };
+    try {
+      if (editId) await api('PUT', `/safety/areas/${editId}`, body); else await api('POST', '/safety/areas', body);
+      setEditId(null); setMsg({ ok: true, text: 'נשמר.' }); await load();
+    } catch (er) { setMsg({ ok: false, text: errText(er instanceof ApiError ? er.code : 'generic') }); }
+  }
+  return (
+    <details className="card" style={{ marginTop: '1rem' }}>
+      <summary><strong>אזורי אחריות</strong> (איזה ממונה מטפל באיזה בניין או מקום)</summary>
+      <p className="hint">בתרשים הבוט, פנייה עם מיקום (בניין, מעבדה, חדר) מועברת לממונה שאחראי על המקום. ההתאמה לפי מילים שלמות, בסדר הרשימה: הראשון שמתאים קובע. בלי התאמה, הפנייה עוברת לנציג ברירת המחדל של אותו צומת.</p>
+      {areas.length === 0 ? <p className="empty">עוד לא הוגדרו אזורים.</p> : (
+        <table>
+          <caption className="sr-only">אזורי אחריות</caption>
+          <thead><tr><th scope="col">אזור</th><th scope="col">מילות זיהוי</th><th scope="col">ממונה</th>{canEdit && <th scope="col">פעולות</th>}</tr></thead>
+          <tbody>{areas.map((a) => (
+            <tr key={a.id}><th scope="row">{a.name}</th><td>{a.keywords.join(', ')}</td><td>{a.userName}{!a.userActive && ' (לא פעיל)'}</td>
+              {canEdit && <td><button type="button" onClick={() => start(a)}>עריכה<span className="sr-only"> {a.name}</span></button>{' '}
+                <button type="button" className="danger" onClick={async () => { if (!confirm(`למחוק את האזור "${a.name}"?`)) return; await api('DELETE', `/safety/areas/${a.id}`).catch(() => null); await load(); }}>מחיקה<span className="sr-only"> {a.name}</span></button></td>}
+            </tr>))}</tbody>
+        </table>
+      )}
+      {canEdit && editId === null && <button type="button" onClick={() => start()}>הוספת אזור</button>}
+      {canEdit && editId !== null && (
+        <form onSubmit={submit}>
+          <div className="field"><label htmlFor="ar-n">שם האזור</label><input id="ar-n" required maxLength={80} value={name} onChange={(e) => setName(e.target.value)} /></div>
+          <div className="field"><label htmlFor="ar-k">מילות זיהוי (אחת בכל שורה, למשל "בניין 12")</label><textarea id="ar-k" required rows={4} value={kw} onChange={(e) => setKw(e.target.value)} /></div>
+          <div className="field"><label htmlFor="ar-u">ממונה אחראי</label><select id="ar-u" required value={userId} onChange={(e) => setUserId(e.target.value)}>{users.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}</select></div>
+          <div className="row"><button className="primary" type="submit">שמירה</button><button type="button" onClick={() => setEditId(null)}>ביטול</button></div>
+        </form>
+      )}
+      <p role="status" className={msg?.ok ? 'ok' : 'error'}>{msg?.text}</p>
     </details>
   );
 }
