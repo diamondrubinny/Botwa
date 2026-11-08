@@ -87,13 +87,13 @@ export function checkUrl(raw: string): URL {
 const ALLOWED = /^(text\/(html|plain|markdown|csv)|application\/(xhtml\+xml|pdf|vnd\.openxmlformats-officedocument\.wordprocessingml\.document))/i;
 
 /** GET with manual redirects (max 3, each re-validated), a size cap and content-type allow-list. */
-export async function safeGet(raw: string, opts: { maxBytes?: number } = {}): Promise<Fetched> {
+export async function safeGet(raw: string, opts: { maxBytes?: number; allow?: RegExp; accept?: string } = {}): Promise<Fetched> {
   const maxBytes = opts.maxBytes ?? 5 * 1024 * 1024;
   let url = checkUrl(raw);
   for (let hop = 0; hop <= 3; hop++) {
     let res;
     try {
-      res = await undiciFetch(url, { dispatcher: agent, redirect: 'manual', signal: AbortSignal.timeout(25_000), headers: { 'user-agent': 'BotwaKnowledgeBase/1.0', accept: 'text/html,text/plain,application/pdf;q=0.9,*/*;q=0.1' } });
+      res = await undiciFetch(url, { dispatcher: agent, redirect: 'manual', signal: AbortSignal.timeout(25_000), headers: { 'user-agent': 'BotwaKnowledgeBase/1.0', accept: opts.accept ?? 'text/html,text/plain,application/pdf;q=0.9,*/*;q=0.1' } });
     } catch (e) {
       throw new FetchError(classifyNetworkError(e));
     }
@@ -104,7 +104,7 @@ export async function safeGet(raw: string, opts: { maxBytes?: number } = {}): Pr
     }
     if (!res.ok) { await res.body?.cancel().catch(() => undefined); throw new FetchError(`http_${res.status}`); }
     const contentType = (res.headers.get('content-type') ?? '').split(';')[0]!.trim().toLowerCase();
-    if (!ALLOWED.test(contentType)) { await res.body?.cancel().catch(() => undefined); throw new FetchError('unsupported_content_type'); }
+    if (!(opts.allow ?? ALLOWED).test(contentType)) { await res.body?.cancel().catch(() => undefined); throw new FetchError('unsupported_content_type'); }
     if (Number(res.headers.get('content-length') ?? 0) > maxBytes) { await res.body?.cancel().catch(() => undefined); throw new FetchError('too_large'); }
     const chunks: Buffer[] = [];
     let total = 0;

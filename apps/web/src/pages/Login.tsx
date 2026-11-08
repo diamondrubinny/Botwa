@@ -1,11 +1,13 @@
 import { startAuthentication, browserSupportsWebAuthn } from '@simplewebauthn/browser';
 import { useState, type FormEvent } from 'react';
 import { api, ApiError } from '../api';
+import { logoSrc, useBrand } from '../brand';
 import { Icon } from '../components/Icon';
 import { ThemeMenu } from '../components/ThemeMenu';
 import { errText, t } from '../strings';
 
 export function Login({ onDone }: { onDone: () => void }) {
+  const brand = useBrand();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [totp, setTotp] = useState('');
@@ -53,7 +55,7 @@ export function Login({ onDone }: { onDone: () => void }) {
     <div className="login-page">
       <div style={{ position: 'fixed', top: '.6rem', insetInlineStart: '.6rem' }}><ThemeMenu align="start" /></div>
       <main className="login" id="main">
-        <div className="brand"><span className="brand-mark"><Icon name="chat" /></span><h1 tabIndex={-1}>{t.appName}</h1></div>
+        <div className="brand">{brand.hasLogo ? <img className="brand-logo" src={logoSrc(brand)} alt="" /> : <span className="brand-mark"><Icon name="chat" /></span>}<h1 tabIndex={-1}>{brand.appName === 'Botwa' ? t.appName : brand.appName}</h1></div>
         <form className="card" onSubmit={submit} noValidate>
           {passkeys && (
             <>

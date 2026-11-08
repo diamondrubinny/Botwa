@@ -235,6 +235,26 @@ await page.waitForSelector('td:has-text("בניין 12, בניין 13")');
 check('safety board: a responsibility area is added', true);
 await axe('safety board: management');
 
+// branding: name, logo, colour (adapted for contrast), colours pulled from a site (internal addresses are refused)
+await page.click('aside.sidebar nav >> text=הגדרות');
+await page.waitForSelector('#br-name');
+await page.fill('#br-name', 'בטיחון'); await page.fill('#br-color', '#0f766e');
+await page.click('button:has-text("שמירת שם וצבע")');
+await page.waitForSelector('text=המיתוג נשמר.');
+check('branding: the brand colour reaches the page', (await page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--accent').trim().length)) > 0 && (await page.textContent('aside.sidebar .brand strong')) === 'בטיחון');
+const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64');
+writeFileSync('/tmp/e2e-logo.png', png);
+await page.setInputFiles('#br-logo', '/tmp/e2e-logo.png'); await page.click('button:has-text("העלאה")');
+await page.waitForSelector('text=הלוגו הוחלף.');
+check('branding: the logo shows in the menu', (await page.locator('aside.sidebar img.brand-logo').count()) === 1);
+await page.fill('#br-site', 'http://127.0.0.1'); await page.click('button:has-text("משיכת צבעים ולוגו")');
+await page.waitForSelector('text=הכתובת נחסמה');
+check('branding: an internal address is refused', true);
+await axe('settings: branding');
+await page.fill('#br-color', ''); await page.click('button:has-text("שמירת שם וצבע")'); await page.waitForSelector('text=המיתוג נשמר.');
+await page.click('button:has-text("הסרת הלוגו")'); await page.waitForSelector('text=הלוגו הוסר.');
+await page.fill('#br-name', 'Botwa'); await page.click('button:has-text("שמירת שם וצבע")'); await page.waitForSelector('text=המיתוג נשמר.');
+
 // website chat widget: configure, embed on a "customer site", chat both ways, blocked on an unlisted site
 await page.click('aside.sidebar nav >> text=ערוצים');
 await page.fill('#ch-label', 'האתר שלנו'); await page.selectOption('#ch-type', 'webchat'); await page.click('button:has-text("יצירה")');

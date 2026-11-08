@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api, can, type Me } from './api';
+import { logoSrc, useBrand } from './brand';
 import { A11yWidget } from './components/A11yWidget';
 import { Icon } from './components/Icon';
 import { ThemeMenu } from './components/ThemeMenu';
@@ -59,6 +60,7 @@ function Shell({ me, reloadMe, onLogout }: { me: Me; reloadMe: () => Promise<voi
   const { tick } = useLive();
   const [unread, setUnread] = useState(0);
   const sheet = useRef<HTMLDialogElement>(null);
+  const brand = useBrand();
 
   const page = me.mfaEnrollmentRequired ? 'account' : route;
   const visible = NAV.filter((n) => n.allowed(me));
@@ -72,11 +74,11 @@ function Shell({ me, reloadMe, onLogout }: { me: Me; reloadMe: () => Promise<voi
 
   // unread count in the tab title / installed-app badge so new work is noticed elsewhere
   useEffect(() => {
-    const base = 'Botwa – מערכת תמיכה';
+    const base = `${brand.appName} – מערכת תמיכה`;
     document.title = unread > 0 ? `(${unread}) ${base}` : base;
     const nav = navigator as Navigator & { setAppBadge?: (n?: number) => Promise<void>; clearAppBadge?: () => Promise<void> };
     if (unread > 0) void nav.setAppBadge?.(unread).catch(() => undefined); else void nav.clearAppBadge?.().catch(() => undefined);
-  }, [unread]);
+  }, [unread, brand.appName]);
 
   // move focus to the page heading on navigation (screen-reader friendly)
   useEffect(() => { document.querySelector<HTMLElement>('main h1')?.focus(); }, [page, me.id]);
@@ -112,7 +114,7 @@ function Shell({ me, reloadMe, onLogout }: { me: Me; reloadMe: () => Promise<voi
       <a className="skip" href="#main" onClick={(e) => { e.preventDefault(); document.querySelector<HTMLElement>('main h1')?.focus(); }}>{t.skip}</a>
 
       <aside className="sidebar" aria-label="תפריט צד">
-        <div className="brand"><span className="brand-mark"><Icon name="chat" /></span><strong>Botwa</strong></div>
+        <div className="brand">{brand.hasLogo ? <img className="brand-logo" src={logoSrc(brand)} alt="" /> : <span className="brand-mark"><Icon name="chat" /></span>}<strong>{brand.appName}</strong></div>
         <nav aria-label="ניווט ראשי"><ul className="nav-list">{visible.map(link)}</ul></nav>
         <div className="side-foot">
           {availability}
@@ -128,7 +130,7 @@ function Shell({ me, reloadMe, onLogout }: { me: Me; reloadMe: () => Promise<voi
 
       <div className="content">
         <header className="topbar">
-          <span className="brand-mark"><Icon name="chat" size={18} /></span>
+          {brand.hasLogo ? <img className="brand-logo sm" src={logoSrc(brand)} alt="" /> : <span className="brand-mark"><Icon name="chat" size={18} /></span>}
           <strong>{title}</strong>
           <span className="spacer" />
           {availability}

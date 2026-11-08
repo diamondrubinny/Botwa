@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { applyBrand } from './brand';
 
 export type ThemeMode = 'system' | 'soft' | 'light' | 'dark';
 export const ACCENTS = [
@@ -24,6 +25,7 @@ export function applyTheme(mode: ThemeMode, accent: Accent): void {
   const r = document.documentElement;
   r.dataset.theme = dark ? 'dark' : mode === 'light' ? 'light' : 'soft';
   r.dataset.accent = accent;
+  applyBrand();
   // keep the browser chrome (address bar / PWA title bar) in tune with the theme
   const meta = document.querySelector('meta[name="theme-color"]');
   meta?.setAttribute('content', getComputedStyle(r).getPropertyValue('--accent').trim() || '#4338ca');

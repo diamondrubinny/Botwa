@@ -20,6 +20,7 @@ import { PushService } from './push.js';
 import { KnowledgeBase } from './kb/service.js';
 import { kbRoutes } from './routes/kb.js';
 import { flowRoutes } from './routes/flow.js';
+import { brandingRoutes } from './routes/branding.js';
 import { safetyRoutes } from './routes/safety.js';
 import { widgetRoutes } from './routes/widget.js';
 import { apiRoutes } from './routes/api.js';
@@ -108,6 +109,7 @@ export async function buildApp(cfg: Config, db: Db, mgr: ChannelManager, media: 
   kbRoutes(app, db, kb);
   flowRoutes(app, db, kb);
   safetyRoutes(app, db, kb);
+  brandingRoutes(app, db, kb);
   widgetRoutes(app, db, mgr, cfg);
   const hooks = new WebhookService(db, cfg, webhookSender);
   mgr.webhooks = hooks;
