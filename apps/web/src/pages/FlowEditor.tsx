@@ -173,6 +173,11 @@ export function FlowEditor({ me }: { me: Me }) {
           {canEdit && mode !== 'flow' && <button className="primary" disabled={!flow || dirty || problems.length > 0 || unfin.length > 0} onClick={() => setBotMode('flow')}>הפעלת התרשים כמצב הבוט</button>}
           {canEdit && mode === 'flow' && <button onClick={() => setBotMode('menu')}>חזרה לתפריט הממוספר</button>}
         </div>
+        {canEdit && mode !== 'flow' && (!flow || dirty || problems.length > 0 || unfin.length > 0) && (
+          <p role="status" className="error">
+            ההפעלה חסומה כי: {!flow ? 'אין תרשים. ' : ''}{dirty ? 'יש שינויים שלא נשמרו (לחצו "שמירה"). ' : ''}{problems.length > 0 ? 'יש בעיות בתרשים (מפורטות מתחת). ' : ''}{unfin.length > 0 ? `נשארו טקסטים עם "[להשלים" בצמתים: ${unfin.join(', ')}.` : ''}
+          </p>
+        )}
         <p className="hint">הבוט עצמו מופעל ב<a href="#/bot">עמוד הבוט</a>. כדי להפעיל את התרשים יש לשמור אותו קודם ושיהיה תקין.</p>
       </div>
       <div className="chips" role="group" aria-label="תצוגה">
