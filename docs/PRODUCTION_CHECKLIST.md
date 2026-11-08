@@ -156,3 +156,8 @@ Lawyer (privacy, ToS risk, employee monitoring/notice) · Privacy officer (if re
 - [ ] Test the WhatsApp flow end to end from a real phone (not covered in this environment: Baileys and Cloud API were never run against real services).
 - [ ] Privacy: the identification step stores full name, faculty, PI name and status on the contact card. Add it to the privacy policy and set retention (legal review required).
 - [ ] Decide whether answers may ever be drafted by an external language model (currently retrieval only; nothing leaves the server).
+
+## Headless browser (optional, scripts/enable-browser.sh)
+- [ ] Only if needed for JavaScript-built sites. The browser service has no database access or keys; confirm `docker compose ps` shows `browser` healthy and that `docker compose exec browser env` contains no secrets other than BROWSER_TOKEN.
+- [ ] Not built or run by CI in this environment: the Docker image with Chromium (apt `chromium`) and the compose service were NOT tested here; the rendering code was tested against a real Chromium, and the SSRF proxy and the service endpoints with automated tests. Build once, then render one JavaScript-built page from the knowledge base preview.
+- [ ] Chromium runs with --no-sandbox inside the locked-down container (read-only filesystem, no capabilities, own network, memory and process limits). Review that trade-off for your threat model.

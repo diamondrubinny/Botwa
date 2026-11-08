@@ -41,6 +41,15 @@ const schema = z.object({
   SEMANTIC_SEARCH: z.enum(['off', 'local']).default('off'),
   SEMANTIC_MODEL: z.string().regex(/^[\w.-]+\/[\w.-]+$/).default('Xenova/multilingual-e5-small'),
   MODEL_DIR: z.string().default('./data/models'),
+  /**
+   * Headless browser for web pages that build their content with JavaScript. off = plain fetching only. local = Chromium inside this process
+   * (needs Chromium: build with WITH_BROWSER=1, or set BROWSER_PATH). With BROWSER_URL + BROWSER_TOKEN a separate rendering container is used instead.
+   */
+  BROWSER: z.enum(['off', 'local']).default('off'),
+  BROWSER_PATH: z.string().optional(),
+  BROWSER_NO_SANDBOX: bool('false'),
+  BROWSER_URL: z.string().url().optional(),
+  BROWSER_TOKEN: z.string().min(24).optional(),
   /** knowledge-base question log (customer text) is deleted after this many days */
   KB_QUERY_RETENTION_DAYS: z.coerce.number().int().min(1).max(365).default(30),
   BACKUP_DIR: z.string().default('./data/backups'),

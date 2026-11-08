@@ -87,6 +87,7 @@ Agents see only conversations assigned to them or unassigned; supervisors/admins
 - `GET/PUT /channels/:id/cloud` (channels.manage): webhook URL + verify token / save credentials. Public `GET/POST /webhooks/whatsapp/:channelId` (HMAC signature, no session).
 
 ## API (P22: knowledge base, permission `kb.manage`)
+- Headless browser (optional): `GET /kb/browser` status; scrape preview `POST /kb/scrape/preview`; see docs/KNOWLEDGE_BASE.he.md (scripts/enable-browser.sh).
 - `/kb/sources` (list/get/patch/delete), `POST /kb/sources/{faq,text,link,file}`, `POST /kb/sources/:id/reindex`, `/kb/categories`, `/kb/synonyms`, `POST /kb/search` (playground), `/kb/gaps`, `/kb/stats`.
 - Any signed-in staff: `GET /conversations/:id/kb-suggestions`, `POST /kb/feedback`.
 

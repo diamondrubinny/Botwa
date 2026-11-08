@@ -21,6 +21,7 @@ import { KnowledgeBase } from './kb/service.js';
 import { kbRoutes } from './routes/kb.js';
 import { flowRoutes } from './routes/flow.js';
 import { brandingRoutes } from './routes/branding.js';
+import { BrowserRenderer, RemoteRenderer } from './kb/browser.js';
 import { safetyRoutes } from './routes/safety.js';
 import { widgetRoutes } from './routes/widget.js';
 import { apiRoutes } from './routes/api.js';
@@ -106,6 +107,9 @@ export async function buildApp(cfg: Config, db: Db, mgr: ChannelManager, media: 
   const kb = new KnowledgeBase(db, cfg, media);
   mgr.kb = kb;
   kb.setEmbedder(new LocalEmbedder(cfg, () => void kb.embedMissing().catch(() => undefined)));
+  if (cfg.BROWSER_URL && cfg.BROWSER_TOKEN) kb.setRenderer(new RemoteRenderer(cfg.BROWSER_URL.replace(/\/$/, ''), cfg.BROWSER_TOKEN));
+  else if (cfg.BROWSER === 'local') kb.setRenderer(new BrowserRenderer({ path: cfg.BROWSER_PATH, noSandbox: cfg.BROWSER_NO_SANDBOX || undefined }));
+  app.addHook('onClose', async () => { await kb.closeRenderer(); });
   kbRoutes(app, db, kb);
   flowRoutes(app, db, kb);
   safetyRoutes(app, db, kb);

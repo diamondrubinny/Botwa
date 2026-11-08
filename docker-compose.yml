@@ -13,7 +13,7 @@ services:
       retries: 10
 
   server:
-    build: { context: ., dockerfile: apps/server/Dockerfile, args: { WITH_SEMANTIC: "${WITH_SEMANTIC:-0}" } }
+    build: { context: ., dockerfile: apps/server/Dockerfile, args: { WITH_SEMANTIC: "${WITH_SEMANTIC:-0}", WITH_BROWSER: "${WITH_BROWSER:-0}" } }
     restart: unless-stopped
     env_file: .env
     environment:
@@ -25,10 +25,39 @@ services:
       BACKUP_DIR: /data/backups
       MODEL_DIR: /data/models
       CLAMAV_HOST: ${CLAMAV_HOST:-}   # set to "clamav" (and run with --profile media) to enable attachments
+    networks: [default, webrender]
     volumes: [media:/data/media, backups:/data/backups, models:/data/models]     # quarantine/ + clean/ attachment storage (not web-accessible)
     depends_on: { db: { condition: service_healthy } }
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  # Optional headless browser for pages built by JavaScript: `docker compose --profile browser up -d` (or scripts/enable-browser.sh).
+  # Isolated on purpose: no database, no .env, no keys; it shares only a token with the server, sits on its own network (cannot reach the
+  # database), and refuses non-public addresses itself. Chromium runs without its own sandbox inside this locked-down container.
+  browser:
+    build: { context: ., dockerfile: apps/server/Dockerfile, args: { WITH_SEMANTIC: "0", WITH_BROWSER: "1" } }
+    profiles: ["browser"]
+    restart: unless-stopped
+    command: ["node", "dist/browser-server.js"]
+    environment:
+      BROWSER_TOKEN: ${BROWSER_TOKEN:?set BROWSER_TOKEN in .env (scripts/enable-browser.sh does it)}
+      BROWSER_NO_SANDBOX: "true"
+      BROWSER_PATH: /usr/bin/chromium
+      PORT: "3100"
+      HOST: 0.0.0.0
+    networks: [webrender]
+    read_only: true
+    tmpfs: ["/tmp:size=512m"]
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    mem_limit: 1g
+    pids_limit: 300
+    shm_size: 256m
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3100/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
       interval: 30s
       timeout: 5s
       retries: 3
@@ -59,6 +88,9 @@ services:
       - caddy_data:/data
       - caddy_config:/config
     depends_on: [server]
+
+networks:
+  webrender: {}
 
 volumes:
   backups:

@@ -14,6 +14,8 @@ export const crawlCfgSchema = z.object({
   include: z.array(z.string().trim().min(1).max(120)).max(10).default([]),
   /** never addresses containing one of these */
   exclude: z.array(z.string().trim().min(1).max(120)).max(10).default([]),
+  /** pages built by JavaScript: read them in a headless browser (auto = only when the plain page looks empty) */
+  render: z.enum(['auto', 'always', 'never']).default('auto'),
   /** CSS selector of the page's main content (empty = automatic) */
   selector: z.string().trim().max(200).default(''),
   /** CSS selectors of parts to drop from every page (menus, banners...) */
@@ -26,7 +28,7 @@ export const MAX_CRAWL_PAGES = 300;
 
 export interface CrawlReport {
   at: string; discovered: number; indexed: number; unchanged: number; failed: number;
-  robots: number; filtered: number; duplicates: number; thin: number; gone: number; limited: boolean; sitemap: number; boilerplate: number;
+  robots: number; filtered: number; duplicates: number; thin: number; gone: number; limited: boolean; sitemap: number; boilerplate: number; rendered: number;
 }
 
 const TRACKING = /^(utm_[a-z]+|fbclid|gclid|msclkid|mc_cid|mc_eid|igshid|_ga|ref|source)$/i;
@@ -134,3 +136,18 @@ export function canonicalOf(html: string, pageUrl: string): string | null {
 const SOFT_404 = /(^|\W)(404|page not found|not found|הדף לא נמצא|העמוד לא נמצא|דף לא נמצא|שגיאה 404)(\W|$)/i;
 export const isSoft404 = (title: string | null, text: string): boolean => (!!title && SOFT_404.test(title)) || (text.length < 400 && SOFT_404.test(text));
 export const MIN_PAGE_CHARS = 150;
+
+/**
+ * Whether a page fetched without JavaScript is probably an empty shell that a script fills in: almost no visible text next to scripts,
+ * an empty application root, or a "please enable JavaScript" notice.
+ */
+export function looksClientRendered(html: string): boolean {
+  const visible = html.replace(/<(script|style|noscript|template)[\s\S]*?<\/\1>/gi, ' ').replace(/<[^>]+>/g, ' ').replace(/&[a-z#0-9]+;/gi, ' ').replace(/\s+/g, ' ').trim();
+  const hasScripts = /<script[\s>]/i.test(html);
+  if (!hasScripts) return false;
+  if (visible.length < 300) return true;
+  if (/<div[^>]+id=["'](root|app|__next|__nuxt|app-root)["'][^>]*>\s*<\/div>/i.test(html) && visible.length < 1500) return true;
+  const ns = /<noscript[^>]*>([\s\S]*?)<\/noscript>/gi;
+  for (let m = ns.exec(html); m; m = ns.exec(html)) if (/javascript|ג'?אווה ?סקריפט/i.test(m[1]!) && visible.length < 1500) return true;
+  return false;
+}

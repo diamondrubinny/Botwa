@@ -155,6 +155,9 @@ export function kbRoutes(app: FastifyInstance, db: Db, kb: KnowledgeBase) {
     }
   });
 
+  // Whether pages can be rendered in a headless browser (off, local or a separate container) and if it is ready.
+  app.get('/kb/browser', { preHandler: manage }, async () => kb.rendererStatus());
+
   // Health of the knowledge base: sources in error, links not refreshed for a long time, sources without content.
   app.get('/kb/health', { preHandler: manage }, async () => {
     const byStatus = (await db.query(`SELECT status, count(*)::int AS n FROM kb_sources GROUP BY status`)).rows;

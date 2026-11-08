@@ -21,8 +21,8 @@ const ERR_SRC: Record<string, string> = {
   too_large: 'הקובץ גדול מדי', empty_content: 'לא נמצא טקסט בתוכן', infected: 'נמצאה תוכנה זדונית', scan_unavailable: 'סורק הווירוסים לא זמין', extract_timeout: 'הקריאה ארכה יותר מדי',
   extract_failed: 'לא ניתן לקרוא את הקובץ', gone: 'הדף כבר לא נמצא באתר (הושבת)', thin_content: 'כמעט אין בדף טקסט', soft_404: 'דף שגיאה', dns_failed: 'כתובת האתר לא נמצאה', timeout: 'האתר לא ענה בזמן', tls_error: 'בעיית תעודת אבטחה באתר', kb_full: 'המאגר מלא', too_many_redirects: 'יותר מדי הפניות', bad_url: 'כתובת לא תקינה',
 };
-interface CrawlReport { at: string; discovered: number; indexed: number; unchanged: number; failed: number; robots: number; filtered: number; duplicates: number; thin: number; gone: number; limited: boolean; sitemap: number; boilerplate?: number }
-const reportText = (r: CrawlReport) => `נסרקו ${r.indexed + r.unchanged + r.failed + r.thin + r.duplicates} דפים: ${r.indexed} חדשים או עודכנו, ${r.unchanged} ללא שינוי${r.failed ? `, ${r.failed} נכשלו` : ''}${r.thin ? `, ${r.thin} כמעט ריקים (לא נשמרו)` : ''}${r.duplicates ? `, ${r.duplicates} כפילויות` : ''}${r.robots ? `, ${r.robots} נחסמו ב-robots.txt` : ''}${r.filtered ? `, ${r.filtered} מחוץ להיקף` : ''}${r.gone ? `, ${r.gone} כבר לא באתר (הושבתו)` : ''}${r.boilerplate ? `, הוסרו ${r.boilerplate} קטעים שחוזרים בהרבה דפים (תפריטים וכותרות)` : ''}${r.limited ? '. הסריקה נעצרה במגבלת הדפים' : ''}`;
+interface CrawlReport { at: string; discovered: number; indexed: number; unchanged: number; failed: number; robots: number; filtered: number; duplicates: number; thin: number; gone: number; limited: boolean; sitemap: number; boilerplate?: number; rendered?: number }
+const reportText = (r: CrawlReport) => `נסרקו ${r.indexed + r.unchanged + r.failed + r.thin + r.duplicates} דפים: ${r.indexed} חדשים או עודכנו, ${r.unchanged} ללא שינוי${r.failed ? `, ${r.failed} נכשלו` : ''}${r.thin ? `, ${r.thin} כמעט ריקים (לא נשמרו)` : ''}${r.duplicates ? `, ${r.duplicates} כפילויות` : ''}${r.robots ? `, ${r.robots} נחסמו ב-robots.txt` : ''}${r.filtered ? `, ${r.filtered} מחוץ להיקף` : ''}${r.gone ? `, ${r.gone} כבר לא באתר (הושבתו)` : ''}${r.rendered ? `, ${r.rendered} נטענו בדפדפן` : ''}${r.boilerplate ? `, הוסרו ${r.boilerplate} קטעים שחוזרים בהרבה דפים (תפריטים וכותרות)` : ''}${r.limited ? '. הסריקה נעצרה במגבלת הדפים' : ''}`;
 type Tab = 'sources' | 'test' | 'gaps' | 'synonyms' | 'stats' | 'health';
 const TABS: [Tab, string][] = [['sources', 'מקורות'], ['test', 'בדיקת חיפוש'], ['gaps', 'שאלות ללא מענה'], ['synonyms', 'מילים נרדפות'], ['stats', 'סטטיסטיקה'], ['health', 'בריאות וכלים']];
 
@@ -63,6 +63,7 @@ function Sources() {
 
   return (
     <>
+      <BrowserBanner />
       <div className="row" role="group" aria-label="הוספת מקור">
         <button className="primary" onClick={() => setAdd(add === 'faq' ? null : 'faq')} aria-expanded={add === 'faq'}>שאלה ותשובה</button>
         <button onClick={() => setAdd(add === 'file' ? null : 'file')} aria-expanded={add === 'file'}>העלאת מסמך</button>
@@ -153,7 +154,7 @@ function AddForm({ kind, cats, onDone, onError }: { kind: 'faq' | 'text' | 'file
   const [body, setBody] = useState('');
   const [url, setUrl] = useState('');
   const [crawl, setCrawl] = useState(0);
-  const [adv, setAdv] = useState<CrawlOpts>({ depth: 1, sitemap: false, stayInPath: false, files: false, include: '', exclude: '', selector: '', remove: '' });
+  const [adv, setAdv] = useState<CrawlOpts>({ render: 'auto', depth: 1, sitemap: false, stayInPath: false, files: false, include: '', exclude: '', selector: '', remove: '' });
   const [preview, setPreview] = useState<Preview | null>(null);
   const [refresh, setRefresh] = useState('');
   const [audience, setAudience] = useState<'bot' | 'staff' | 'both'>('both');
@@ -261,6 +262,19 @@ function Categories({ cats, reload }: { cats: Category[]; reload: () => Promise<
 }
 
 const SEM_TEXT: Record<string, string> = { off: 'כבוי (חיפוש לפי מילים בלבד)', loading: 'המודל נטען…', ready: 'פעיל', error: 'שגיאה' };
+function BrowserBanner() {
+  const [s, setS] = useState<{ mode: string; state: string; detail?: string } | null>(null);
+  usePoll(async () => setS(await api<NonNullable<typeof s>>('GET', '/kb/browser').catch(() => null)), 30000);
+  if (!s) return null;
+  return (
+    <p className="hint" role="status">
+      דפדפן לטעינת דפים: <strong>{s.state === 'ready' ? 'פעיל' : s.state === 'off' ? 'כבוי' : 'לא זמין'}</strong>{s.mode === 'remote' ? ' (שירות נפרד)' : s.mode === 'local' ? ' (על השרת)' : ''}
+      {s.state === 'unavailable' && s.detail ? ` · ${s.detail}` : ''}
+      {s.state === 'off' ? ' · להפעלה: ראו "דפדפן לסריקת אתרים" בתיעוד מאגר הידע.' : ''}
+    </p>
+  );
+}
+
 function SemanticBanner() {
   const [s, setS] = useState<{ state: string; detail?: string; embedded: number; total: number } | null>(null);
   usePoll(async () => setS(await api<NonNullable<typeof s>>('GET', '/kb/semantic').catch(() => null)), 10000);
@@ -392,11 +406,11 @@ function StatsView() {
 }
 
 
-interface CrawlOpts { depth: number; sitemap: boolean; stayInPath: boolean; files: boolean; include: string; exclude: string; selector: string; remove: string }
+interface CrawlOpts { render: 'auto' | 'always' | 'never'; depth: number; sitemap: boolean; stayInPath: boolean; files: boolean; include: string; exclude: string; selector: string; remove: string }
 const lines = (v: string) => v.split('\n').map((x) => x.trim()).filter(Boolean).slice(0, 10);
-const crawlBody = (o: CrawlOpts) => ({ depth: o.depth, sitemap: o.sitemap, stayInPath: o.stayInPath, files: o.files, include: lines(o.include), exclude: lines(o.exclude), selector: o.selector.trim(), remove: lines(o.remove) });
+const crawlBody = (o: CrawlOpts) => ({ render: o.render, depth: o.depth, sitemap: o.sitemap, stayInPath: o.stayInPath, files: o.files, include: lines(o.include), exclude: lines(o.exclude), selector: o.selector.trim(), remove: lines(o.remove) });
 interface Preview {
-  url: string; title: string | null; canonical: string | null; robotsAllowed: boolean; chars: number; thin: boolean; soft404: boolean; headings: string[]; excerpt: string;
+  url: string; rendered?: boolean; title: string | null; canonical: string | null; robotsAllowed: boolean; chars: number; thin: boolean; soft404: boolean; headings: string[]; excerpt: string;
   links: { total: number; accepted: string[]; filtered: number; robots: number; duplicates: number }; sitemap: { found: boolean; urls: number; sample: string[] };
 }
 
@@ -411,6 +425,9 @@ function ScrapeOptions({ adv, setAdv, url, onPreview, onError, crawl }: { adv: C
   return (
     <details className="card">
       <summary><strong>אפשרויות סריקה מתקדמות</strong> (עומק, מפת אתר, דפוסים, בורר תוכן, תצוגה מקדימה)</summary>
+      <div className="field"><label htmlFor="sc-render">אתרים שנבנים ב-JavaScript (דפדפן)</label>
+        <select id="sc-render" value={adv.render} onChange={(e) => set({ render: e.target.value as CrawlOpts['render'] })}><option value="auto">אוטומטי: דפדפן רק כשהדף נראה ריק בקריאה רגילה</option><option value="always">תמיד בדפדפן (איטי יותר)</option><option value="never">אף פעם, קריאה רגילה בלבד</option></select>
+        <p className="hint">הדפדפן זמין רק אם הופעל בשרת (ראו את השורה "דפדפן לטעינת דפים" מעל כפתורי ההוספה). אם אינו זמין, הדפים נקראים ישירות.</p></div>
       <div className="row">
         <div className="field"><label htmlFor="sc-depth">עומק (קפיצות מהדף הראשון)</label>
           <select id="sc-depth" value={adv.depth} disabled={crawl === 0} onChange={(e) => set({ depth: Number(e.target.value) })}>{[1, 2, 3, 4].map((n) => <option key={n} value={n}>{n}</option>)}</select></div>
@@ -433,6 +450,7 @@ function PreviewPanel({ p }: { p: Preview }) {
     <section className="card" aria-live="polite" aria-labelledby="sc-pv">
       <h3 id="sc-pv">תצוגה מקדימה: {p.title ?? p.url}</h3>
       <ul>
+        <li>{p.rendered ? 'הדף נטען בדפדפן (התוכן נבנה ב-JavaScript).' : 'הדף נקרא ישירות, בלי דפדפן.'}</li>
         <li>{p.chars.toLocaleString('he-IL')} תווים של טקסט {p.thin && <strong className="error"> (מעט מדי: דף כזה לא יישמר)</strong>}{p.soft404 && <strong className="error"> (נראה כדף שגיאה)</strong>}</li>
         {!p.robotsAllowed && <li className="error">robots.txt של האתר אוסר קריאת הדף הזה, ולכן הסריקה תדלג עליו.</li>}
         {p.canonical && p.canonical !== p.url && <li>הדף מצהיר שהכתובת הקנונית שלו היא <span dir="ltr">{p.canonical}</span>, ולכן בסריקה יקרא רק הדף ההוא.</li>}

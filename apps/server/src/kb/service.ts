@@ -5,7 +5,8 @@ import type { MediaService } from '../media/store.js';
 import { matchOptionLexical } from '../flow/match.js';
 import { checkUrl, FetchError, safeGet, type Fetched } from './fetch.js';
 import { extract, kindFor, type DocKind, type HtmlOpts } from './extract.js';
-import { canonicalOf, crawlCfgSchema, DEFAULT_CRAWL, inScope, isSoft404, MIN_PAGE_CHARS, normalizeUrl, parseRobots, parseSitemap, prefixOf, robotsAllows, type CrawlCfg, type CrawlReport, type Robots, type Scope } from './crawler.js';
+import type { Renderer, RendererStatus } from './browser.js';
+import { canonicalOf, crawlCfgSchema, DEFAULT_CRAWL, inScope, isSoft404, looksClientRendered, MIN_PAGE_CHARS, normalizeUrl, parseRobots, parseSitemap, prefixOf, robotsAllows, type CrawlCfg, type CrawlReport, type Robots, type Scope } from './crawler.js';
 import { dot, fromBuffer, NO_EMBEDDER, toBuffer, type Embedder } from '../semantic/embedder.js';
 import { bestSnippet, chunkText, indexTerms, queryTokens, variants, words } from './text.js';
 
@@ -46,6 +47,21 @@ export class KnowledgeBase {
   private fetcher: Fetcher = safeGet;
   /** Tests replace the network layer. */
   setFetcher(f: Fetcher): void { this.fetcher = f; }
+  private renderer: Renderer | null = null;
+  setRenderer(r: Renderer | null): void { this.renderer = r; }
+  async closeRenderer(): Promise<void> { await this.renderer?.close?.(); }
+  async rendererStatus(): Promise<RendererStatus> { return this.renderer ? this.renderer.status() : { mode: 'off', state: 'off' }; }
+  /**
+   * Fetch a page for reading. Plain fetch first; when the page looks like an empty shell built by scripts (or the source asks for it),
+   * the headless browser renders it. If the browser is missing or fails, the plain page is used as before.
+   */
+  private async getPage(url: string, mode: CrawlCfg['render']): Promise<Fetched & { rendered: boolean }> {
+    if (mode === 'never' || !this.renderer) return { ...(await this.fetcher(url)), rendered: false };
+    if (mode === 'always') { try { return { ...(await this.renderer.render(url)), rendered: true }; } catch (e) { if ((e as Error).message === 'blocked_address') throw e; return { ...(await this.fetcher(url)), rendered: false }; } }
+    const f = await this.fetcher(url);
+    if (kindFor(f.url, f.contentType) !== 'html' || !looksClientRendered(f.body.toString('utf8', 0, 600_000))) return { ...f, rendered: false };
+    try { return { ...(await this.renderer.render(url)), rendered: true }; } catch { return { ...f, rendered: false }; }
+  }
   private synCache: { at: number; groups: string[][] } = { at: 0, groups: [] };
 
   constructor(private readonly db: Db, private readonly cfg: Config, private readonly media: MediaService) {}
@@ -132,17 +148,23 @@ export class KnowledgeBase {
    * `opts.html`: selectors for a web page's main content; `opts.minChars`: refuse near-empty pages ("thin_content") and error pages that
    * answer 200 ("soft_404"); `opts.storeLinks`: remember the links of the page (so a crawl can go on from pages that did not change).
    */
-  async indexDocument(id: string, kind: DocKind, data: Buffer, nameForTitle: string, opts: { html?: HtmlOpts; minChars?: number; storeLinks?: boolean } = {}): Promise<boolean> {
-    const hash = createHash('sha256').update(data).update(kind === 'html' ? JSON.stringify(opts.html ?? {}) : '').digest('hex');
+  async indexDocument(id: string, kind: DocKind, data: Buffer, nameForTitle: string, opts: { html?: HtmlOpts; minChars?: number; storeLinks?: boolean; hashText?: boolean } = {}): Promise<boolean> {
+    let hash = createHash('sha256').update(data).update(kind === 'html' ? JSON.stringify(opts.html ?? {}) : '').digest('hex');
     const cur = (await this.db.query('SELECT content_hash, title, (SELECT count(*)::int FROM kb_chunks WHERE source_id = $1) AS chunks FROM kb_sources WHERE id = $1', [id])).rows[0];
     if (!cur) return false;
-    if (cur.content_hash === hash && cur.chunks > 0) { await this.setReady(id, {}); return false; } // nothing changed: keep the version
+    let ex: Awaited<ReturnType<typeof extract>> | null = null;
+    // a page rendered by a browser differs in every byte read (ids, times): what matters is whether its text changed
+    if (kind === 'html' && opts.hashText) { ex = await extract(kind, data, 30_000, opts.html); hash = createHash('sha256').update(ex.text).update(JSON.stringify(opts.html ?? {})).digest('hex'); }
+    if (cur.content_hash === hash && cur.chunks > 0) {   // nothing changed: keep the version
+      if (ex && opts.storeLinks) await this.db.query(`UPDATE kb_sources SET meta = meta || jsonb_build_object('links', $2::jsonb) WHERE id = $1`, [id, JSON.stringify(ex.links.slice(0, 400))]);
+      await this.setReady(id, {}); return false;
+    }
     if (BINARY.includes(kind)) {
       const scan = await this.media.scanBuffer(data);
       if (scan.status === 'infected') throw new Error('infected');
       if (scan.status !== 'clean') throw new Error('scan_unavailable'); // fail closed, like attachments
     }
-    const ex = await extract(kind, data, 30_000, opts.html);
+    ex ??= await extract(kind, data, 30_000, opts.html);
     if (kind === 'html' && opts.storeLinks) await this.db.query(`UPDATE kb_sources SET meta = meta || jsonb_build_object('links', $2::jsonb) WHERE id = $1`, [id, JSON.stringify(ex.links.slice(0, 400))]);
     if (!ex.text.trim()) throw new Error('empty_content');
     if (opts.minChars !== undefined && kind === 'html') {
@@ -178,10 +200,10 @@ export class KnowledgeBase {
     if (!s || s.kind !== 'link' || !s.url) return;
     try {
       const cfg = await this.crawlCfgOf(id);
-      const f = await this.fetcher(s.url);
+      const f = await this.getPage(s.url, cfg.render);
       const kind = kindFor(f.url, f.contentType);
       if (!kind) throw new FetchError('unsupported_content_type');
-      await this.indexDocument(id, kind, f.body, s.title, { html: this.htmlOpts(cfg), storeLinks: s.crawl_pages > 0 });
+      await this.indexDocument(id, kind, f.body, s.title, { html: this.htmlOpts(cfg), storeLinks: s.crawl_pages > 0, hashText: f.rendered });
       if (s.crawl_pages > 0 && !s.parent_id && kind === 'html') await this.crawl(id, f.url, s.crawl_pages, cfg);
     } catch (e) {
       await this.setError(id, e instanceof Error ? e.message : 'failed');
@@ -212,7 +234,7 @@ export class KnowledgeBase {
     const start = normalizeUrl(startUrl) ?? startUrl;
     const origin = new URL(start).origin;
     const scope: Scope = { origin, prefix: cfg.stayInPath ? prefixOf(start) : null, include: cfg.include, exclude: cfg.exclude, files: cfg.files };
-    const rep: CrawlReport = { at: new Date().toISOString(), discovered: 0, indexed: 0, unchanged: 0, failed: 0, robots: 0, filtered: 0, duplicates: 0, thin: 0, gone: 0, limited: false, sitemap: 0, boilerplate: 0 };
+    const rep: CrawlReport = { at: new Date().toISOString(), discovered: 0, indexed: 0, unchanged: 0, failed: 0, robots: 0, filtered: 0, duplicates: 0, thin: 0, gone: 0, limited: false, sitemap: 0, boilerplate: 0, rendered: 0 };
     const robots = await this.readRobots(origin);
     const delay = this.cfg.NODE_ENV === 'test' ? 0 : Math.min(5000, Math.max(400, (robots.crawlDelay ?? 0) * 1000)); // be polite to the site
     const seen = new Set<string>([start]);
@@ -247,7 +269,8 @@ export class KnowledgeBase {
       if (!childId) continue; // already exists as an independent source
       touched.add(childId);
       try {
-        const f = await this.fetcher(url);
+        const f = await this.getPage(url, cfg.render);
+        if (f.rendered) rep.rendered++;
         const kind = kindFor(f.url, f.contentType);
         if (!kind) throw new FetchError('unsupported_content_type');
         if (kind === 'html') {
@@ -264,7 +287,7 @@ export class KnowledgeBase {
         }
         let changed: boolean;
         try {
-          changed = await this.indexDocument(childId, kind, f.body, url, { html: this.htmlOpts(cfg), minChars: this.cfg.NODE_ENV === 'test' ? 50 : MIN_PAGE_CHARS, storeLinks: true });
+          changed = await this.indexDocument(childId, kind, f.body, url, { html: this.htmlOpts(cfg), minChars: this.cfg.NODE_ENV === 'test' ? 50 : MIN_PAGE_CHARS, storeLinks: true, hashText: f.rendered });
         } catch (e) {
           const code = (e as Error).message;
           if (code === 'thin_content' || code === 'soft_404' || code === 'empty_content') {
@@ -314,10 +337,10 @@ export class KnowledgeBase {
    * followed and which refused (and why). Nothing is stored.
    */
   async previewScrape(rawUrl: string, cfg: CrawlCfg): Promise<{
-    url: string; title: string | null; canonical: string | null; robotsAllowed: boolean; chars: number; thin: boolean; soft404: boolean;
+    url: string; rendered: boolean; title: string | null; canonical: string | null; robotsAllowed: boolean; chars: number; thin: boolean; soft404: boolean;
     headings: string[]; excerpt: string; links: { total: number; accepted: string[]; filtered: number; robots: number; duplicates: number }; sitemap: { found: boolean; urls: number; sample: string[] };
   }> {
-    const f = await this.fetcher(KnowledgeBase.validateUrl(rawUrl));
+    const f = await this.getPage(KnowledgeBase.validateUrl(rawUrl), cfg.render);
     const kind = kindFor(f.url, f.contentType);
     if (!kind) throw new FetchError('unsupported_content_type');
     const final = normalizeUrl(f.url) ?? f.url;
@@ -342,7 +365,7 @@ export class KnowledgeBase {
     if (cfg.sitemap) { const urls = await this.readSitemaps(origin, robots.sitemaps); sm = { found: urls.length > 0, urls: urls.length, sample: urls.slice(0, 5) }; }
     const u = new URL(final);
     return {
-      url: final, title: ex.title, canonical: kind === 'html' ? canonicalOf(f.body.toString('utf8', 0, 200_000), f.url) : null,
+      url: final, rendered: f.rendered, title: ex.title, canonical: kind === 'html' ? canonicalOf(f.body.toString('utf8', 0, 200_000), f.url) : null,
       robotsAllowed: robotsAllows(robots, u.pathname + u.search), chars: ex.text.length, thin: ex.text.length < MIN_PAGE_CHARS, soft404: isSoft404(ex.title, ex.text),
       headings: [...ex.text.matchAll(/^(#{1,4})\s+(.+)$/gm)].slice(0, 30).map((m) => `${'  '.repeat(m[1]!.length - 1)}${m[2]}`),
       excerpt: ex.text.slice(0, 2500), links: { total: ex.links.length, accepted: accepted.slice(0, 40), filtered, robots: robotsN, duplicates: dup }, sitemap: sm,
