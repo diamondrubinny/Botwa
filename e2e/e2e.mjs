@@ -210,11 +210,10 @@ await page.waitForSelector('text=הבוט עובד כעת לפי התפריט ה
 // safety unit: the template, unfinished placeholders block activation, the simulator accepts a photo, areas and the board
 page.removeAllListeners('dialog'); page.once('dialog', (d) => d.accept());
 await page.click('button:has-text("יצירת תרשים בטיחות לפי האפיון")');
-await page.waitForSelector('[role="note"]:has-text("טרם הושלמו")');
-check('safety template: unfinished placeholders are listed', (await page.locator('[role="note"] li').count()) === 1);
+check('safety template: nothing is left to fill in', (await page.locator('[role="note"]').count()) === 0);
 await page.click('button:has-text("שמירה")');
 await page.waitForSelector('text=התרשים נשמר.');
-check('safety template: activation is blocked while placeholders remain', await page.isDisabled('button:has-text("הפעלת התרשים כמצב הבוט")'));
+check('safety template: activation is enabled', await page.isEnabled('button:has-text("הפעלת התרשים כמצב הבוט")'));
 await axe('flow editor: safety template');
 await page.click('.chips >> text=בדיקה בשיחה');
 await page.fill('#sim-in', 'שלום'); await page.click('button:has-text("שליחה")');

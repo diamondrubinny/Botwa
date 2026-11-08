@@ -360,7 +360,7 @@ describe('the safety unit template', () => {
     expect(topics.type === 'menu' && topics.options.length).toBe(15);
     expect(byId.get('m_status')!.type === 'menu' && (byId.get('m_status') as { options: unknown[] }).options.length).toBe(STATUSES.length);
     expect(STATUSES).toHaveLength(9);
-    expect(unfinished(t)).toEqual(['offsite']);                                              // only the 07-0124 link is unknown
+    expect(unfinished(t)).toEqual([]);                                                       // nothing is left to fill in before switching on
     const required = ['q_name', 'q_faculty', 'q_pi'].map((id) => (byId.get(id) as { optional: boolean }).optional);
     expect(required).toEqual([false, false, false]);                                         // name, faculty, PI are mandatory
     expect(['q_building', 'q_room'].map((id) => (byId.get(id) as { optional: boolean }).optional)).toEqual([true, true]);
@@ -504,14 +504,17 @@ describe('safety flow live: areas, template endpoint, placeholders, profile, fil
     const tpl = (await call('POST', '/flow/templates/safety', 'admin@t.io')).json();
     expect(tpl.flow.nodes.length).toBeGreaterThan(60);
     expect((await db.query(`SELECT count(*)::int AS n FROM tags WHERE name IN ('לייזרים','חומ״ס','מפגע','Biosafety','סולמות')`)).rows[0].n).toBe(5);
-    expect((await call('PUT', '/flow', 'admin@t.io', { flow: tpl.flow })).statusCode).toBe(200);
-    expect((await call('GET', '/flow', 'admin@t.io')).json().unfinished).toEqual(['offsite']);   // only the 07-0124 link is unknown; the other forms come from the unit's site
+    // the template is ready to use; a flow that still has a "[להשלים" placeholder cannot be switched on
+    const draft = JSON.parse(JSON.stringify(tpl.flow)) as { nodes: { id: string; text?: string }[] };
+    draft.nodes.find((n) => n.id === 'offsite')!.text += ' [להשלים: קישור]';
+    expect((await call('PUT', '/flow', 'admin@t.io', { flow: draft })).statusCode).toBe(200);
+    expect((await call('GET', '/flow', 'admin@t.io')).json().unfinished).toEqual(['offsite']);
     const blocked = await call('PUT', '/flow/mode', 'admin@t.io', { mode: 'flow' });
     expect(blocked.statusCode).toBe(409);
     expect(blocked.json()).toMatchObject({ error: 'unfinished_flow' });
-    // the unit fills in the form links and an officer for chemicals
-    const f = JSON.parse(JSON.stringify(tpl.flow)) as { nodes: { id: string; text?: string; userId?: string }[] };
-    for (const n of f.nodes) { if (n.text?.includes('[להשלים')) n.text = n.text.replace(/\[להשלים: [^\]]*\]/, 'https://forms.example.com/x'); if (n.id === 'chem_ho') n.userId = ids.o2; }
+    // fixed: the chemicals officer is chosen and the placeholder is gone
+    const f = JSON.parse(JSON.stringify(tpl.flow)) as { nodes: { id: string; userId?: string }[] };
+    f.nodes.find((n) => n.id === 'chem_ho')!.userId = ids.o2;
     expect((await call('PUT', '/flow', 'admin@t.io', { flow: f })).statusCode).toBe(200);
     expect((await call('PUT', '/flow/mode', 'admin@t.io', { mode: 'flow' })).statusCode).toBe(200);
   });

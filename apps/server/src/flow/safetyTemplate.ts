@@ -8,7 +8,6 @@ export const TEMPLATE_TAGS = [
 ] as const;
 
 export const STATUSES = ['מנהל / מהנדס מעבדה', 'משתלם', 'סטודנט להסמכה', 'עמית מחקר', 'אחראי בניין', 'עובד טכני', 'עובד ניקיון', 'חבר סגל מינהלי', 'מתנדב'];
-const TODO = (what: string) => `[להשלים: ${what}]`;
 
 /**
  * The WhatsApp flow of the safety unit: identification (asked once per customer), then fifteen topics. Forms are links, other
@@ -63,7 +62,7 @@ export function buildSafetyFlow(tag: (name: string) => string): Flow {
   linkTopic('waste', `פינוי פסולת כימית מתבצע באמצעות הטופס באתר היחידה: https://forms.office.com/Pages/ResponsePage.aspx?id=TCxQ8S7uHEGXFchV9nU7hKzpfSuA-6lNkgLTuMY2-ulURTk5UFI1T0pBRVhITDFKQVFFSjdNSTVVWSQlQCNjPTEu`);
   linkTopic('accident', `דיווח על תאונה או אירוע "כמעט-ונפגע" מתבצע בטופס באתר היחידה: https://safetyreport.technion.ac.il/accidentreport/\nבמקרה חירום יש להתקשר מיד לגורמי החירום.`);
   linkTopic('event', `אירוע בקמפוס מדווח בטופס האירועים באתר היחידה: https://technionevents.web.technion.ac.il/`);
-  linkTopic('offsite', `ניסוי מחוץ לקמפוס מחייב מילוי טופס מנוהל 07-0124: ${TODO('קישור לטופס מנוהל 07-0124')}`);
+  linkTopic('offsite', `ניסוי מחוץ לקמפוס מחייב מילוי טופס לפי נוהל 07-0124. לקבלת הטופס פנו ליחידת הבטיחות.`);
 
   // ---- a report that needs details: description or photo, exact place, then the officer ----
   const report = (p: string, opts: { tags: string[]; to: string; areas: boolean; mediaText: string; docs?: boolean; question?: boolean; place?: boolean; label: string }) => {

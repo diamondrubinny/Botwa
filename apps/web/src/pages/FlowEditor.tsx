@@ -132,6 +132,12 @@ export function FlowEditor({ me }: { me: Me }) {
       refreshRefs();
     } catch (e) { fail(e); }
   }
+  async function fillPlaceholders() {
+    if (!flow || !confirm('להחליף כל "[להשלים ...]" בנוסח "פנו ליחידת הבטיחות לקבלת הקישור" ולשמור? אפשר לערוך את הנוסח אחר כך בכל צומת.')) return;
+    const next = JSON.parse(JSON.stringify(flow).replace(/\[להשלים[^\]"\\]*\]/g, 'פנו ליחידת הבטיחות לקבלת הקישור')) as Flow;
+    setMsg(null);
+    try { await api('PUT', '/flow', { flow: next }); setFlow(next); setSaved(JSON.stringify(next)); setProblems([]); setUnfin([]); setMsg({ ok: true, text: 'הטקסטים הושלמו והתרשים נשמר. אפשר להפעיל אותו.' }); } catch (e) { fail(e); }
+  }
   const refreshRefs = () => { void api<Refs>('GET', '/flow/refs').then(setRefs).catch(() => undefined); };
   async function setBotMode(m: 'menu' | 'flow') {
     setMsg(null);
@@ -188,6 +194,7 @@ export function FlowEditor({ me }: { me: Me }) {
       {flow && flow.nodes.some((n) => JSON.stringify(n).includes('[להשלים')) && (
         <div className="card" role="note"><strong>יש טקסטים שטרם הושלמו</strong>
           <p className="hint">בצמתים הבאים מופיע "[להשלים" (למשל כתובת טופס). אי אפשר להפעיל את התרשים כמצב הבוט עד שישלימו אותם ויישמרו:</p>
+          {canEdit && <button type="button" onClick={fillPlaceholders}>השלמה אוטומטית בנוסח ניטרלי ושמירה</button>}
           <ul>{flow.nodes.filter((n) => JSON.stringify(n).includes('[להשלים')).map((n) => <li key={n.id}><button type="button" className="linklike" onClick={() => { setTab('edit'); setOpen(n.id); setTimeout(() => document.getElementById(`fn-${n.id}`)?.scrollIntoView({ block: 'nearest' }), 0); }}>{nodeName(n)}</button></li>)}</ul>
         </div>
       )}
