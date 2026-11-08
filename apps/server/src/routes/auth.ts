@@ -87,6 +87,7 @@ export function authRoutes(app: FastifyInstance, db: Db, cfg: Config) {
       mfaEnabled: u.totpEnabled,
       passkeys: u.passkeys,
       mfaEnrollmentRequired: cfg.REQUIRE_MFA_FOR_PRIVILEGED && needsMfaEnrollment(u),
+      passwordChangeRequired: u.mustChangePassword,
     };
   });
 
@@ -103,7 +104,8 @@ export function authRoutes(app: FastifyInstance, db: Db, cfg: Config) {
     if (!body.success) return reply.code(400).send({ error: 'bad_request' });
     const { rows } = await db.query('SELECT password_hash FROM users WHERE id = $1', [req.user!.id]);
     if (!(await verifyPassword(rows[0].password_hash, body.data.current))) return reply.code(401).send(invalid);
-    await db.query('UPDATE users SET password_hash = $2, updated_at = now() WHERE id = $1', [
+    if (body.data.next === body.data.current) return reply.code(400).send({ error: 'password_unchanged' });
+    await db.query('UPDATE users SET password_hash = $2, must_change_password = false, updated_at = now() WHERE id = $1', [
       req.user!.id,
       await hashPassword(body.data.next),
     ]);

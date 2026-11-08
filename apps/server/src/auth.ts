@@ -18,6 +18,8 @@ export interface AuthUser {
   mfaRequired: boolean;
   totpEnabled: boolean;
   passkeys: number;
+  /** an administrator reset the password: until the person sets their own, nothing else is allowed */
+  mustChangePassword: boolean;
   sessionId: string;
 }
 
@@ -33,7 +35,7 @@ declare module 'fastify' {
 
 export async function loadSession(db: Db, token: string): Promise<AuthUser | null> {
   const { rows } = await db.query(
-    `SELECT u.id, u.email, u.name, u.role, u.totp_enabled, s.id AS session_id,
+    `SELECT u.id, u.email, u.name, u.role, u.totp_enabled, u.must_change_password, s.id AS session_id,
             r.name AS role_name, r.permissions, r.builtin, r.mfa_required,
             (SELECT count(*)::int FROM passkeys p WHERE p.user_id = u.id) AS passkeys
        FROM sessions s JOIN users u ON u.id = s.user_id JOIN roles r ON r.key = u.role
@@ -46,7 +48,7 @@ export async function loadSession(db: Db, token: string): Promise<AuthUser | nul
   const permissions = r.builtin && builtin ? builtin.permissions : cleanPermissions(r.permissions);
   return {
     id: r.id, email: r.email, name: r.name, role: r.role, roleName: builtin?.name ?? r.role_name, permissions,
-    mfaRequired: r.builtin && builtin ? builtin.mfaRequired : r.mfa_required, totpEnabled: r.totp_enabled, passkeys: r.passkeys, sessionId: r.session_id,
+    mfaRequired: r.builtin && builtin ? builtin.mfaRequired : r.mfa_required, totpEnabled: r.totp_enabled, passkeys: r.passkeys, mustChangePassword: r.must_change_password, sessionId: r.session_id,
   };
 }
 
@@ -60,6 +62,7 @@ export function requireAuth(db: Db, perm?: Permission, opts?: { allowEnrollment?
     if (!opts?.allowEnrollment && req.server.mfaEnforced && needsMfaEnrollment(user)) {
       return reply.code(403).send({ error: 'mfa_enrollment_required' });
     }
+    if (!opts?.allowEnrollment && user.mustChangePassword) return reply.code(403).send({ error: 'password_change_required' });
     if (perm && !can(user, perm)) return reply.code(403).send({ error: 'forbidden' });
     req.user = user;
   };

@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from 'react';
+import { useRef, useState, type FormEvent } from 'react';
 import { api, ApiError, can, type Me, type RoleRow, type UserRow } from '../api';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { usePoll } from '../hooks';
@@ -15,6 +15,28 @@ export function Team({ me }: { me: Me }) {
   const assignable = roles.filter((r) => r.permissions.every((p) => me.permissions.includes(p)));
   usePoll(async () => { const r = await api<{ roles: RoleRow[] }>('GET', '/roles').catch(() => null); if (r) setRoles(r.roles); }, 60000);
   const [resetFor, setResetFor] = useState<UserRow | null>(null);
+  const [pwFor, setPwFor] = useState<UserRow | null>(null);
+  const [pwOwn, setPwOwn] = useState(false);
+  const [pwVal, setPwVal] = useState('');
+  const [pwRes, setPwRes] = useState<string | null>(null);
+  const [pwDone, setPwDone] = useState(false);
+  const [delFor, setDelFor] = useState<UserRow | null>(null);
+  const [delEmail, setDelEmail] = useState('');
+  const [panelMsg, setPanelMsg] = useState('');
+  const panel = useRef<HTMLHeadingElement>(null);
+  const openPw = (u: UserRow) => { setPwFor(u); setDelFor(null); setPwOwn(false); setPwVal(''); setPwRes(null); setPwDone(false); setPanelMsg(''); setTimeout(() => panel.current?.focus(), 0); };
+  const openDel = (u: UserRow) => { setDelFor(u); setPwFor(null); setDelEmail(''); setPanelMsg(''); setTimeout(() => panel.current?.focus(), 0); };
+  async function doReset(e: FormEvent) {
+    e.preventDefault(); setPanelMsg('');
+    try {
+      const r = await api<{ temporaryPassword?: string }>('POST', `/users/${pwFor!.id}/reset-password`, pwOwn ? { password: pwVal } : {});
+      setPwRes(r.temporaryPassword ?? null); setPwDone(true); setPwVal(''); await reload();
+    } catch (er) { setPanelMsg(errText(er instanceof ApiError ? er.code : 'generic')); }
+  }
+  async function doDelete(e: FormEvent) {
+    e.preventDefault(); setPanelMsg('');
+    try { await api('DELETE', `/users/${delFor!.id}`, { email: delEmail.trim() }); setDelFor(null); await reload(); } catch (er) { setPanelMsg(errText(er instanceof ApiError ? er.code : 'generic')); }
+  }
 
   const reload = async () => setUsers(await api<UserRow[]>('GET', '/users').catch(() => []));
   usePoll(reload, 15000);
@@ -61,6 +83,8 @@ export function Team({ me }: { me: Me }) {
                         {u.active ? 'השבתה' : 'הפעלה'}<span className="sr-only"> {u.name}</span>
                       </button>
                       {u.mfaEnabled && <button onClick={() => setResetFor(u)}>איפוס MFA<span className="sr-only"> {u.name}</span></button>}
+                      <button disabled={u.id === meId || !assignable.some((r) => r.key === u.role)} onClick={() => openPw(u)}>איפוס סיסמה<span className="sr-only"> {u.name}</span></button>
+                      <button className="danger" disabled={u.id === meId || !assignable.some((r) => r.key === u.role)} onClick={() => openDel(u)}>מחיקה<span className="sr-only"> {u.name}</span></button>
                     </div>
                   </td>
                 )}
@@ -69,6 +93,44 @@ export function Team({ me }: { me: Me }) {
           </tbody>
         </table>
       </div>
+
+      {pwFor && (
+        <section className="card" aria-labelledby="pw-h">
+          <h2 id="pw-h" ref={panel} tabIndex={-1}>איפוס סיסמה: {pwFor.name}</h2>
+          {!pwDone ? (
+            <form onSubmit={doReset}>
+              <p className="hint">הסיסמה הנוכחית תתבטל והמשתמש ינותק מכל המכשירים. אם החשבון נעול בגלל ניסיונות כושלים, הנעילה תוסר. בכניסה הבאה יידרש לבחור סיסמה חדשה משלו.</p>
+              <div className="field"><label><input type="checkbox" style={{ width: 'auto', minHeight: 'auto' }} checked={pwOwn} onChange={(e) => setPwOwn(e.target.checked)} /> אבחר את הסיסמה הזמנית בעצמי (אחרת תיווצר אוטומטית)</label></div>
+              {pwOwn && <div className="field"><label htmlFor="pw-own">סיסמה זמנית (לפחות 12 תווים)</label><input id="pw-own" type="password" required minLength={12} maxLength={256} autoComplete="new-password" dir="ltr" value={pwVal} onChange={(e) => setPwVal(e.target.value)} /></div>}
+              <div className="row"><button className="primary" type="submit">איפוס</button><button type="button" onClick={() => setPwFor(null)}>ביטול</button></div>
+            </form>
+          ) : (
+            <div role="status">
+              <p>הסיסמה אופסה והמשתמש נותק.</p>
+              {pwRes ? (
+                <>
+                  <p>סיסמה זמנית (מוצגת פעם אחת בלבד, מסרו אותה בערוץ מאובטח):</p>
+                  <p><code dir="ltr" style={{ fontSize: '1.2rem', userSelect: 'all' }}>{pwRes}</code> <button type="button" onClick={() => void navigator.clipboard?.writeText(pwRes)}>העתקה</button></p>
+                </>
+              ) : <p>הסיסמה שבחרתם נשמרה. מסרו אותה בערוץ מאובטח.</p>}
+              <button type="button" onClick={() => { setPwFor(null); setPwRes(null); }}>סגירה</button>
+            </div>
+          )}
+          <p role="alert" className="error">{panelMsg}</p>
+        </section>
+      )}
+
+      {delFor && (
+        <section className="card" aria-labelledby="del-h">
+          <h2 id="del-h" ref={panel} tabIndex={-1}>מחיקת משתמש: {delFor.name}</h2>
+          <form onSubmit={doDelete}>
+            <p>החשבון יימחק לצמיתות. השיחות שלו יישארו (בלי שיוך), וההערות וההודעות שכתב יישארו בלי שם. אי אפשר לשחזר. אם רק רוצים להפסיק את הגישה, "השבתה" מספיקה וניתנת לביטול.</p>
+            <div className="field"><label htmlFor="del-em">לאישור, הקלידו את האימייל <span dir="ltr">{delFor.email}</span></label><input id="del-em" required dir="ltr" autoComplete="off" value={delEmail} onChange={(e) => setDelEmail(e.target.value)} /></div>
+            <div className="row"><button className="danger" type="submit" disabled={delEmail.trim().toLowerCase() !== delFor.email.toLowerCase()}>מחיקה לצמיתות</button><button type="button" onClick={() => setDelFor(null)}>ביטול</button></div>
+          </form>
+          <p role="alert" className="error">{panelMsg}</p>
+        </section>
+      )}
 
       {isAdmin && (
         <form className="card" onSubmit={create}>

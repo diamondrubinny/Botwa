@@ -46,6 +46,7 @@ export function Account({ me, onChanged }: { me: Me; onChanged: () => void }) {
       await api('POST', '/auth/password', { current: cur, next });
       setCur(''); setNext('');
       setPwMsg({ ok: true, text: 'הסיסמה עודכנה.' });
+      onChanged();
     } catch (err) {
       setPwMsg({ ok: false, text: errText(err instanceof ApiError ? err.code : 'generic') });
     }

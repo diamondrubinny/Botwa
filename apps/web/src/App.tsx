@@ -64,7 +64,7 @@ function Shell({ me, reloadMe, onLogout }: { me: Me; reloadMe: () => Promise<voi
   const brand = useBrand();
   const sb = useSidebar();
 
-  const page = me.mfaEnrollmentRequired ? 'account' : route;
+  const page = me.mfaEnrollmentRequired || me.passwordChangeRequired ? 'account' : route;
   const visible = NAV.filter((n) => n.allowed(me));
   // phones: first three destinations + "more" (a sheet with everything); few destinations: show all
   const bottom = visible.length <= 4 ? visible : visible.slice(0, 3);
@@ -162,6 +162,7 @@ function Shell({ me, reloadMe, onLogout }: { me: Me; reloadMe: () => Promise<voi
         </header>
 
         <main id="main">
+          {me.passwordChangeRequired && <p className="banner" role="alert">מנהל המערכת איפס את הסיסמה שלכם. בחרו עכשיו סיסמה חדשה משלכם (הסיסמה הזמנית היא "הסיסמה הנוכחית") כדי להמשיך.</p>}
           {me.mfaEnrollmentRequired && <p className="banner" role="alert">התפקיד שלכם מחייב אימות דו-שלבי או Passkey. הפעילו אחד מהם כדי להמשיך.</p>}
           {page === 'inbox' && <Inbox me={me} />}
           {page === 'bot' && can(me, 'bot.view') && <Bot me={me} />}

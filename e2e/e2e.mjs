@@ -640,6 +640,29 @@ await page.fill('#u-name', 'אנה אנליסטית'); await page.fill('#u-email
 await page.selectOption('#u-role', { label: 'אנליסט' });
 await page.click('button:has-text("יצירת משתמש")');
 await page.waitForSelector('td:has-text("ana@e2e.io")');
+
+// reset password and delete a user
+await page.fill('#u-name', 'זמני'); await page.fill('#u-email', 'tmp@e2e.io'); await page.fill('#u-pw', 'temporary-password-1');
+await page.click('button:has-text("יצירת משתמש")');
+await page.waitForSelector('td:has-text("tmp@e2e.io")');
+await page.click('tr:has(td:has-text("tmp@e2e.io")) button:has-text("איפוס סיסמה")');
+await page.waitForSelector('h2:has-text("איפוס סיסמה: זמני")');
+await axe('team: reset password panel');
+await page.click('section[aria-labelledby="pw-h"] button[type=submit]');
+await page.waitForSelector('section[aria-labelledby="pw-h"] code');
+const temp = await page.textContent('section[aria-labelledby="pw-h"] code');
+check('team: a temporary password is shown once', /^[A-Za-z2-9]{16}$/.test(temp ?? ''), temp ?? '');
+await axe('team: temporary password shown');
+await page.click('section[aria-labelledby="pw-h"] button:has-text("סגירה")');
+check('team: the temporary password is gone after closing', (await page.locator('code:has-text("' + temp + '")').count()) === 0);
+await page.click('tr:has(td:has-text("tmp@e2e.io")) button:has-text("מחיקה")');
+await page.waitForSelector('h2:has-text("מחיקת משתמש: זמני")');
+check('team: delete stays disabled until the e-mail is typed', await page.isDisabled('section[aria-labelledby="del-h"] button[type=submit]'));
+await axe('team: delete panel');
+await page.fill('#del-em', 'tmp@e2e.io');
+await page.click('section[aria-labelledby="del-h"] button[type=submit]');
+await page.waitForFunction(() => !document.body.innerText.includes('tmp@e2e.io'), null, { timeout: 8000 }).catch(() => undefined);
+check('team: the user is deleted', (await page.locator('td:has-text("tmp@e2e.io")').count()) === 0);
 await page.click('aside.sidebar >> button:has-text("התנתקות")');
 await page.waitForSelector('#email');
 await page.fill('#email', 'ana@e2e.io'); await page.fill('#pw', 'analyst-password-1'); await page.click('button[type=submit]');

@@ -1,4 +1,5 @@
 import type { FastifyInstance } from 'fastify';
+import { randomInt } from 'node:crypto';
 import { z } from 'zod';
 import { audit } from '../audit.js';
 import { requireAuth, type AuthUser } from '../auth.js';
@@ -7,6 +8,7 @@ import { hashPassword, PASSWORD_MIN } from '../password.js';
 import { BUILTIN_ROLES, cleanPermissions, isSubset } from '../permissions.js';
 
 const idParam = z.object({ id: z.string().uuid() });
+const TEMP_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789';   // no look-alike characters
 const publicCols = 'id, email, name, role, active, available, totp_enabled AS "mfaEnabled", created_at AS "createdAt"';
 
 export async function permissionsOfRole(db: Db, key: string): Promise<string[] | null> {
@@ -106,6 +108,40 @@ export function userRoutes(app: FastifyInstance, db: Db) {
     await db.query('DELETE FROM passkeys WHERE user_id = $1', [p.data.id]);
     await db.query('DELETE FROM sessions WHERE user_id = $1', [p.data.id]);
     await audit(db, { actorId: req.user!.id, action: 'user.mfa_reset', target: p.data.id, ip: req.ip });
+    return { ok: true };
+  });
+
+  // A temporary password for someone who forgot theirs. Shown once; the person must choose their own at the next sign-in.
+  app.post('/users/:id/reset-password', { preHandler: manage, config: { rateLimit: { max: 10, timeWindow: '10 minutes' } } }, async (req, reply) => {
+    const p = idParam.safeParse(req.params);
+    const b = z.object({ password: z.string().min(PASSWORD_MIN).max(256).optional() }).safeParse(req.body ?? {});
+    if (!p.success || !b.success) return reply.code(400).send({ error: 'bad_request' });
+    if (p.data.id === req.user!.id) return reply.code(409).send({ error: 'use_account_page' });
+    const cur = (await db.query('SELECT role FROM users WHERE id = $1', [p.data.id])).rows[0];
+    if (!cur) return reply.code(404).send({ error: 'not_found' });
+    if (!(await mayUseRole(db, req.user!, cur.role))) return reply.code(403).send({ error: 'role_exceeds_permissions' });
+    const generated = b.data.password === undefined;
+    const pw = b.data.password ?? Array.from({ length: 16 }, () => TEMP_ALPHABET[randomInt(TEMP_ALPHABET.length)]).join('');
+    await db.query('UPDATE users SET password_hash = $2, must_change_password = true, failed_logins = 0, locked_until = NULL, updated_at = now() WHERE id = $1', [p.data.id, await hashPassword(pw)]);
+    await db.query('DELETE FROM sessions WHERE user_id = $1', [p.data.id]);
+    await audit(db, { actorId: req.user!.id, action: 'user.password_reset', target: p.data.id, ip: req.ip, meta: { generated } });
+    return reply.header('cache-control', 'no-store').send(generated ? { ok: true, temporaryPassword: pw } : { ok: true });
+  });
+
+  // Delete an account. The person's conversations stay (unassigned), their notes and messages stay without a name; sessions, passkeys and stars go.
+  app.delete('/users/:id', { preHandler: manage, config: { rateLimit: { max: 20, timeWindow: '10 minutes' } } }, async (req, reply) => {
+    const p = idParam.safeParse(req.params);
+    const b = z.object({ email: z.string().email().max(254).transform((s) => s.toLowerCase()) }).safeParse(req.body);
+    if (!p.success || !b.success) return reply.code(400).send({ error: 'bad_request' });
+    const actor = req.user!;
+    if (p.data.id === actor.id) return reply.code(409).send({ error: 'cannot_delete_self' });
+    const cur = (await db.query('SELECT role, email, active FROM users WHERE id = $1', [p.data.id])).rows[0];
+    if (!cur) return reply.code(404).send({ error: 'not_found' });
+    if (b.data.email !== String(cur.email).toLowerCase()) return reply.code(400).send({ error: 'confirm_mismatch' });   // typed address must match: no deleting by a mistaken click
+    if (!(await mayUseRole(db, actor, cur.role))) return reply.code(403).send({ error: 'role_exceeds_permissions' });
+    if (cur.role === 'admin' && cur.active && (await activeAdmins(db, p.data.id)) === 0) return reply.code(409).send({ error: 'last_admin' });
+    await db.query('DELETE FROM users WHERE id = $1', [p.data.id]);
+    await audit(db, { actorId: actor.id, action: 'user.delete', target: p.data.id, ip: req.ip, meta: { role: cur.role } });
     return { ok: true };
   });
 
