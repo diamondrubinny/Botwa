@@ -167,13 +167,23 @@ await page.waitForSelector('th:has-text("מהן שעות הפעילות שלכם
 await page.waitForSelector('.badge:has-text("מוכן")');
 check('knowledge base: FAQ added and indexed', true);
 await axe('knowledge base: sources');
+await page.click('.chips >> text=מקורות');
+await page.click('button:has-text("הוספת קישור")');
+await page.selectOption('#kb-crawl', '25');
+await page.click('summary:has-text("אפשרויות סריקה מתקדמות")');
+await page.fill('#sc-exc', '/login'); await page.fill('#sc-sel', 'main');
+check('knowledge base: advanced scrape options are available', (await page.locator('#sc-depth').count()) === 1 && (await page.locator('button:has-text("תצוגה מקדימה")').count()) === 1);
+await axe('knowledge base: advanced scrape options');
+await page.fill('#kb-url', 'http://127.0.0.1/'); await page.click('button:has-text("תצוגה מקדימה")');
+await page.waitForSelector('text=כתובת חסומה מטעמי אבטחה');
+check('knowledge base: preview refuses an internal address', true);
 await page.click('.chips >> text=בדיקת חיפוש');
 await page.fill('#pg-q', 'בשעות הפעילות');
 await page.click('button:has-text("בדיקה")');
 await page.waitForSelector('text=הבוט היה עונה.');
 check('knowledge base: playground finds the answer despite a Hebrew prefix', true);
 await axe('knowledge base: playground');
-for (const tab of ['שאלות ללא מענה', 'מילים נרדפות', 'סטטיסטיקה']) { await page.click(`.chips >> text=${tab}`); await page.waitForTimeout(400); await axe(`knowledge base: ${tab}`); }
+for (const tab of ['שאלות ללא מענה', 'מילים נרדפות', 'סטטיסטיקה', 'בריאות וכלים']) { await page.click(`.chips >> text=${tab}`); await page.waitForTimeout(400); await axe(`knowledge base: ${tab}`); }
 await page.click('aside.sidebar nav >> text=בוט');
 await page.waitForSelector('legend:has-text("מענה ממאגר הידע")');
 await axe('bot page with knowledge base settings');

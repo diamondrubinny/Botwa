@@ -7,7 +7,7 @@ import { errText } from '../strings';
 interface Source {
   id: string; kind: 'faq' | 'text' | 'file' | 'link'; title: string; variants: string[]; url: string | null; fileName: string | null; categoryId: string | null;
   audience: 'bot' | 'staff' | 'both'; boost: number; enabled: boolean; status: 'pending' | 'ready' | 'error'; error: string | null; refreshHours: number | null;
-  crawlPages: number; lastFetchedAt: string | null; parentId: string | null; version: number; uses: number; helpful: number; unhelpful: number; chunks: number; body?: string;
+  crawlPages: number; crawlReport?: CrawlReport | null; lastFetchedAt: string | null; parentId: string | null; version: number; uses: number; helpful: number; unhelpful: number; chunks: number; body?: string;
 }
 interface Category { id: string; name: string; sources: number }
 interface Hit { sem?: number; cos?: number | null; sourceId: string; title: string; kind: string; url: string | null; snippet: string; score: number; matched: number; tokens: number; exact: boolean; heading: string | null }
@@ -19,10 +19,12 @@ const STATUS = { pending: 'בעיבוד…', ready: 'מוכן', error: 'שגיא
 const ERR_SRC: Record<string, string> = {
   http_404: 'הדף לא נמצא (404)', http_403: 'הגישה נחסמה (403)', fetch_failed: 'לא ניתן להתחבר לכתובת', blocked_address: 'כתובת חסומה מטעמי אבטחה', unsupported_content_type: 'סוג תוכן לא נתמך',
   too_large: 'הקובץ גדול מדי', empty_content: 'לא נמצא טקסט בתוכן', infected: 'נמצאה תוכנה זדונית', scan_unavailable: 'סורק הווירוסים לא זמין', extract_timeout: 'הקריאה ארכה יותר מדי',
-  extract_failed: 'לא ניתן לקרוא את הקובץ', kb_full: 'המאגר מלא', too_many_redirects: 'יותר מדי הפניות', bad_url: 'כתובת לא תקינה',
+  extract_failed: 'לא ניתן לקרוא את הקובץ', gone: 'הדף כבר לא נמצא באתר (הושבת)', thin_content: 'כמעט אין בדף טקסט', soft_404: 'דף שגיאה', dns_failed: 'כתובת האתר לא נמצאה', timeout: 'האתר לא ענה בזמן', tls_error: 'בעיית תעודת אבטחה באתר', kb_full: 'המאגר מלא', too_many_redirects: 'יותר מדי הפניות', bad_url: 'כתובת לא תקינה',
 };
-type Tab = 'sources' | 'test' | 'gaps' | 'synonyms' | 'stats';
-const TABS: [Tab, string][] = [['sources', 'מקורות'], ['test', 'בדיקת חיפוש'], ['gaps', 'שאלות ללא מענה'], ['synonyms', 'מילים נרדפות'], ['stats', 'סטטיסטיקה']];
+interface CrawlReport { at: string; discovered: number; indexed: number; unchanged: number; failed: number; robots: number; filtered: number; duplicates: number; thin: number; gone: number; limited: boolean; sitemap: number }
+const reportText = (r: CrawlReport) => `נסרקו ${r.indexed + r.unchanged + r.failed + r.thin + r.duplicates} דפים: ${r.indexed} חדשים או עודכנו, ${r.unchanged} ללא שינוי${r.failed ? `, ${r.failed} נכשלו` : ''}${r.thin ? `, ${r.thin} כמעט ריקים (לא נשמרו)` : ''}${r.duplicates ? `, ${r.duplicates} כפילויות` : ''}${r.robots ? `, ${r.robots} נחסמו ב-robots.txt` : ''}${r.filtered ? `, ${r.filtered} מחוץ להיקף` : ''}${r.gone ? `, ${r.gone} כבר לא באתר (הושבתו)` : ''}${r.limited ? '. הסריקה נעצרה במגבלת הדפים' : ''}`;
+type Tab = 'sources' | 'test' | 'gaps' | 'synonyms' | 'stats' | 'health';
+const TABS: [Tab, string][] = [['sources', 'מקורות'], ['test', 'בדיקת חיפוש'], ['gaps', 'שאלות ללא מענה'], ['synonyms', 'מילים נרדפות'], ['stats', 'סטטיסטיקה'], ['health', 'בריאות וכלים']];
 
 export function KnowledgeBase() {
   const [tab, setTab] = useState<Tab>('sources');
@@ -38,6 +40,7 @@ export function KnowledgeBase() {
       {tab === 'gaps' && <Gaps onAnswer={() => setTab('sources')} />}
       {tab === 'synonyms' && <Synonyms />}
       {tab === 'stats' && <StatsView />}
+      {tab === 'health' && <Health />}
     </>
   );
 }
@@ -96,6 +99,7 @@ function Sources() {
                   <span className={`badge ${s.status === 'ready' ? 'connected' : s.status === 'error' ? 'error' : 'connecting'}`}>{STATUS[s.status]}</span>
                   {s.error && <div className="error"><small>{ERR_SRC[s.error] ?? s.error}</small></div>}
                   <div className="hint">{s.chunks} קטעים · גרסה {s.version}{s.refreshHours ? ` · רענון כל ${s.refreshHours} שע׳` : ''}</div>
+                  {s.crawlReport && <div className="hint">סריקה אחרונה ({new Date(s.crawlReport.at).toLocaleDateString('he-IL')}): {reportText(s.crawlReport)}</div>}
                 </td>
                 <td>{AUD[s.audience]}</td>
                 <td>{s.uses}{(s.helpful || s.unhelpful) ? ` (👍${s.helpful} 👎${s.unhelpful})` : ''}</td>
@@ -149,6 +153,8 @@ function AddForm({ kind, cats, onDone, onError }: { kind: 'faq' | 'text' | 'file
   const [body, setBody] = useState('');
   const [url, setUrl] = useState('');
   const [crawl, setCrawl] = useState(0);
+  const [adv, setAdv] = useState<CrawlOpts>({ depth: 1, sitemap: false, stayInPath: false, files: false, include: '', exclude: '', selector: '', remove: '' });
+  const [preview, setPreview] = useState<Preview | null>(null);
   const [refresh, setRefresh] = useState('');
   const [audience, setAudience] = useState<'bot' | 'staff' | 'both'>('both');
   const [categoryId, setCategoryId] = useState('');
@@ -165,7 +171,7 @@ function AddForm({ kind, cats, onDone, onError }: { kind: 'faq' | 'text' | 'file
     try {
       if (kind === 'faq') await api('POST', '/kb/sources/faq', { title, variants: variants.split('\n').map((v) => v.trim()).filter(Boolean), body, ...common });
       else if (kind === 'text') await api('POST', '/kb/sources/text', { title, body, ...common });
-      else if (kind === 'link') await api('POST', '/kb/sources/link', { url, crawlPages: crawl, refreshHours: refresh ? Number(refresh) : null, ...common });
+      else if (kind === 'link') await api('POST', '/kb/sources/link', { url, crawlPages: crawl, refreshHours: refresh ? Number(refresh) : null, crawl: crawlBody(adv), ...common });
       else {
         const f = file.current?.files?.[0];
         if (!f) { onError('בחרו קובץ.'); setBusy(false); return; }
@@ -190,13 +196,15 @@ function AddForm({ kind, cats, onDone, onError }: { kind: 'faq' | 'text' | 'file
           <div className="field"><label htmlFor="kb-url">כתובת (http/https)</label><input id="kb-url" ref={first} required dir="ltr" inputMode="url" placeholder="https://example.com/help" value={url} onChange={(e) => setUrl(e.target.value)} /></div>
           <div className="field">
             <label htmlFor="kb-crawl">לקרוא גם דפים מאותו אתר שמקושרים מהדף</label>
-            <select id="kb-crawl" value={crawl} onChange={(e) => setCrawl(Number(e.target.value))}><option value={0}>לא, רק הדף הזה</option><option value={5}>עד 5 דפים</option><option value={10}>עד 10 דפים</option><option value={25}>עד 25 דפים</option></select>
+            <select id="kb-crawl" value={crawl} onChange={(e) => setCrawl(Number(e.target.value))}><option value={0}>לא, רק הדף הזה</option>{[5, 10, 25, 50, 100, 300].map((n) => <option key={n} value={n}>עד {n} דפים</option>)}</select>
           </div>
           <div className="field">
             <label htmlFor="kb-ref">רענון אוטומטי</label>
             <select id="kb-ref" value={refresh} onChange={(e) => setRefresh(e.target.value)}><option value="">ללא</option><option value="24">פעם ביום</option><option value="168">פעם בשבוע</option></select>
             <p className="hint">השרת ניגש לכתובת בעצמו. כתובות פנימיות וכתובות של השרת עצמו נחסמות מטעמי אבטחה.</p>
           </div>
+          <ScrapeOptions adv={adv} setAdv={setAdv} url={url} onPreview={setPreview} onError={onError} crawl={crawl} />
+          {preview && <PreviewPanel p={preview} />}
         </>
       ) : kind === 'file' ? (
         <>
@@ -380,5 +388,128 @@ function StatsView() {
       <h3 style={{ marginTop: '1rem' }}>המקורות הנפוצים</h3>
       <ol>{s.top.length === 0 ? <li>אין עדיין.</li> : s.top.map((t) => <li key={t.id}>{t.title}: {t.uses} שימושים (👍{t.helpful} 👎{t.unhelpful})</li>)}</ol>
     </section>
+  );
+}
+
+
+interface CrawlOpts { depth: number; sitemap: boolean; stayInPath: boolean; files: boolean; include: string; exclude: string; selector: string; remove: string }
+const lines = (v: string) => v.split('\n').map((x) => x.trim()).filter(Boolean).slice(0, 10);
+const crawlBody = (o: CrawlOpts) => ({ depth: o.depth, sitemap: o.sitemap, stayInPath: o.stayInPath, files: o.files, include: lines(o.include), exclude: lines(o.exclude), selector: o.selector.trim(), remove: lines(o.remove) });
+interface Preview {
+  url: string; title: string | null; canonical: string | null; robotsAllowed: boolean; chars: number; thin: boolean; soft404: boolean; headings: string[]; excerpt: string;
+  links: { total: number; accepted: string[]; filtered: number; robots: number; duplicates: number }; sitemap: { found: boolean; urls: number; sample: string[] };
+}
+
+function ScrapeOptions({ adv, setAdv, url, onPreview, onError, crawl }: { adv: CrawlOpts; setAdv: (o: CrawlOpts) => void; url: string; onPreview: (p: Preview | null) => void; onError: (t: string) => void; crawl: number }) {
+  const [busy, setBusy] = useState(false);
+  const set = (p: Partial<CrawlOpts>) => setAdv({ ...adv, ...p });
+  async function run() {
+    setBusy(true); onPreview(null);
+    try { onPreview(await api<Preview>('POST', '/kb/scrape/preview', { url, crawl: crawlBody(adv) })); } catch (er) { onError(ERR_SRC[er instanceof ApiError ? er.code : ''] ?? errText(er instanceof ApiError ? er.code : 'generic')); }
+    setBusy(false);
+  }
+  return (
+    <details className="card">
+      <summary><strong>אפשרויות סריקה מתקדמות</strong> (עומק, מפת אתר, דפוסים, בורר תוכן, תצוגה מקדימה)</summary>
+      <div className="row">
+        <div className="field"><label htmlFor="sc-depth">עומק (קפיצות מהדף הראשון)</label>
+          <select id="sc-depth" value={adv.depth} disabled={crawl === 0} onChange={(e) => set({ depth: Number(e.target.value) })}>{[1, 2, 3, 4].map((n) => <option key={n} value={n}>{n}</option>)}</select></div>
+      </div>
+      <div className="field"><label><input type="checkbox" style={{ width: 'auto', minHeight: 'auto' }} checked={adv.sitemap} disabled={crawl === 0} onChange={(e) => set({ sitemap: e.target.checked })} /> להוסיף כתובות ממפת האתר (sitemap.xml)</label></div>
+      <div className="field"><label><input type="checkbox" style={{ width: 'auto', minHeight: 'auto' }} checked={adv.stayInPath} disabled={crawl === 0} onChange={(e) => set({ stayInPath: e.target.checked })} /> להישאר בתוך החלק של האתר שבכתובת (למשל רק /help)</label></div>
+      <div className="field"><label><input type="checkbox" style={{ width: 'auto', minHeight: 'auto' }} checked={adv.files} disabled={crawl === 0} onChange={(e) => set({ files: e.target.checked })} /> לקרוא גם קבצי PDF, Word ו-Excel שמקושרים (נסרקים לוירוסים)</label></div>
+      <div className="field"><label htmlFor="sc-inc">לקרוא רק כתובות שמכילות (שורה לכל דפוס, אפשר *)</label><textarea id="sc-inc" rows={2} dir="ltr" value={adv.include} disabled={crawl === 0} onChange={(e) => set({ include: e.target.value })} placeholder="/help/*" /></div>
+      <div className="field"><label htmlFor="sc-exc">לא לקרוא כתובות שמכילות (שורה לכל דפוס)</label><textarea id="sc-exc" rows={2} dir="ltr" value={adv.exclude} disabled={crawl === 0} onChange={(e) => set({ exclude: e.target.value })} placeholder={'/login\nprint=1'} /></div>
+      <div className="field"><label htmlFor="sc-sel">בורר CSS של תוכן הדף (ריק = זיהוי אוטומטי)</label><input id="sc-sel" dir="ltr" maxLength={200} value={adv.selector} onChange={(e) => set({ selector: e.target.value })} placeholder="main .article" /></div>
+      <div className="field"><label htmlFor="sc-rem">חלקים להסיר מכל דף (בורר CSS בכל שורה)</label><textarea id="sc-rem" rows={2} dir="ltr" value={adv.remove} onChange={(e) => set({ remove: e.target.value })} placeholder=".promo&#10;#cookie-banner" /></div>
+      <p className="hint">בכל מקרה: השרת מכבד robots.txt, מדלג על דפי שגיאה ודפים ריקים, מאחד כתובות כפולות (כולל canonical) ולא עוקב אחרי קישורי nofollow. אם בדף נשאר אחרי הסריקה טקסט מיותר או שחסר תוכן, התאימו בורר וראו בתצוגה המקדימה.</p>
+      <button type="button" onClick={run} disabled={busy || !url.trim()}>{busy ? 'בודק…' : 'תצוגה מקדימה (לא נשמר דבר)'}</button>
+    </details>
+  );
+}
+
+function PreviewPanel({ p }: { p: Preview }) {
+  return (
+    <section className="card" aria-live="polite" aria-labelledby="sc-pv">
+      <h3 id="sc-pv">תצוגה מקדימה: {p.title ?? p.url}</h3>
+      <ul>
+        <li>{p.chars.toLocaleString('he-IL')} תווים של טקסט {p.thin && <strong className="error"> (מעט מדי: דף כזה לא יישמר)</strong>}{p.soft404 && <strong className="error"> (נראה כדף שגיאה)</strong>}</li>
+        {!p.robotsAllowed && <li className="error">robots.txt של האתר אוסר קריאת הדף הזה, ולכן הסריקה תדלג עליו.</li>}
+        {p.canonical && p.canonical !== p.url && <li>הדף מצהיר שהכתובת הקנונית שלו היא <span dir="ltr">{p.canonical}</span>, ולכן בסריקה יקרא רק הדף ההוא.</li>}
+        <li>קישורים בדף: {p.links.total}. ייסרקו {p.links.accepted.length}{p.links.accepted.length >= 40 ? '+' : ''}, מחוץ להיקף {p.links.filtered}, נחסמו ב-robots.txt {p.links.robots}, כפולים {p.links.duplicates}.</li>
+        {p.sitemap.found && <li>במפת האתר נמצאו {p.sitemap.urls} כתובות.</li>}
+      </ul>
+      {p.headings.length > 0 && <><strong>כותרות שזוהו</strong><pre dir="auto" style={{ whiteSpace: 'pre-wrap' }}>{p.headings.join('\n')}</pre></>}
+      <strong>הטקסט שייקלט (תחילתו)</strong>
+      <pre dir="auto" style={{ whiteSpace: 'pre-wrap', maxHeight: 260, overflow: 'auto' }} tabIndex={0}>{p.excerpt}</pre>
+      {p.links.accepted.length > 0 && <details><summary>כתובות שייסרקו (דוגמה)</summary><ul dir="ltr">{p.links.accepted.map((u) => <li key={u} style={{ overflowWrap: 'anywhere' }}>{u}</li>)}</ul></details>}
+    </section>
+  );
+}
+
+interface Health {
+  byStatus: { status: string; n: number }[];
+  errors: { id: string; title: string; url: string | null; kind: string; error: string | null }[];
+  stale: { id: string; title: string; url: string | null; lastFetchedAt: string }[];
+  empty: { id: string; title: string; kind: string }[];
+  crawls: { id: string; title: string; url: string | null; report: CrawlReport }[];
+}
+interface DupGroup { hash: string; items: { id: string; title: string; kind: string; url: string | null; enabled: boolean; parentId: string | null }[] }
+
+function Health() {
+  const [h, setH] = useState<Health | null>(null);
+  const [dups, setDups] = useState<DupGroup[]>([]);
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const [del, setDel] = useState<{ id: string; title: string } | null>(null);
+  const load = async () => { setH(await api<Health>('GET', '/kb/health').catch(() => null)); setDups(await api<DupGroup[]>('GET', '/kb/duplicates').catch(() => [])); };
+  useEffect(() => { void load(); }, []);
+  const act = async (fn: () => Promise<unknown>, ok: string) => { setMsg(null); try { await fn(); setMsg({ ok: true, text: ok }); await load(); } catch (e) { setMsg({ ok: false, text: errText(e instanceof ApiError ? e.code : 'generic') }); } };
+  if (!h) return <p role="status">טוען…</p>;
+  const n = (s: string) => h.byStatus.find((x) => x.status === s)?.n ?? 0;
+  return (
+    <>
+      <section className="card" aria-labelledby="hl-h">
+        <h2 id="hl-h">בריאות המאגר</h2>
+        <p>{n('ready')} מקורות תקינים, {n('pending')} ממתינים, {n('error')} בשגיאה.</p>
+        <div className="row"><button onClick={() => act(() => api('POST', '/kb/sources/refresh-links'), 'כל הקישורים נשלחו לרענון (דפים שלא השתנו לא יתעדכנו).')}>רענון כל הקישורים עכשיו</button></div>
+        <p role="status" className={msg?.ok ? 'ok' : 'error'}>{msg?.text}</p>
+      </section>
+
+      <section className="card" aria-labelledby="hl-e">
+        <h2 id="hl-e">מקורות בשגיאה ({h.errors.length})</h2>
+        {h.errors.length === 0 ? <p>אין.</p> : (
+          <table><caption className="sr-only">מקורות בשגיאה</caption><thead><tr><th scope="col">מקור</th><th scope="col">הסיבה</th><th scope="col">פעולות</th></tr></thead>
+            <tbody>{h.errors.map((e) => (
+              <tr key={e.id}><th scope="row">{e.title}{e.url && <div dir="ltr" className="hint" style={{ overflowWrap: 'anywhere' }}>{e.url}</div>}</th><td>{ERR_SRC[e.error ?? ''] ?? e.error}</td>
+                <td className="row">{e.kind === 'link' && <button onClick={() => act(() => api('POST', `/kb/sources/${e.id}/reindex`), 'הרענון התחיל.')}>ניסיון חוזר<span className="sr-only"> {e.title}</span></button>}
+                  <button className="danger" onClick={() => setDel({ id: e.id, title: e.title })}>מחיקה<span className="sr-only"> {e.title}</span></button></td></tr>))}</tbody></table>
+        )}
+      </section>
+
+      <section className="card" aria-labelledby="hl-d">
+        <h2 id="hl-d">תוכן כפול ({dups.length})</h2>
+        <p className="hint">מקורות שהתוכן שלהם זהה. כדאי להשאיר אחד.</p>
+        {dups.length === 0 ? <p>לא נמצאו כפילויות.</p> : dups.map((g) => (
+          <ul key={g.hash}>{g.items.map((i, k) => <li key={i.id} className="row"><span>{i.title}{i.url && <span dir="ltr" className="hint"> {i.url}</span>}{k === 0 && ' (הראשון)'}</span>
+            {k > 0 && <button className="danger" onClick={() => setDel({ id: i.id, title: i.title })}>מחיקה<span className="sr-only"> {i.title}</span></button>}</li>)}</ul>
+        ))}
+      </section>
+
+      <section className="card" aria-labelledby="hl-s">
+        <h2 id="hl-s">לא רועננו מעל 60 יום ({h.stale.length}) ומקורות בלי תוכן ({h.empty.length})</h2>
+        {h.stale.length + h.empty.length === 0 ? <p>אין.</p> : (
+          <ul>{h.stale.map((x) => <li key={x.id} className="row"><span>{x.title} · נקרא לאחרונה {new Date(x.lastFetchedAt).toLocaleDateString('he-IL')}</span><button onClick={() => act(() => api('POST', `/kb/sources/${x.id}/reindex`), 'הרענון התחיל.')}>רענון<span className="sr-only"> {x.title}</span></button></li>)}
+            {h.empty.map((x) => <li key={x.id}>{x.title} (אין קטעי תוכן)</li>)}</ul>
+        )}
+      </section>
+
+      <section className="card" aria-labelledby="hl-c">
+        <h2 id="hl-c">דוחות סריקה אחרונים</h2>
+        {h.crawls.length === 0 ? <p>עוד לא בוצעה סריקת אתר.</p> : <ul>{h.crawls.map((c) => <li key={c.id}><strong>{c.title}</strong> ({new Date(c.report.at).toLocaleString('he-IL')}): {reportText(c.report)}</li>)}</ul>}
+      </section>
+
+      <ConfirmDialog open={!!del} danger title="מחיקת מקור" message={`"${del?.title}" יימחק מהמאגר.`} onCancel={() => setDel(null)}
+        onConfirm={() => { const d = del!; setDel(null); void act(() => api('DELETE', `/kb/sources/${d.id}`), 'נמחק.'); }} />
+    </>
   );
 }

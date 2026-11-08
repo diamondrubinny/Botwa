@@ -52,14 +52,15 @@ export interface Chunk { heading: string | null; body: string }
 export function chunkText(text: string, target = 800, max = 1200): Chunk[] {
   const chunks: Chunk[] = [];
   let heading: string | null = null;
+  const stack: string[] = [];   // headings by level: "H1 › H2" is kept as the context of each chunk
   let buf = '';
   const flush = () => { const b = buf.trim(); if (b.length >= 15) chunks.push({ heading, body: b }); buf = ''; };
   const paras = text.replace(/\r/g, '').split(/\n{2,}/);
   for (const raw of paras) {
     const p = raw.trim();
     if (!p) continue;
-    const h = /^#{1,4}\s+(.+)$/.exec(p.split('\n')[0]!);
-    if (h) { flush(); heading = h[1]!.slice(0, 200); const rest = p.split('\n').slice(1).join('\n').trim(); if (rest) buf = rest; continue; }
+    const h = /^(#{1,4})\s+(.+)$/.exec(p.split('\n')[0]!);
+    if (h) { flush(); const lvl = h[1]!.length; stack.length = Math.min(stack.length, lvl - 1); while (stack.length < lvl - 1) stack.push(''); stack[lvl - 1] = h[2]!.trim(); heading = stack.filter(Boolean).join(' › ').slice(0, 200); const rest = p.split('\n').slice(1).join('\n').trim(); if (rest) buf = rest; continue; }
     if (p.length > max) {
       flush();
       for (const piece of splitLong(p, target)) { buf = piece; flush(); }

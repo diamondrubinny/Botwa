@@ -22,10 +22,11 @@ export function kindFor(fileNameOrUrl: string, mime: string): DocKind | null {
 const ext = import.meta.url.endsWith('.ts') ? '.ts' : '.js';
 
 /** Parse an untrusted document in an isolated worker (memory cap, hard timeout). */
-export function extract(kind: DocKind, data: Buffer, timeoutMs = 30_000): Promise<Extracted> {
+export interface HtmlOpts { select?: string; remove?: string[] }
+export function extract(kind: DocKind, data: Buffer, timeoutMs = 30_000, opts?: HtmlOpts): Promise<Extracted> {
   return new Promise((resolve, reject) => {
     const w = new Worker(new URL(`./extract-worker${ext}`, import.meta.url), {
-      workerData: { kind, data: new Uint8Array(data) },
+      workerData: { kind, data: new Uint8Array(data), opts },
       resourceLimits: { maxOldGenerationSizeMb: 384, maxYoungGenerationSizeMb: 32 },
       execArgv: ext === '.ts' ? ['--import', 'tsx'] : [],
     });

@@ -4,7 +4,8 @@ import type { Db } from '../db.js';
 import type { MediaService } from '../media/store.js';
 import { matchOptionLexical } from '../flow/match.js';
 import { checkUrl, FetchError, safeGet, type Fetched } from './fetch.js';
-import { extract, kindFor, type DocKind } from './extract.js';
+import { extract, kindFor, type DocKind, type HtmlOpts } from './extract.js';
+import { canonicalOf, crawlCfgSchema, DEFAULT_CRAWL, inScope, isSoft404, MIN_PAGE_CHARS, normalizeUrl, parseRobots, parseSitemap, prefixOf, robotsAllows, type CrawlCfg, type CrawlReport, type Robots, type Scope } from './crawler.js';
 import { dot, fromBuffer, NO_EMBEDDER, toBuffer, type Embedder } from '../semantic/embedder.js';
 import { bestSnippet, chunkText, indexTerms, queryTokens, variants, words } from './text.js';
 
@@ -31,6 +32,7 @@ export function isConfident(top: Hit | undefined, next: Hit | undefined, minScor
   return lexical || semantic;
 }
 
+export type Fetcher = (url: string, o?: { allow?: RegExp; accept?: string; maxBytes?: number }) => Promise<Fetched>;
 const BINARY: DocKind[] = ['pdf', 'docx', 'xlsx'];
 const MAX_CHUNKS_TOTAL = 30_000;
 
@@ -41,9 +43,9 @@ export class KnowledgeBase {
   setEmbedder(e: Embedder): void { this.embedder = e; this.vecs = null; }
   semanticStatus() { return this.embedder.status(); }
   private semReady = () => this.embedder.status().state === 'ready';
-  private fetcher: (url: string) => Promise<Fetched> = safeGet;
+  private fetcher: Fetcher = safeGet;
   /** Tests replace the network layer. */
-  setFetcher(f: (url: string) => Promise<Fetched>): void { this.fetcher = f; }
+  setFetcher(f: Fetcher): void { this.fetcher = f; }
   private synCache: { at: number; groups: string[][] } = { at: 0, groups: [] };
 
   constructor(private readonly db: Db, private readonly cfg: Config, private readonly media: MediaService) {}
@@ -125,9 +127,13 @@ export class KnowledgeBase {
     } catch (e) { await this.setError(id, (e as Error).message); throw e; }
   }
 
-  /** Index uploaded or fetched document bytes for a source (replacing earlier content). Returns false when content is unchanged. */
-  async indexDocument(id: string, kind: DocKind, data: Buffer, nameForTitle: string): Promise<boolean> {
-    const hash = createHash('sha256').update(data).digest('hex');
+  /**
+   * Index uploaded or fetched document bytes for a source (replacing earlier content). Returns false when content is unchanged.
+   * `opts.html`: selectors for a web page's main content; `opts.minChars`: refuse near-empty pages ("thin_content") and error pages that
+   * answer 200 ("soft_404"); `opts.storeLinks`: remember the links of the page (so a crawl can go on from pages that did not change).
+   */
+  async indexDocument(id: string, kind: DocKind, data: Buffer, nameForTitle: string, opts: { html?: HtmlOpts; minChars?: number; storeLinks?: boolean } = {}): Promise<boolean> {
+    const hash = createHash('sha256').update(data).update(kind === 'html' ? JSON.stringify(opts.html ?? {}) : '').digest('hex');
     const cur = (await this.db.query('SELECT content_hash, title, (SELECT count(*)::int FROM kb_chunks WHERE source_id = $1) AS chunks FROM kb_sources WHERE id = $1', [id])).rows[0];
     if (!cur) return false;
     if (cur.content_hash === hash && cur.chunks > 0) { await this.setReady(id, {}); return false; } // nothing changed: keep the version
@@ -136,56 +142,102 @@ export class KnowledgeBase {
       if (scan.status === 'infected') throw new Error('infected');
       if (scan.status !== 'clean') throw new Error('scan_unavailable'); // fail closed, like attachments
     }
-    const ex = await extract(kind, data);
+    const ex = await extract(kind, data, 30_000, opts.html);
+    if (kind === 'html' && opts.storeLinks) await this.db.query(`UPDATE kb_sources SET meta = meta || jsonb_build_object('links', $2::jsonb) WHERE id = $1`, [id, JSON.stringify(ex.links.slice(0, 400))]);
     if (!ex.text.trim()) throw new Error('empty_content');
+    if (opts.minChars !== undefined && kind === 'html') {
+      if (isSoft404(ex.title, ex.text)) throw new Error('soft_404');
+      if (ex.text.length < opts.minChars) throw new Error('thin_content');
+    }
     const title = cur.title && cur.title !== nameForTitle ? cur.title : (ex.title ?? nameForTitle).slice(0, 300);
     const n = await this.replaceChunks(id, title, [], ex.text);
     if (n === 0) throw new Error('empty_content');
     await this.db.query('UPDATE kb_sources SET version = version + 1 WHERE id = $1', [id]);
     await this.setReady(id, { title, hash });
     await this.embedSource(id).catch(() => undefined);
-    this.lastLinks.set(id, ex.links);
     return true;
   }
-  private lastLinks = new Map<string, string[]>();
 
-  /** Fetch + index one link source; optionally crawl same-site pages it links to. */
+  /** Links stored for a page by an earlier read. */
+  private async linksOf(id: string): Promise<string[]> {
+    const v = (await this.db.query(`SELECT meta->'links' AS l FROM kb_sources WHERE id = $1`, [id])).rows[0]?.l as unknown;
+    return Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : [];
+  }
+
+  private async crawlCfgOf(id: string): Promise<CrawlCfg> {
+    const raw = (await this.db.query('SELECT crawl_cfg FROM kb_sources WHERE id = $1', [id])).rows[0]?.crawl_cfg;
+    const p = crawlCfgSchema.safeParse(raw ?? {});
+    return p.success ? p.data : DEFAULT_CRAWL;
+  }
+  private htmlOpts = (c: CrawlCfg): HtmlOpts => ({ select: c.selector || undefined, remove: c.remove.length ? c.remove : undefined });
+
+  /** Fetch + index one link source; optionally crawl the site pages it links to. */
   private async process(id: string): Promise<void> {
     const { rows } = await this.db.query('SELECT id, kind, url, title, crawl_pages, parent_id FROM kb_sources WHERE id = $1', [id]);
     const s = rows[0];
     if (!s || s.kind !== 'link' || !s.url) return;
     try {
+      const cfg = await this.crawlCfgOf(id);
       const f = await this.fetcher(s.url);
       const kind = kindFor(f.url, f.contentType);
       if (!kind) throw new FetchError('unsupported_content_type');
-      await this.indexDocument(id, kind, f.body, s.title);
-      if (s.crawl_pages > 0 && !s.parent_id && kind === 'html') await this.crawl(id, f.url, s.crawl_pages, this.lastLinks.get(id) ?? []);
+      await this.indexDocument(id, kind, f.body, s.title, { html: this.htmlOpts(cfg), storeLinks: s.crawl_pages > 0 });
+      if (s.crawl_pages > 0 && !s.parent_id && kind === 'html') await this.crawl(id, f.url, s.crawl_pages, cfg);
     } catch (e) {
       await this.setError(id, e instanceof Error ? e.message : 'failed');
-    } finally {
-      this.lastLinks.delete(id);
     }
   }
 
-  private async crawl(parentId: string, baseUrl: string, limit: number, links: string[]): Promise<void> {
-    const base = new URL(baseUrl);
-    const seen = new Set<string>([base.toString()]);
-    const todo: string[] = [];
-    for (const h of links) {
+  private async readRobots(origin: string): Promise<Robots> {
+    try { return parseRobots((await this.fetcher(`${origin}/robots.txt`, { allow: /^text\//i, accept: 'text/plain', maxBytes: 200_000 })).body.toString('utf8')); } catch { return { allow: [], disallow: [], crawlDelay: null, sitemaps: [] }; }
+  }
+  /** Addresses from the sitemaps the site declares (robots.txt) or the default /sitemap.xml: at most five files, one index level deep. */
+  private async readSitemaps(origin: string, declared: string[]): Promise<string[]> {
+    const out: string[] = [];
+    const todo = [...new Set([...declared, `${origin}/sitemap.xml`])].slice(0, 5);
+    let files = 0;
+    while (todo.length && files < 5) {
+      const u = todo.shift()!;
+      files++;
       try {
-        const u = new URL(h, base);
-        u.hash = '';
-        if (u.origin !== base.origin || !/^https?:$/.test(u.protocol)) continue;
-        if (/\.(jpe?g|png|gif|svg|webp|ico|css|js|zip|mp4|mp3|xml|json)(\?|$)/i.test(u.pathname)) continue;
-        const key = u.toString();
-        if (seen.has(key)) continue;
-        seen.add(key); todo.push(key);
-      } catch { /* ignore malformed links */ }
-      if (todo.length >= limit) break;
+        const r = parseSitemap((await this.fetcher(u, { allow: /^(text|application)\/(xml|plain|x-xml)/i, accept: 'application/xml,text/xml', maxBytes: 3_000_000 })).body.toString('utf8'));
+        out.push(...r.urls);
+        for (const m of r.sitemaps) if (todo.length + files < 5) todo.push(m);
+      } catch { /* a sitemap that is missing or unreadable is simply not used */ }
     }
+    return out;
+  }
+
+  private async crawl(parentId: string, startUrl: string, limit: number, cfg: CrawlCfg): Promise<void> {
+    const start = normalizeUrl(startUrl) ?? startUrl;
+    const origin = new URL(start).origin;
+    const scope: Scope = { origin, prefix: cfg.stayInPath ? prefixOf(start) : null, include: cfg.include, exclude: cfg.exclude, files: cfg.files };
+    const rep: CrawlReport = { at: new Date().toISOString(), discovered: 0, indexed: 0, unchanged: 0, failed: 0, robots: 0, filtered: 0, duplicates: 0, thin: 0, gone: 0, limited: false, sitemap: 0 };
+    const robots = await this.readRobots(origin);
+    const delay = this.cfg.NODE_ENV === 'test' ? 0 : Math.min(5000, Math.max(400, (robots.crawlDelay ?? 0) * 1000)); // be polite to the site
+    const seen = new Set<string>([start]);
+    const queue: { url: string; depth: number }[] = [];
+    const enqueue = (raw: string, base: string, depth: number): boolean => {
+      const n = normalizeUrl(raw, base);
+      if (!n || seen.has(n)) return false;
+      seen.add(n);
+      if (inScope(n, scope) === 'filtered') { rep.filtered++; return false; }
+      const u = new URL(n);
+      if (!robotsAllows(robots, u.pathname + u.search)) { rep.robots++; return false; }
+      queue.push({ url: n, depth }); rep.discovered++;
+      return true;
+    };
+    for (const h of await this.linksOf(parentId)) enqueue(h, start, 1);
+    if (cfg.sitemap) for (const u of await this.readSitemaps(origin, robots.sitemaps)) if (enqueue(u, start, 1)) rep.sitemap++;
+
     const meta = (await this.db.query('SELECT category_id, audience, boost, created_by FROM kb_sources WHERE id = $1', [parentId])).rows[0];
-    for (const url of todo) {
-      await new Promise((r) => setTimeout(r, this.cfg.NODE_ENV === 'test' ? 0 : 400)); // be polite to the site
+    const touched = new Set<string>();
+    const deadline = Date.now() + 15 * 60_000;
+    let processed = 0;
+    while (queue.length && processed < limit && Date.now() < deadline) {
+      const { url, depth } = queue.shift()!;
+      processed++;
+      if (delay) await new Promise((r) => setTimeout(r, delay));
       const ins = await this.db.query(
         `INSERT INTO kb_sources (kind, title, url, category_id, audience, boost, parent_id, created_by) VALUES ('link', $1, $1, $2, $3, $4, $5, $6)
          ON CONFLICT (url) WHERE kind = 'link' DO NOTHING RETURNING id`,
@@ -193,13 +245,88 @@ export class KnowledgeBase {
       );
       const childId = (ins.rows[0]?.id ?? (await this.db.query(`SELECT id FROM kb_sources WHERE kind = 'link' AND url = $1 AND parent_id = $2`, [url, parentId])).rows[0]?.id) as string | undefined;
       if (!childId) continue; // already exists as an independent source
+      touched.add(childId);
       try {
         const f = await this.fetcher(url);
         const kind = kindFor(f.url, f.contentType);
         if (!kind) throw new FetchError('unsupported_content_type');
-        await this.indexDocument(childId, kind, f.body, url);
-      } catch (e) { await this.setError(childId, e instanceof Error ? e.message : 'failed'); }
+        if (kind === 'html') {
+          // the page may say its real address is another one: read that one instead and do not keep two copies
+          const finalUrl = normalizeUrl(f.url) ?? f.url;
+          const canon = canonicalOf(f.body.toString('utf8', 0, 200_000), f.url);
+          const real = canon && canon !== finalUrl && inScope(canon, scope) === 'ok' ? canon : finalUrl !== url ? finalUrl : null;
+          if (real && real !== url) {
+            await this.db.query('DELETE FROM kb_sources WHERE id = $1', [childId]); touched.delete(childId);
+            rep.duplicates++;
+            if (!seen.has(real)) { seen.add(real); if (inScope(real, scope) === 'ok') { queue.unshift({ url: real, depth }); rep.discovered++; processed--; } }
+            continue;
+          }
+        }
+        let changed: boolean;
+        try {
+          changed = await this.indexDocument(childId, kind, f.body, url, { html: this.htmlOpts(cfg), minChars: this.cfg.NODE_ENV === 'test' ? 50 : MIN_PAGE_CHARS, storeLinks: true });
+        } catch (e) {
+          const code = (e as Error).message;
+          if (code === 'thin_content' || code === 'soft_404' || code === 'empty_content') {
+            // an index page with little text is still followed; it just is not kept as an answer source
+            if (kind === 'html' && depth < cfg.depth) for (const h of await this.linksOf(childId)) enqueue(h, f.url, depth + 1);
+            await this.db.query('DELETE FROM kb_sources WHERE id = $1', [childId]); touched.delete(childId);
+            rep.thin++;
+            continue;
+          }
+          throw e;
+        }
+        if (changed) rep.indexed++; else rep.unchanged++;
+        if (kind === 'html' && depth < cfg.depth) for (const h of await this.linksOf(childId)) enqueue(h, f.url, depth + 1);
+      } catch (e) { rep.failed++; await this.setError(childId, e instanceof Error ? e.message : 'failed'); }
     }
+    rep.limited = queue.length > 0;
+    if (!rep.limited) {
+      // pages of earlier crawls that are no longer reachable under these options are switched off, not silently kept answering
+      const gone = await this.db.query(`UPDATE kb_sources SET enabled = false, status = 'error', error = 'gone' WHERE parent_id = $1 AND NOT (id = ANY($2::uuid[])) AND enabled RETURNING id`, [parentId, [...touched]]);
+      rep.gone = gone.rowCount ?? 0;
+    }
+    await this.db.query('UPDATE kb_sources SET crawl_report = $2 WHERE id = $1', [parentId, JSON.stringify(rep)]);
+  }
+
+  /**
+   * Dry run of a scrape for one address: what would be read, how the main text comes out with the given selectors, which links would be
+   * followed and which refused (and why). Nothing is stored.
+   */
+  async previewScrape(rawUrl: string, cfg: CrawlCfg): Promise<{
+    url: string; title: string | null; canonical: string | null; robotsAllowed: boolean; chars: number; thin: boolean; soft404: boolean;
+    headings: string[]; excerpt: string; links: { total: number; accepted: string[]; filtered: number; robots: number; duplicates: number }; sitemap: { found: boolean; urls: number; sample: string[] };
+  }> {
+    const f = await this.fetcher(KnowledgeBase.validateUrl(rawUrl));
+    const kind = kindFor(f.url, f.contentType);
+    if (!kind) throw new FetchError('unsupported_content_type');
+    const final = normalizeUrl(f.url) ?? f.url;
+    const origin = new URL(final).origin;
+    const robots = await this.readRobots(origin);
+    const ex = await extract(kind, f.body, 30_000, kind === 'html' ? this.htmlOpts(cfg) : undefined);
+    const scope: Scope = { origin, prefix: cfg.stayInPath ? prefixOf(final) : null, include: cfg.include, exclude: cfg.exclude, files: cfg.files };
+    const seen = new Set<string>([final]);
+    const accepted: string[] = [];
+    let filtered = 0, robotsN = 0, dup = 0;
+    for (const h of ex.links) {
+      const n = normalizeUrl(h, f.url);
+      if (!n) continue;
+      if (seen.has(n)) { dup++; continue; }
+      seen.add(n);
+      if (inScope(n, scope) === 'filtered') { filtered++; continue; }
+      const u = new URL(n);
+      if (!robotsAllows(robots, u.pathname + u.search)) { robotsN++; continue; }
+      accepted.push(n);
+    }
+    let sm = { found: false, urls: 0, sample: [] as string[] };
+    if (cfg.sitemap) { const urls = await this.readSitemaps(origin, robots.sitemaps); sm = { found: urls.length > 0, urls: urls.length, sample: urls.slice(0, 5) }; }
+    const u = new URL(final);
+    return {
+      url: final, title: ex.title, canonical: kind === 'html' ? canonicalOf(f.body.toString('utf8', 0, 200_000), f.url) : null,
+      robotsAllowed: robotsAllows(robots, u.pathname + u.search), chars: ex.text.length, thin: ex.text.length < MIN_PAGE_CHARS, soft404: isSoft404(ex.title, ex.text),
+      headings: [...ex.text.matchAll(/^(#{1,4})\s+(.+)$/gm)].slice(0, 30).map((m) => `${'  '.repeat(m[1]!.length - 1)}${m[2]}`),
+      excerpt: ex.text.slice(0, 2500), links: { total: ex.links.length, accepted: accepted.slice(0, 40), filtered, robots: robotsN, duplicates: dup }, sitemap: sm,
+    };
   }
 
   static validateUrl(raw: string): string {

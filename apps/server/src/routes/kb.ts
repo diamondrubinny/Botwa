@@ -5,6 +5,7 @@ import { audit } from '../audit.js';
 import { requireAuth } from '../auth.js';
 import { loadBot } from '../bot.js';
 import type { Db } from '../db.js';
+import { crawlCfgSchema, DEFAULT_CRAWL, MAX_CRAWL_PAGES } from '../kb/crawler.js';
 import { kindFor } from '../kb/extract.js';
 import { FetchError } from '../kb/fetch.js';
 import { isConfident, KnowledgeBase } from '../kb/service.js';
@@ -15,7 +16,7 @@ const idParam = z.object({ id: z.string().uuid() });
 const audience = z.enum(['bot', 'staff', 'both']);
 const common = { categoryId: z.string().uuid().nullable().optional(), audience: audience.default('both'), boost: z.number().int().min(0).max(2).default(0) };
 const SELECT = `s.id, s.kind, s.title, s.variants, s.url, s.file_name AS "fileName", s.category_id AS "categoryId", s.audience, s.boost, s.enabled, s.status, s.error,
-  s.refresh_hours AS "refreshHours", s.crawl_pages AS "crawlPages", s.last_fetched_at AS "lastFetchedAt", s.parent_id AS "parentId", s.version,
+  s.refresh_hours AS "refreshHours", s.crawl_pages AS "crawlPages", s.crawl_cfg AS "crawlCfg", s.crawl_report AS "crawlReport", s.last_fetched_at AS "lastFetchedAt", s.parent_id AS "parentId", s.version,
   s.uses, s.helpful, s.unhelpful, s.updated_at AS "updatedAt", (SELECT count(*)::int FROM kb_chunks c WHERE c.source_id = s.id) AS chunks`;
 
 export function kbRoutes(app: FastifyInstance, db: Db, kb: KnowledgeBase) {
@@ -68,15 +69,15 @@ export function kbRoutes(app: FastifyInstance, db: Db, kb: KnowledgeBase) {
 
   // A web page (optionally with the pages it links to on the same site); re-read automatically if refreshHours is set.
   app.post('/kb/sources/link', { preHandler: manage, config: limit }, async (req, reply) => {
-    const b = z.object({ url: z.string().trim().max(1000), crawlPages: z.number().int().min(0).max(25).default(0), refreshHours: z.number().int().min(1).max(8760).nullable().default(null), ...common }).safeParse(req.body);
+    const b = z.object({ url: z.string().trim().max(1000), crawlPages: z.number().int().min(0).max(MAX_CRAWL_PAGES).default(0), refreshHours: z.number().int().min(1).max(8760).nullable().default(null), crawl: crawlCfgSchema.default(() => DEFAULT_CRAWL), ...common }).safeParse(req.body);
     if (!b.success) return reply.code(400).send({ error: 'bad_request' });
     let url: string;
     try { url = KnowledgeBase.validateUrl(b.data.url); } catch (e) { return reply.code(400).send({ error: e instanceof FetchError ? e.message : 'bad_url' }); }
     const dup = await db.query(`SELECT id FROM kb_sources WHERE kind = 'link' AND url = $1`, [url]);
     if (dup.rowCount) return reply.code(409).send({ error: 'already_exists', id: dup.rows[0].id });
     const { rows } = await db.query(
-      `INSERT INTO kb_sources (kind, title, url, category_id, audience, boost, crawl_pages, refresh_hours, created_by) VALUES ('link',$1,$1,$2,$3,$4,$5,$6,$7) RETURNING id`,
-      [url, b.data.categoryId ?? null, b.data.audience, b.data.boost, b.data.crawlPages, b.data.refreshHours, req.user!.id],
+      `INSERT INTO kb_sources (kind, title, url, category_id, audience, boost, crawl_pages, refresh_hours, created_by, crawl_cfg) VALUES ('link',$1,$1,$2,$3,$4,$5,$6,$7,$8) RETURNING id`,
+      [url, b.data.categoryId ?? null, b.data.audience, b.data.boost, b.data.crawlPages, b.data.refreshHours, req.user!.id, JSON.stringify(b.data.crawl)],
     );
     kb.enqueue(rows[0].id);
     await audit(db, { actorId: req.user!.id, action: 'kb.create', target: rows[0].id, ip: req.ip, meta: { kind: 'link', host: new URL(url).host } });
@@ -118,7 +119,7 @@ export function kbRoutes(app: FastifyInstance, db: Db, kb: KnowledgeBase) {
     const b = z.object({
       title: z.string().trim().min(1).max(300).optional(), variants: z.array(z.string().trim().min(2).max(300)).max(20).optional(), body: z.string().trim().min(2).max(200_000).optional(),
       enabled: z.boolean().optional(), audience: audience.optional(), boost: z.number().int().min(0).max(2).optional(), categoryId: z.string().uuid().nullable().optional(),
-      refreshHours: z.number().int().min(1).max(8760).nullable().optional(), crawlPages: z.number().int().min(0).max(25).optional(),
+      refreshHours: z.number().int().min(1).max(8760).nullable().optional(), crawlPages: z.number().int().min(0).max(MAX_CRAWL_PAGES).optional(), crawl: crawlCfgSchema.optional(),
     }).safeParse(req.body);
     if (!p.success || !b.success) return reply.code(400).send({ error: 'bad_request' });
     const cur = (await db.query('SELECT kind FROM kb_sources WHERE id = $1', [p.data.id])).rows[0];
@@ -128,9 +129,9 @@ export function kbRoutes(app: FastifyInstance, db: Db, kb: KnowledgeBase) {
     await db.query(
       `UPDATE kb_sources SET title = COALESCE($2, title), variants = COALESCE($3, variants), body = COALESCE($4, body), enabled = COALESCE($5, enabled), audience = COALESCE($6, audience),
               boost = COALESCE($7, boost), category_id = CASE WHEN $8::boolean THEN $9::uuid ELSE category_id END, refresh_hours = CASE WHEN $10::boolean THEN $11::int ELSE refresh_hours END,
-              crawl_pages = COALESCE($12, crawl_pages), updated_at = now() WHERE id = $1`,
+              crawl_pages = COALESCE($12, crawl_pages), crawl_cfg = COALESCE($13::jsonb, crawl_cfg), updated_at = now() WHERE id = $1`,
       [p.data.id, d.title ?? null, d.variants ?? null, d.body ?? null, d.enabled ?? null, d.audience ?? null, d.boost ?? null,
-       d.categoryId !== undefined, d.categoryId ?? null, d.refreshHours !== undefined, d.refreshHours ?? null, d.crawlPages ?? null],
+       d.categoryId !== undefined, d.categoryId ?? null, d.refreshHours !== undefined, d.refreshHours ?? null, d.crawlPages ?? null, d.crawl ? JSON.stringify(d.crawl) : null],
     );
     // faq/text content feeds the search index; for documents and links the title is only a label
     if ((d.title !== undefined || d.variants !== undefined || d.body !== undefined) && ['faq', 'text'].includes(cur.kind)) await kb.indexWritten(p.data.id).catch(() => undefined);
@@ -138,6 +139,47 @@ export function kbRoutes(app: FastifyInstance, db: Db, kb: KnowledgeBase) {
     await db.query(`UPDATE kb_sources c SET enabled = p.enabled, audience = p.audience, boost = p.boost, category_id = p.category_id FROM kb_sources p WHERE c.parent_id = p.id AND p.id = $1`, [p.data.id]);
     await audit(db, { actorId: req.user!.id, action: 'kb.update', target: p.data.id, ip: req.ip });
     return { ok: true };
+  });
+
+  // Dry run of a scrape: what the page yields with these options and which links a crawl would follow. Stores nothing.
+  app.post('/kb/scrape/preview', { preHandler: manage, config: { rateLimit: { max: 15, timeWindow: '5 minutes' } } }, async (req, reply) => {
+    const b = z.object({ url: z.string().trim().max(1000), crawl: crawlCfgSchema.default(() => DEFAULT_CRAWL) }).safeParse(req.body);
+    if (!b.success) return reply.code(400).send({ error: 'bad_request' });
+    try {
+      const r = await kb.previewScrape(b.data.url, b.data.crawl);
+      await audit(db, { actorId: req.user!.id, action: 'kb.scrape_preview', ip: req.ip, meta: { host: new URL(r.url).host } });
+      return r;
+    } catch (e) {
+      const code = (e as Error).message;
+      return reply.code(422).send({ error: e instanceof FetchError || /^(bad_url|blocked_address|https_required|unsupported_content_type|too_large|too_many_redirects|dns_failed|timeout|connection_|tls_error|unreachable|fetch_failed|http_\d+|extract_)/.test(code) ? code : 'fetch_failed' });
+    }
+  });
+
+  // Health of the knowledge base: sources in error, links not refreshed for a long time, sources without content.
+  app.get('/kb/health', { preHandler: manage }, async () => {
+    const byStatus = (await db.query(`SELECT status, count(*)::int AS n FROM kb_sources GROUP BY status`)).rows;
+    const errors = (await db.query(`SELECT id, title, url, kind, error, parent_id AS "parentId" FROM kb_sources WHERE status = 'error' ORDER BY updated_at DESC LIMIT 100`)).rows;
+    const stale = (await db.query(`SELECT id, title, url, last_fetched_at AS "lastFetchedAt" FROM kb_sources WHERE kind = 'link' AND enabled AND status = 'ready' AND last_fetched_at < now() - interval '60 days' ORDER BY last_fetched_at LIMIT 100`)).rows;
+    const empty = (await db.query(`SELECT s.id, s.title, s.kind FROM kb_sources s WHERE s.status = 'ready' AND s.enabled AND NOT EXISTS (SELECT 1 FROM kb_chunks c WHERE c.source_id = s.id) LIMIT 100`)).rows;
+    const crawls = (await db.query(`SELECT id, title, url, crawl_report AS "report" FROM kb_sources WHERE crawl_report IS NOT NULL ORDER BY updated_at DESC LIMIT 20`)).rows;
+    return { byStatus, errors, stale, empty, crawls };
+  });
+
+  // The same content stored under several sources (identical files or pages): the later ones can be removed.
+  app.get('/kb/duplicates', { preHandler: manage }, async () => {
+    const { rows } = await db.query(
+      `SELECT content_hash AS hash, json_agg(json_build_object('id', id, 'title', title, 'kind', kind, 'url', url, 'enabled', enabled, 'parentId', parent_id) ORDER BY created_at) AS items
+         FROM kb_sources WHERE content_hash IS NOT NULL GROUP BY content_hash HAVING count(*) > 1 LIMIT 100`,
+    );
+    return rows;
+  });
+
+  // Read every link source again now (changed pages are re-indexed, unchanged ones keep their version).
+  app.post('/kb/sources/refresh-links', { preHandler: manage, config: { rateLimit: { max: 3, timeWindow: '10 minutes' } } }, async (req) => {
+    const { rows } = await db.query(`SELECT id FROM kb_sources WHERE kind = 'link' AND parent_id IS NULL AND enabled`);
+    for (const r of rows) { await db.query(`UPDATE kb_sources SET status = 'pending', error = NULL WHERE id = $1`, [r.id]); kb.enqueue(r.id as string); }
+    await audit(db, { actorId: req.user!.id, action: 'kb.refresh_all', ip: req.ip, meta: { count: rows.length } });
+    return { queued: rows.length };
   });
 
   app.post('/kb/sources/:id/reindex', { preHandler: manage, config: limit }, async (req, reply) => {

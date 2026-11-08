@@ -5,22 +5,36 @@ import { parse } from 'node-html-parser';
  * Runs inside a worker thread with a memory cap and a hard timeout set by the parent (extract.ts): parsers handle untrusted
  * files, so a crash, memory bomb or endless loop must only cost this thread, not the server.
  */
-type Job = { kind: 'html' | 'text' | 'csv' | 'docx' | 'pdf' | 'xlsx'; data: Uint8Array };
+type HtmlOpts = { select?: string; remove?: string[] };
+type Job = { kind: 'html' | 'text' | 'csv' | 'docx' | 'pdf' | 'xlsx'; data: Uint8Array; opts?: HtmlOpts };
 type Sheet = { name: string; rows: string[][] };
 const MAX_CHARS = 2_000_000;
 
-function htmlToText(html: string): { title: string | null; text: string; links: string[] } {
+const BOILERPLATE = /(^|[-_\s])(cookie|cookies|consent|gdpr|breadcrumb|breadcrumbs|share|social|sidebar|popup|modal|newsletter|toolbar|skip-link|a11y|accessibility-widget)([-_\s]|$)/i;
+const SHELL_ROLES = new Set(['navigation', 'banner', 'contentinfo', 'complementary', 'dialog', 'search']);
+
+function htmlToText(html: string, opts: HtmlOpts = {}): { title: string | null; text: string; links: string[] } {
   const root = parse(html, { blockTextElements: { script: false, style: false, noscript: false } });
-  const links = root.querySelectorAll('a[href]').map((a) => a.getAttribute('href') ?? '').filter(Boolean).slice(0, 500);
+  // links the site asks robots not to follow are not followed
+  const links = root.querySelectorAll('a[href]').filter((a) => !/nofollow/i.test(a.getAttribute('rel') ?? '')).map((a) => a.getAttribute('href') ?? '').filter(Boolean).slice(0, 1000);
   const title = root.querySelector('title')?.text.trim() || root.querySelector('h1')?.text.trim() || null;
   root.querySelectorAll('script,style,noscript,nav,footer,header,aside,form,svg,iframe,template,button,select').forEach((n) => n.remove());
-  const main = root.querySelector('main') ?? root.querySelector('article') ?? root.querySelector('body') ?? root;
+  for (const sel of opts.remove ?? []) { try { root.querySelectorAll(sel).forEach((n) => n.remove()); } catch { /* an invalid selector is ignored */ } }
+  let chosen: import('node-html-parser').HTMLElement | null = null;
+  if (opts.select) { try { chosen = root.querySelector(opts.select); } catch { chosen = null; } }
+  const main = chosen ?? root.querySelector('main') ?? root.querySelector('article') ?? root.querySelector('[role=main]') ?? root.querySelector('body') ?? root;
+  if (!chosen) {
+    // cookie banners, share bars, breadcrumbs, pop-ups and landmark regions that are page furniture, not content
+    main.querySelectorAll('[class],[id],[role]').forEach((n) => {
+      if (SHELL_ROLES.has((n.getAttribute('role') ?? '').toLowerCase()) || BOILERPLATE.test(`${n.getAttribute('class') ?? ''} ${n.getAttribute('id') ?? ''}`)) n.remove();
+    });
+  }
   const lines: string[] = [];
   const walk = (n: import('node-html-parser').Node) => {
     if (n.nodeType === 3) { const t = n.text.replace(/\s+/g, ' '); if (t.trim()) lines.push(t); return; }
     const el = n as import('node-html-parser').HTMLElement;
     const tag = (el.tagName ?? '').toLowerCase();
-    if (/^h[1-4]$/.test(tag)) { lines.push(`\n\n# ${el.text.replace(/\s+/g, ' ').trim()}\n\n`); return; }
+    if (/^h[1-4]$/.test(tag)) { lines.push(`\n\n${'#'.repeat(Number(tag[1]))} ${el.text.replace(/\s+/g, ' ').trim()}\n\n`); return; }
     if (tag === 'li') lines.push('\n- ');
     if (tag === 'br') { lines.push('\n'); return; }
     el.childNodes.forEach(walk);
@@ -69,7 +83,7 @@ async function run(job: Job): Promise<{ title: string | null; text: string; link
   const buf = Buffer.from(job.data);
   if (job.kind === 'text') return { title: null, text: buf.toString('utf8') };
   if (job.kind === 'csv') return { title: null, text: csvToText(buf.toString('utf8')) };
-  if (job.kind === 'html') return htmlToText(buf.toString('utf8'));
+  if (job.kind === 'html') return htmlToText(buf.toString('utf8'), job.opts);
   if (job.kind === 'xlsx') {
     const sheets = await readWorkbook(buf);
     const text = sheets.map((sh) => { const [head = [], ...rest] = sh.rows; return `# ${sh.name}\n\n${rest.map((r) => r.map((c, i) => (head[i] && c ? `${head[i]}: ${c}` : c)).filter(Boolean).join('; ')).filter(Boolean).join('\n\n')}`; }).join('\n\n');
