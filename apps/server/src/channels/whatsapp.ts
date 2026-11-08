@@ -232,6 +232,12 @@ export class WhatsAppAdapter implements ChannelAdapter {
     await this.sock.sendPresenceUpdate('paused', externalContactId);
   }
 
+  async listGroups(): Promise<{ id: string; name: string; size: number }[]> {
+    if (!this.sock) throw new Error('channel_not_connected');
+    const groups = await this.sock.groupFetchAllParticipating();
+    return Object.values(groups).map((g) => ({ id: g.id, name: g.subject ?? '', size: g.participants?.length ?? 0 })).sort((a, b) => a.name.localeCompare(b.name, 'he'));
+  }
+
   async react(externalContactId: string, externalMessageId: string, emoji: string): Promise<void> {
     if (!this.sock) throw new Error('channel_not_connected');
     await this.sock.sendMessage(externalContactId, { react: { text: emoji, key: { remoteJid: externalContactId, id: externalMessageId, fromMe: false } } });

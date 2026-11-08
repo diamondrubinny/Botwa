@@ -67,6 +67,8 @@ export function Inbox({ me }: { me: Me }) {
   const [sugg, setSugg] = useState<{ sourceId: string; title: string; url: string | null; score: number; text: string }[]>([]);
   const [safety, setSafety] = useState<{ topics: string[]; hits: { topic: string; sourceId: string; title: string; reference: string | null; url: string | null; excerpt: string; instrument: string }[] }>({ topics: [], hits: [] });
   const [bump, setBump] = useState(0); // local refetch trigger after an action
+  const [targets, setTargets] = useState<{ id: string; name: string; groupName: string }[]>([]);
+  const [fwd, setFwd] = useState<{ rule: string; note: string; msg: string } | null>(null);
   // list preferences, kept in this browser: sort order, channel, and "only unread / only waiting for an answer"
   const [lp, setLp] = useState<{ sort: 'recent' | 'waiting' | 'unread'; channel: string; unreadOnly: boolean; waitingOnly: boolean }>(() => {
     try { const v = JSON.parse(localStorage.getItem('botwa_inbox_prefs') ?? '{}') as Partial<{ sort: string; channel: string; unreadOnly: boolean; waitingOnly: boolean }>; return { sort: v.sort === 'waiting' || v.sort === 'unread' ? v.sort : 'recent', channel: v.channel ?? '', unreadOnly: !!v.unreadOnly, waitingOnly: !!v.waitingOnly }; } catch { return { sort: 'recent', channel: '', unreadOnly: false, waitingOnly: false }; }
@@ -88,6 +90,7 @@ export function Inbox({ me }: { me: Me }) {
     const q = (filter === 'mine' ? 'mine=true&status=open' : filter === 'blocked' ? 'blocked=true' : filter === 'starred' ? 'starred=true' : filter === 'snoozed' ? 'snoozed=true&status=open' : `status=${filter}`) + (search.trim() ? `&q=${encodeURIComponent(search.trim())}` : '') + (tagFilter ? `&tag=${tagFilter}` : '');
     setConvs(await api<Conversation[]>('GET', `/conversations?${q}`).catch(() => []));
   }, 5000, [filter, search, tagFilter, live, bump]);
+  usePoll(async () => setTargets(await api<{ id: string; name: string; groupName: string }[]>('GET', '/forward/targets').catch(() => [])), 60000);
   usePoll(async () => setAllTags(await api<Tag[]>('GET', '/tags').catch(() => [])), 60000);
   usePoll(async () => setCanned(await api<Canned[]>('GET', '/canned-replies').catch(() => [])), 60000);
   usePoll(async () => { if (canAssignOthers && can(me, 'users.view')) setTeam(await api<UserRow[]>('GET', '/users').catch(() => [])); }, 60000);
@@ -203,6 +206,14 @@ export function Inbox({ me }: { me: Me }) {
     });
   }
 
+  // a link such as #/inbox?c=<id> (from a message forwarded to a group) opens that conversation
+  const linkedOnce = useRef(false);
+  useEffect(() => {
+    if (linkedOnce.current) return;
+    const id = new URLSearchParams(window.location.hash.split('?')[1] ?? '').get('c');
+    if (id && /^[0-9a-f-]{36}$/i.test(id)) { linkedOnce.current = true; void openRelated(id); }
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
   async function openRelated(id: string) {
     const [c] = await api<Conversation[]>('GET', `/conversations?id=${id}&status=open`).catch(() => []);
     const [c2] = c ? [c] : await api<Conversation[]>('GET', `/conversations?id=${id}&status=closed`).catch(() => []);
@@ -313,11 +324,28 @@ export function Inbox({ me }: { me: Me }) {
                   <option value="10080">שבוע</option>
                   {sel.snoozedUntil && <option value="0">ביטול דחייה</option>}
                 </select>
+                {targets.length > 0 && <button type="button" aria-expanded={!!fwd} onClick={() => setFwd(fwd ? null : { rule: targets[0]!.id, note: '', msg: '' })}>העברה לקבוצה</button>}
                 <button onClick={() => act(async () => { await api('POST', `/conversations/${sel.id}/unread`); setSelId(null); })}>סימון כלא נקראה</button>
                 <button onClick={() => act(() => api('POST', `/conversations/${sel.id}/status`, { status: sel.status === 'open' ? 'closed' : 'open' }))}>
                   {sel.status === 'open' ? 'סגירת שיחה' : 'פתיחה מחדש'}
                 </button>
               </div>
+
+              {fwd && sel && (
+                <form className="card" style={{ margin: '.6rem .9rem 0' }} aria-labelledby="fwd-h" onSubmit={async (e) => {
+                  e.preventDefault(); setFwd({ ...fwd, msg: '' });
+                  try { const r = await api<{ ok: boolean; queued: boolean }>('POST', `/conversations/${sel.id}/forward`, { ruleId: fwd.rule, note: fwd.note.trim() || undefined }); setFwd(null); setBump((n) => n + 1); setErr(r.queued ? 'ההעברה ממתינה: הערוץ מנותק, והיא תישלח כשיחזור.' : ''); }
+                  catch (er) { setFwd({ ...fwd, msg: errText(er instanceof ApiError ? er.code : 'generic') }); }
+                }}>
+                  <h3 id="fwd-h">העברת השיחה לקבוצת ווצאפ</h3>
+                  <div className="field"><label htmlFor="fwd-r">לאיזו קבוצה</label>
+                    <select id="fwd-r" value={fwd.rule} onChange={(e) => setFwd({ ...fwd, rule: e.target.value })}>{targets.map((t) => <option key={t.id} value={t.id}>{t.name}{t.groupName && t.groupName !== t.name ? ` (${t.groupName})` : ''}</option>)}</select></div>
+                  <div className="field"><label htmlFor="fwd-n">הערה לקבוצה (אופציונלי)</label><input id="fwd-n" maxLength={400} value={fwd.note} onChange={(e) => setFwd({ ...fwd, note: e.target.value })} /></div>
+                  <p className="hint">נשלחת הודעה עם שם הלקוח, הנושא, ההודעות האחרונות וקישור לשיחה. כל חברי הקבוצה יראו אותה: לא להעביר מידע רגיש לקבוצה שלא צריכה לראות אותו.</p>
+                  <div className="row"><button className="primary" type="submit">שליחה לקבוצה</button><button type="button" onClick={() => setFwd(null)}>ביטול</button></div>
+                  <p role="alert" className="error">{fwd.msg}</p>
+                </form>
+              )}
 
               {sel.blocked && (
                 <p className="banner" role="status" style={{ margin: '.6rem .9rem 0' }}>

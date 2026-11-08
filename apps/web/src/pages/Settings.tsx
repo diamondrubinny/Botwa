@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from 'react';
 import { api, ApiError, can, type BackupFile, type BusinessHours, type Me, type SendingCfg } from '../api';
 import { Branding } from '../components/Branding';
+import { ForwardRules } from '../components/ForwardRules';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { usePoll } from '../hooks';
 import { errText } from '../strings';
@@ -184,6 +185,7 @@ export function Settings({ me }: { me: Me }) {
       <ConfirmDialog open={!!delBk} danger title="מחיקת גיבוי" message={`הקובץ ${delBk ?? ''} יימחק לצמיתות.`} onCancel={() => setDelBk(null)}
         onConfirm={async () => { const n = delBk!; setDelBk(null); await api('DELETE', `/backups/${n}`).catch(() => undefined); await loadBackups(); }} />
       </>)}
+      {canEdit && <ForwardRules />}
       {canEdit && <Branding />}
     </>
   );

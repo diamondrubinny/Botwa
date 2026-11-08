@@ -59,6 +59,8 @@ export interface ChannelAdapter {
   markRead?(externalContactId: string, externalMessageIds: string[]): Promise<void>;
   /** React to a customer's message with an emoji (empty string removes our reaction). Best effort; not every platform has it. */
   react?(externalContactId: string, externalMessageId: string, emoji: string): Promise<void>;
+  /** WhatsApp groups this number is a member of (id like 1203630...@g.us). */
+  listGroups?(): Promise<{ id: string; name: string; size: number }[]>;
   sendMedia?(externalContactId: string, media: OutboundMedia): Promise<{ externalMessageId?: string }>;
 }
 

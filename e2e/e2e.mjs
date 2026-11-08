@@ -257,6 +257,10 @@ await axe('safety board: officers');
 // branding: name, logo, colour (adapted for contrast), colours pulled from a site (internal addresses are refused)
 await page.click('aside.sidebar nav >> text=הגדרות');
 await page.waitForSelector('#br-name');
+await page.waitForSelector('#fw-h');
+check('settings: group forwarding card is there', true);
+if (await page.locator('button:has-text("הוספת כלל")').isEnabled()) await page.click('button:has-text("הוספת כלל")');
+await axe('settings: group forwarding');
 await page.fill('#br-name', 'בטיחון'); await page.fill('#br-color', '#0f766e');
 await page.click('button:has-text("שמירת שם וצבע")');
 await page.waitForSelector('text=המיתוג נשמר.');

@@ -15,7 +15,7 @@ export function usePoll(fn: () => void | Promise<void>, ms: number, deps: unknow
 }
 
 export function useHashRoute(): [string, (r: string) => void] {
-  const read = () => window.location.hash.replace(/^#\/?/, '') || 'inbox';
+  const read = () => window.location.hash.replace(/^#\/?/, '').split('?')[0] || 'inbox';   // "#/inbox?c=ID" is the inbox, opened on that conversation
   const [route, setRoute] = useState(read);
   useEffect(() => {
     const on = () => setRoute(read());

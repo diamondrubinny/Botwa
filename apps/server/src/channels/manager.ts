@@ -15,6 +15,7 @@ import type { EventType, WebhookService } from '../integrations/webhooks.js';
 import { runFlow, type Effect, type FlowContext, type FlowInput, type FlowState } from '../flow/engine.js';
 import { resolveArea } from '../safety/areas.js';
 import { contactText, officerNote, officersForTopic, pickOfficer } from '../safety/officers.js';
+import { forwardText, type ForwardRule } from './forward.js';
 import { loadFlow } from '../flow/store.js';
 import { loadBusinessHours } from '../routes/settings.js';
 import { sendAlert } from '../alerts.js';
@@ -106,6 +107,58 @@ export class ChannelManager {
     this.bus.emit('event', e);
   }
 
+  private groupCache = new Map<string, { at: number; groups: { id: string; name: string; size: number }[] }>();
+  /** The WhatsApp groups the linked number belongs to (asked of WhatsApp at most every 5 minutes unless refreshed). */
+  async listGroups(channelId: string, refresh = false): Promise<{ id: string; name: string; size: number }[]> {
+    const a = this.adapters.get(channelId);
+    if (!a?.listGroups || this.statuses.get(channelId) !== 'connected') throw new Error('channel_not_connected');
+    const c = this.groupCache.get(channelId);
+    if (!refresh && c && Date.now() - c.at < 300_000) return c.groups;
+    const groups = await a.listGroups();
+    this.groupCache.set(channelId, { at: Date.now(), groups });
+    return groups;
+  }
+
+  /** Post a message into a group through the channel's normal sending lane (pacing, caps). Recorded first, so a failure is retried later; an automatic forward is recorded once per rule and conversation. */
+  async forwardToGroup(o: { ruleId: string | null; convId: string | null; channelId: string; jid: string; text: string; trigger: 'handoff' | 'manual' | 'test'; by: string | null }): Promise<boolean> {
+    const ins = await this.db.query(
+      `INSERT INTO forward_log (rule_id, conversation_id, channel_id, group_jid, text, trigger, by_user) VALUES ($1,$2,$3,$4,$5,$6,$7) ON CONFLICT DO NOTHING RETURNING id`,
+      [o.ruleId, o.convId, o.channelId, o.jid, o.text, o.trigger, o.by]);
+    if (!ins.rows[0]) return false;
+    return this.deliverForward(ins.rows[0].id as number);
+  }
+  private async deliverForward(id: number): Promise<boolean> {
+    const r = (await this.db.query(`SELECT channel_id, group_jid, text, tries FROM forward_log WHERE id = $1 AND status = 'pending'`, [id])).rows[0];
+    if (!r) return false;
+    try {
+      await this.sendText(r.channel_id, r.group_jid, r.text, { background: true });
+      await this.db.query(`UPDATE forward_log SET status = 'sent', sent_at = now(), tries = tries + 1 WHERE id = $1`, [id]);
+      return true;
+    } catch {
+      await this.db.query(`UPDATE forward_log SET tries = tries + 1, status = CASE WHEN tries + 1 >= 5 THEN 'failed' ELSE 'pending' END WHERE id = $1`, [id]);
+      return false;
+    }
+  }
+  /** Forwards that could not be sent (channel down) go out when it is back; gives up after five tries or a day. */
+  async retryForwards(): Promise<number> {
+    await this.db.query(`UPDATE forward_log SET status = 'failed' WHERE status = 'pending' AND created_at < now() - interval '1 day'`);
+    const { rows } = await this.db.query(`SELECT id, channel_id FROM forward_log WHERE status = 'pending' AND tries < 5 ORDER BY id LIMIT 20`);
+    let n = 0;
+    for (const r of rows) if (this.statuses.get(r.channel_id) === 'connected' && (await this.deliverForward(r.id))) n++;
+    return n;
+  }
+  /** When the bot hands a conversation to people: post it into the groups of every matching rule. */
+  private async autoForward(convId: string): Promise<void> {
+    const rules = (await this.db.query(`SELECT * FROM forward_rules WHERE enabled AND on_handoff`)).rows as ForwardRule[];
+    if (!rules.length) return;
+    const tags = (await this.db.query('SELECT tag_id FROM conversation_tags WHERE conversation_id = $1', [convId])).rows.map((r) => r.tag_id as string);
+    for (const rule of rules) {
+      if (rule.tag_ids.length && !rule.tag_ids.some((t) => tags.includes(t))) continue;
+      const text = await forwardText(this.db, convId, rule, this.cfg.APP_ORIGIN);
+      if (text) await this.forwardToGroup({ ruleId: rule.id, convId, channelId: rule.channel_id, jid: rule.group_jid, text, trigger: 'handoff', by: null });
+    }
+  }
+
   private statusSince = new Map<string, number>();
   private revive = new Map<string, { at: number; tries: number }>();
 
@@ -166,7 +219,7 @@ export class ChannelManager {
     }
     this.emit({ channelId, type: 'status', status });
     // back online: answer the customers whose messages the bot could not answer while the channel was down
-    if (status === 'connected' && prev !== 'connected') setTimeout(() => void this.catchUp(channelId).catch(() => undefined), this.cfg.NODE_ENV === 'test' ? 30 : 4000).unref?.();
+    if (status === 'connected' && prev !== 'connected') setTimeout(() => { void this.catchUp(channelId).catch(() => undefined); void this.retryForwards().catch(() => undefined); }, this.cfg.NODE_ENV === 'test' ? 30 : 4000).unref?.();
   }
 
   async start(channelId: string, opts?: StartOptions): Promise<void> {
@@ -525,6 +578,7 @@ export class ChannelManager {
     const closed = hours.enabled && !isOpen(hours, new Date());
     await this.botSay(channelId, convId, ext, [closed ? hours.awayMessage : customText || bot.humanMessage, extra].filter(Boolean).join('\n\n'));
     if (closed) await this.db.query('UPDATE conversations SET last_away_at = now() WHERE id = $1', [convId]);
+    void this.autoForward(convId).catch(() => undefined);
   }
 
   /** The flow chart bot: one customer message in, replies + side effects out (see flow/engine.ts). */

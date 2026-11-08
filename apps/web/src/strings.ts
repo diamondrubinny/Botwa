@@ -74,6 +74,8 @@ export const t = {
     confirm_mismatch: 'האימייל שהוקלד אינו תואם.',
     password_unchanged: 'הסיסמה החדשה זהה לנוכחית.',
     password_change_required: 'יש להחליף סיסמה בעמוד "החשבון שלי" כדי להמשיך.',
+    channel_not_whatsapp: 'ההעברה לקבוצה אפשרית רק מערוץ ווצאפ רגיל (QR).',
+    rule_not_found: 'הכלל לא נמצא או כבוי.',
     forbidden: 'אין הרשאה לפעולה זו.',
     generic: 'אירעה שגיאה. נסו שוב.',
   } as Record<string, string>,
