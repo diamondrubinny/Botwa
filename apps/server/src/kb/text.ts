@@ -7,7 +7,7 @@ const NIQQUD = /[֑-ׇ]/g;
 const FINAL: Record<string, string> = { ך: 'כ', ם: 'מ', ן: 'נ', ף: 'פ', ץ: 'צ' };
 const PREFIX = new Set([...'והבכלמש']);
 
-const STOP = new Set(`את של על עם אל או גם כי אם לא כן יש אין היא הוא הם הן אני אתה את אנחנו מה איך מתי איפה למה מי כמה האם זה זאת אלה אלו לי לך לו לה לנו שלי שלך רוצה רוצים צריך צריכה יכול יכולה אפשר בבקשה תודה שלום היי הי ערב טוב בוקר
+const STOP = new Set(`איזה באיזה איזו באיזו מהי מהו מהם מהן כיצד היכן את של על עם אל או גם כי אם לא כן יש אין היא הוא הם הן אני אתה את אנחנו מה איך מתי איפה למה מי כמה האם זה זאת אלה אלו לי לך לו לה לנו שלי שלך רוצה רוצים צריך צריכה יכול יכולה אפשר בבקשה תודה שלום היי הי ערב טוב בוקר
 a an the of to in on at is are was were be been do does did i you we they it my your our can could would should please hello hi thanks thank what how when where why who which and or but for with about`.split(/\s+/));
 
 export function normalizeWord(w: string): string {

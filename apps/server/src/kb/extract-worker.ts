@@ -5,7 +5,8 @@ import { parse } from 'node-html-parser';
  * Runs inside a worker thread with a memory cap and a hard timeout set by the parent (extract.ts): parsers handle untrusted
  * files, so a crash, memory bomb or endless loop must only cost this thread, not the server.
  */
-type Job = { kind: 'html' | 'text' | 'csv' | 'docx' | 'pdf'; data: Uint8Array };
+type Job = { kind: 'html' | 'text' | 'csv' | 'docx' | 'pdf' | 'xlsx'; data: Uint8Array };
+type Sheet = { name: string; rows: string[][] };
 const MAX_CHARS = 2_000_000;
 
 function htmlToText(html: string): { title: string | null; text: string; links: string[] } {
@@ -37,11 +38,43 @@ function csvToText(s: string): string {
   return rows.slice(1).map((r) => r.map((c, i) => (head[i] ? `${head[i]}: ${c}` : c)).join('; ')).join('\n\n');
 }
 
-async function run(job: Job): Promise<{ title: string | null; text: string; links?: string[] }> {
+/** Spreadsheet cells as plain text. Limits: 30 sheets, 5000 rows, 40 columns per sheet. */
+async function readWorkbook(buf: Buffer): Promise<Sheet[]> {
+  const JSZip = (await import('jszip')).default;
+  const zip = await JSZip.loadAsync(buf);
+  const entries = Object.values(zip.files) as unknown as { _data?: { uncompressedSize?: number } }[];
+  if (entries.length > 500 || entries.reduce((n, e) => n + (e._data?.uncompressedSize ?? 0), 0) > 100 * 1024 * 1024) throw new Error('archive_too_large');
+  const ExcelJS = (await import('exceljs')).default;
+  const wb = new ExcelJS.Workbook();
+  await wb.xlsx.load(buf as never);
+  const out: Sheet[] = [];
+  for (const ws of wb.worksheets.slice(0, 30)) {
+    const rows: string[][] = [];
+    ws.eachRow({ includeEmpty: false }, (row, n) => {
+      if (n > 5000) return;
+      const cells: string[] = [];
+      for (let c = 1; c <= Math.min(40, ws.columnCount); c++) {
+        const v = row.getCell(c).value;
+        cells.push(v instanceof Date ? v.toISOString().slice(0, 10) : String(row.getCell(c).text ?? '').replace(/\u0000/g, '').trim().slice(0, 5000));
+        void v;
+      }
+      rows.push(cells);
+    });
+    out.push({ name: ws.name, rows });
+  }
+  return out;
+}
+
+async function run(job: Job): Promise<{ title: string | null; text: string; links?: string[]; sheets?: Sheet[] }> {
   const buf = Buffer.from(job.data);
   if (job.kind === 'text') return { title: null, text: buf.toString('utf8') };
   if (job.kind === 'csv') return { title: null, text: csvToText(buf.toString('utf8')) };
   if (job.kind === 'html') return htmlToText(buf.toString('utf8'));
+  if (job.kind === 'xlsx') {
+    const sheets = await readWorkbook(buf);
+    const text = sheets.map((sh) => { const [head = [], ...rest] = sh.rows; return `# ${sh.name}\n\n${rest.map((r) => r.map((c, i) => (head[i] && c ? `${head[i]}: ${c}` : c)).filter(Boolean).join('; ')).filter(Boolean).join('\n\n')}`; }).join('\n\n');
+    return { title: null, text, sheets };
+  }
   if (job.kind === 'docx') {
     const JSZip = (await import('jszip')).default;
     const zip = await JSZip.loadAsync(buf);
@@ -59,5 +92,5 @@ async function run(job: Job): Promise<{ title: string | null; text: string; link
 }
 
 run(workerData as Job)
-  .then((r) => parentPort!.postMessage({ ok: true, title: r.title, text: r.text.slice(0, MAX_CHARS), links: r.links ?? [] }))
+  .then((r) => parentPort!.postMessage({ ok: true, title: r.title, text: r.text.slice(0, MAX_CHARS), links: r.links ?? [], sheets: r.sheets }))
   .catch((e: Error) => parentPort!.postMessage({ ok: false, error: e.message.slice(0, 200) }));

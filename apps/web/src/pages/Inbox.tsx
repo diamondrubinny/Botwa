@@ -65,6 +65,7 @@ export function Inbox({ me }: { me: Me }) {
   const [related, setRelated] = useState<RelatedConv[]>([]);
   const [pinned, setPinned] = useState<Conversation | null>(null);
   const [sugg, setSugg] = useState<{ sourceId: string; title: string; url: string | null; score: number; text: string }[]>([]);
+  const [safety, setSafety] = useState<{ topics: string[]; hits: { topic: string; sourceId: string; title: string; reference: string | null; url: string | null; excerpt: string; instrument: string }[] }>({ topics: [], hits: [] });
   const [bump, setBump] = useState(0); // local refetch trigger after an action
 
   const sel = convs.find((c) => c.id === selId) ?? (pinned && pinned.id === selId ? pinned : null);
@@ -124,6 +125,17 @@ export function Inbox({ me }: { me: Me }) {
     void api<{ hits: typeof sugg }>('GET', `/conversations/${selId}/kb-suggestions`).then((d) => { if (live) setSugg(d.hits); }).catch(() => undefined);
     return () => { live = false; };
   }, [selId, msgs.filter((m) => m.direction === 'in').length]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Standards for the topic the bot tagged on this conversation (safety officers only).
+  const msgCount = msgs.filter((m) => m.direction === 'in').length;
+  const canSafety = can(me, 'safety.view');
+  const selTags = sel?.tags.map((t) => t.id).join(',') ?? '';
+  useEffect(() => {
+    setSafety({ topics: [], hits: [] });
+    if (!selId || !canSafety) return;
+    let live = true;
+    void api<typeof safety>('GET', `/conversations/${selId}/safety-suggestions`).then((d) => { if (live) setSafety(d); }).catch(() => undefined);
+    return () => { live = false; };
+  }, [selId, msgCount, selTags, canSafety]); // eslint-disable-line react-hooks/exhaustive-deps
   const useSuggestion = (h: (typeof sugg)[number]) => {
     edit(text ? `${text}\n${h.text}` : h.text);
     taRef.current?.focus();
@@ -384,6 +396,23 @@ export function Inbox({ me }: { me: Me }) {
                 ))}
               </div>
 
+              {safety.hits.length > 0 && (
+                <details className="kb-sugg safety-sugg" open={window.matchMedia('(min-width: 900px)').matches}>
+                  <summary>מהתקינה: {safety.topics.join(', ')} ({safety.hits.length})</summary>
+                  <ul>
+                    {safety.hits.map((h) => (
+                      <li key={`${h.topic}-${h.sourceId}`}>
+                        <strong>{h.title}</strong>{h.reference && <> <span className="badge connected">{h.reference}</span></>}
+                        <p style={{ margin: '.2rem 0', whiteSpace: 'pre-wrap' }}>{h.excerpt}</p>
+                        <div className="row">
+                          <button type="button" onClick={() => { const t = `${h.reference ? `לפי ${h.reference}: ` : ''}${h.excerpt}${h.url ? `\n${h.url}` : ''}`; edit(text ? `${text}\n${t}` : t); taRef.current?.focus(); }}>הוספה לתשובה<span className="sr-only"> {h.title}</span></button>
+                          {h.url && <a className="btn" href={h.url} target="_blank" rel="noopener noreferrer">למקור<span className="sr-only"> {h.title}, נפתח בלשונית חדשה</span></a>}
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                </details>
+              )}
               {sugg.length > 0 && (
                 <details className="kb-sugg" open={window.matchMedia('(min-width: 900px)').matches}>
                   <summary>הצעות ממאגר הידע ({sugg.length})</summary>

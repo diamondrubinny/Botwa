@@ -9,6 +9,7 @@ import { kindFor } from '../kb/extract.js';
 import { FetchError } from '../kb/fetch.js';
 import { isConfident, KnowledgeBase } from '../kb/service.js';
 import { sanitizeFileName } from '../media/validate.js';
+import { categorizeSource } from '../safety/importer.js';
 
 const idParam = z.object({ id: z.string().uuid() });
 const audience = z.enum(['bot', 'staff', 'both']);
@@ -107,6 +108,7 @@ export function kbRoutes(app: FastifyInstance, db: Db, kb: KnowledgeBase) {
       await audit(db, { actorId: req.user!.id, action: 'kb.file_rejected', target: rows[0].id, ip: req.ip, meta: { reason: code } });
       return reply.code(422).send({ error: code === 'infected' ? 'file_infected' : code === 'scan_unavailable' ? 'scan_unavailable' : 'extract_failed', id: rows[0].id });
     }
+    await categorizeSource(db, rows[0].id).catch(() => undefined); // puts the document under the safety topics its text is about
     await audit(db, { actorId: req.user!.id, action: 'kb.create', target: rows[0].id, ip: req.ip, meta: { kind: 'file', type: kind } });
     return reply.code(201).send({ id: rows[0].id });
   });

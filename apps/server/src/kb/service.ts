@@ -31,7 +31,7 @@ export function isConfident(top: Hit | undefined, next: Hit | undefined, minScor
   return lexical || semantic;
 }
 
-const BINARY: DocKind[] = ['pdf', 'docx'];
+const BINARY: DocKind[] = ['pdf', 'docx', 'xlsx'];
 const MAX_CHUNKS_TOTAL = 30_000;
 
 export class KnowledgeBase {
@@ -69,6 +69,12 @@ export class KnowledgeBase {
     );
     for (const r of rows) this.enqueue(r.id as string);
     return rows.length;
+  }
+
+  /** Antivirus check for an uploaded binary file (fail closed): 'clean' | 'infected' | 'unavailable'. */
+  async scanBinary(buf: Buffer): Promise<'clean' | 'infected' | 'unavailable'> {
+    const r = await this.media.scanBuffer(buf);
+    return r.status === 'clean' ? 'clean' : r.status === 'infected' ? 'infected' : 'unavailable';
   }
 
   // ---- ingestion ---------------------------------------------------------------------------------------------------
@@ -306,7 +312,7 @@ export class KnowledgeBase {
          FROM kb_chunks c JOIN kb_sources s ON s.id = c.source_id, to_tsquery('simple', $1) AS q(query)
         WHERE c.tsv @@ q.query AND s.enabled AND s.status = 'ready'
           AND ($2::text = 'any' OR s.audience IN ('both', $2))
-          AND ($3::uuid IS NULL OR s.category_id = $3)
+          AND ($3::uuid IS NULL OR s.category_id = $3 OR EXISTS (SELECT 1 FROM kb_source_cats x WHERE x.source_id = s.id AND x.category_id = $3))
         ORDER BY rank DESC LIMIT 60`,
       [terms.join(' | '), opts.audience, opts.categoryId ?? null],
     );
@@ -333,7 +339,7 @@ export class KnowledgeBase {
     if (semIds.length) {
       const meta = new Map((await this.db.query(
         `SELECT s.id, s.title, s.kind, s.url, s.boost FROM kb_sources s WHERE s.id = ANY($1::uuid[]) AND s.enabled AND s.status = 'ready'
-            AND ($2::text = 'any' OR s.audience IN ('both', $2)) AND ($3::uuid IS NULL OR s.category_id = $3)`,
+            AND ($2::text = 'any' OR s.audience IN ('both', $2)) AND ($3::uuid IS NULL OR s.category_id = $3 OR EXISTS (SELECT 1 FROM kb_source_cats x WHERE x.source_id = s.id AND x.category_id = $3))`,
         [semIds.map((x) => x.id), opts.audience, opts.categoryId ?? null])).rows.map((r) => [r.id as string, r]));
       for (const { id, c, ss } of semIds) {
         const m = meta.get(id);

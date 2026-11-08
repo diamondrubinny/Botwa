@@ -17,6 +17,7 @@ import { FlowEditor } from './pages/FlowEditor';
 import { Integrations } from './pages/Integrations';
 import { KnowledgeBase } from './pages/KnowledgeBase';
 import { Reports } from './pages/Reports';
+import { Safety } from './pages/Safety';
 import { Roles } from './pages/Roles';
 import { Settings } from './pages/Settings';
 import { Team } from './pages/Team';
@@ -29,6 +30,7 @@ const NAV: NavItem[] = [
   { r: 'inbox', label: t.nav.inbox, icon: 'chat', allowed: () => true },
   { r: 'bot', label: 'בוט', icon: 'bot', allowed: (m) => can(m, 'bot.view') },
   { r: 'flow', label: 'תרשים זרימה', icon: 'flow', allowed: (m) => can(m, 'bot.view') },
+  { r: 'safety', label: 'לוח בטיחות', icon: 'shield', allowed: (m) => can(m, 'safety.view') },
   { r: 'kb', label: 'מאגר ידע', icon: 'book', allowed: (m) => can(m, 'kb.manage') },
   { r: 'reports', label: 'דוחות', icon: 'chart', allowed: (m) => can(m, 'reports.view') },
   { r: 'canned', label: 'תשובות ותגיות', icon: 'tag', allowed: (m) => can(m, 'canned.manage') || can(m, 'tags.manage') },
@@ -139,6 +141,7 @@ function Shell({ me, reloadMe, onLogout }: { me: Me; reloadMe: () => Promise<voi
           {page === 'bot' && can(me, 'bot.view') && <Bot me={me} />}
           {page === 'flow' && can(me, 'bot.view') && <FlowEditor me={me} />}
           {page === 'integrations' && can(me, 'api.manage') && <Integrations />}
+          {page === 'safety' && can(me, 'safety.view') && <Safety me={me} />}
           {page === 'kb' && can(me, 'kb.manage') && <KnowledgeBase />}
           {page === 'reports' && can(me, 'reports.view') && <Reports />}
           {page === 'canned' && (can(me, 'canned.manage') || can(me, 'tags.manage')) && <CannedReplies me={me} />}
