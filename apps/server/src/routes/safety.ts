@@ -125,6 +125,44 @@ export function safetyRoutes(app: FastifyInstance, db: Db, kb: KnowledgeBase) {
     return { topics: cats.map((c) => c.name), hits: out.slice(0, 6) };
   });
 
+  // ---- responsibility areas: which officer answers for which building / place ----
+  const areaView = requireAuth(db, 'bot.view');
+  const areaManage = requireAuth(db, 'bot.manage');
+  const areaBody = z.object({ name: z.string().trim().min(1).max(80), keywords: z.array(z.string().trim().min(1).max(60)).min(1).max(30), userId: z.string().uuid() });
+
+  app.get('/safety/areas', { preHandler: areaView }, async () => (await db.query(
+    `SELECT a.id, a.name, a.keywords, a.user_id AS "userId", u.name AS "userName", u.active AS "userActive" FROM responsibility_areas a JOIN users u ON u.id = a.user_id ORDER BY a.sort, a.created_at`)).rows);
+
+  app.post('/safety/areas', { preHandler: areaManage }, async (req, reply) => {
+    const b = areaBody.safeParse(req.body);
+    if (!b.success) return reply.code(400).send({ error: 'bad_request' });
+    if (!(await db.query('SELECT 1 FROM users WHERE id = $1 AND active', [b.data.userId])).rowCount) return reply.code(400).send({ error: 'unknown_user' });
+    if ((await db.query('SELECT count(*)::int AS n FROM responsibility_areas')).rows[0].n >= 200) return reply.code(409).send({ error: 'too_many' });
+    const r = await db.query(`INSERT INTO responsibility_areas (name, keywords, user_id, sort) VALUES ($1,$2,$3, COALESCE((SELECT max(sort) + 1 FROM responsibility_areas), 0)) RETURNING id`, [b.data.name, [...new Set(b.data.keywords)], b.data.userId]);
+    await audit(db, { actorId: req.user!.id, action: 'safety.area_create', target: r.rows[0].id, ip: req.ip });
+    return reply.code(201).send({ id: r.rows[0].id });
+  });
+
+  app.put('/safety/areas/:id', { preHandler: areaManage }, async (req, reply) => {
+    const p = idParam.safeParse(req.params);
+    const b = areaBody.safeParse(req.body);
+    if (!p.success || !b.success) return reply.code(400).send({ error: 'bad_request' });
+    if (!(await db.query('SELECT 1 FROM users WHERE id = $1 AND active', [b.data.userId])).rowCount) return reply.code(400).send({ error: 'unknown_user' });
+    const r = await db.query('UPDATE responsibility_areas SET name = $2, keywords = $3, user_id = $4 WHERE id = $1', [p.data.id, b.data.name, [...new Set(b.data.keywords)], b.data.userId]);
+    if (!r.rowCount) return reply.code(404).send({ error: 'not_found' });
+    await audit(db, { actorId: req.user!.id, action: 'safety.area_update', target: p.data.id, ip: req.ip });
+    return { ok: true };
+  });
+
+  app.delete('/safety/areas/:id', { preHandler: areaManage }, async (req, reply) => {
+    const p = idParam.safeParse(req.params);
+    if (!p.success) return reply.code(400).send({ error: 'bad_request' });
+    const r = await db.query('DELETE FROM responsibility_areas WHERE id = $1', [p.data.id]);
+    if (!r.rowCount) return reply.code(404).send({ error: 'not_found' });
+    await audit(db, { actorId: req.user!.id, action: 'safety.area_delete', target: p.data.id, ip: req.ip });
+    return { ok: true };
+  });
+
   app.get('/safety/source/:id', { preHandler: view }, async (req, reply) => {
     const p = idParam.safeParse(req.params);
     if (!p.success) return reply.code(400).send({ error: 'bad_request' });

@@ -12,7 +12,8 @@ import { MediaService } from '../media/store.js';
 import type { KnowledgeBase } from '../kb/service.js';
 import { conversationEventData, messageEventData } from '../integrations/events.js';
 import type { EventType, WebhookService } from '../integrations/webhooks.js';
-import { runFlow, type Effect, type FlowContext, type FlowState } from '../flow/engine.js';
+import { runFlow, type Effect, type FlowContext, type FlowInput, type FlowState } from '../flow/engine.js';
+import { resolveArea } from '../safety/areas.js';
 import { loadFlow } from '../flow/store.js';
 import { loadBusinessHours } from '../routes/settings.js';
 import { sendAlert } from '../alerts.js';
@@ -169,7 +170,7 @@ export class ChannelManager {
             if (r.needsRouting) await autoAssign(this.db, r.conversationId).catch(() => null);
           } else if (r.messageId && bot?.enabled) {
             // the menu bot owns new conversations; people are assigned only at hand-over
-            await this.runBot(channelId, r.conversationId, m.externalContactId, bot, m.media ? null : m.text).catch(() => undefined);
+            await this.runBot(channelId, r.conversationId, m.externalContactId, bot, m.text, !!m.media).catch(() => undefined);
           } else if (r.messageId) {
             if (r.needsRouting) {
               const to = await autoAssign(this.db, r.conversationId).catch(() => null);
@@ -343,7 +344,8 @@ export class ChannelManager {
     } catch { return null; }
   }
 
-  private async runBot(channelId: string, convId: string, ext: string, bot: BotConfig, text: string | null): Promise<void> {
+  private async runBot(channelId: string, convId: string, ext: string, bot: BotConfig, rawText: string | null, hasMedia = false): Promise<void> {
+    let text: string | null = hasMedia ? null : rawText;
     const { rows } = await this.db.query('SELECT bot_state, bot_invalid, assigned_to FROM conversations WHERE id = $1', [convId]);
     const c = rows[0];
     if (!c || c.assigned_to) return; // a person already owns this conversation
@@ -360,7 +362,7 @@ export class ChannelManager {
 
     if (bot.mode === 'flow') {
       const flow = await loadFlow(this.db);
-      if (flow) { await this.runFlowStep(channelId, convId, ext, bot, flow, text); return; }
+      if (flow) { await this.runFlowStep(channelId, convId, ext, bot, flow, { text: rawText !== null && rawText.trim() === '[unsupported message type]' ? null : rawText, media: hasMedia }); return; }
     }
 
     const d = decide(bot, { state: c.bot_state, invalid: c.bot_invalid }, text, await this.kbAnswer(bot, c.bot_state, text));
@@ -392,23 +394,27 @@ export class ChannelManager {
   }
 
   /** The flow chart bot: one customer message in, replies + side effects out (see flow/engine.ts). */
-  private async runFlowStep(channelId: string, convId: string, ext: string, bot: BotConfig, flow: NonNullable<Awaited<ReturnType<typeof loadFlow>>>, text: string | null): Promise<void> {
-    const st = (await this.db.query('SELECT flow_state FROM conversations WHERE id = $1', [convId])).rows[0]?.flow_state as FlowState | null;
+  private async runFlowStep(channelId: string, convId: string, ext: string, bot: BotConfig, flow: NonNullable<Awaited<ReturnType<typeof loadFlow>>>, input: FlowInput): Promise<void> {
+    const row = (await this.db.query('SELECT c.flow_state, ct.profile FROM conversations c JOIN contacts ct ON ct.id = c.contact_id WHERE c.id = $1', [convId])).rows[0];
+    const st = row?.flow_state as FlowState | null;
     const hours = await loadBusinessHours(this.db);
     const ctx: FlowContext = {
       isOpen: !hours.enabled || isOpen(hours, new Date()),
       channelType: this.types.get(channelId) ?? 'whatsapp',
       humanKeywords: bot.humanKeywords, humanOption: bot.humanOption, invalidRetries: bot.invalidRetries, invalidMessage: bot.invalidMessage,
+      profile: (row?.profile ?? {}) as Record<string, string>,
+      resolveArea: (t) => resolveArea(this.db, t),
       kbAnswer: (t) => this.kbAnswer(bot, null, t, true),
       matchOption: async (t, options) => this.kb?.matchOption(t, options) ?? null,
     };
-    const r = await runFlow(flow, st, text, ctx, bot.humanLabel);
+    const r = await runFlow(flow, st, input, ctx, bot.humanLabel);
     for (const reply of r.replies) await this.botSay(channelId, convId, ext, reply);
     const handoff = r.effects.find((e): e is Extract<Effect, { kind: 'handoff' }> => e.kind === 'handoff');
     await this.db.query('UPDATE conversations SET flow_state = $2, bot_state = $3 WHERE id = $1', [convId, JSON.stringify(r.state), handoff ? 'human' : 'menu']);
     for (const e of r.effects) {
       if (e.kind === 'note') await this.db.query('INSERT INTO conversation_notes (conversation_id, body) VALUES ($1, $2)', [convId, e.text]).catch(() => undefined);
       else if (e.kind === 'tag') await this.db.query('INSERT INTO conversation_tags (conversation_id, tag_id) SELECT $1, id FROM tags WHERE id = $2 ON CONFLICT DO NOTHING', [convId, e.tagId]).catch(() => undefined);
+      else if (e.kind === 'profile') await this.db.query(`UPDATE contacts SET profile = profile || $2::jsonb WHERE id = (SELECT contact_id FROM conversations WHERE id = $1)`, [convId, JSON.stringify(e.vars)]).catch(() => undefined);
       else if (e.kind === 'name') await this.db.query(`UPDATE contacts SET display_name = $2 WHERE id = (SELECT contact_id FROM conversations WHERE id = $1) AND display_name IS NULL`, [convId, e.value]).catch(() => undefined);
     }
     if (handoff) {
