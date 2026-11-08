@@ -80,7 +80,7 @@ export function buildSafetyFlow(tag: (name: string) => string, links: TemplateLi
     if (opts.place !== false) parts.push({ id: `${p}_where`, type: 'question', label: `${opts.label}: מיקום`, text: 'ציינו מיקום מדויק (בניין, קומה, חדר, ליד מה):', save: 'where', optional: false, retryText: 'נא לכתוב את המיקום.', next: undefined });
     if (opts.docs) parts.push({ id: `${p}_docs`, type: 'media', label: `${opts.label}: מסמכי מכשור`, text: 'אם יש, אפשר לשלוח מסמכים של המכשור (מפרט, מדריך). אפשר לכתוב "דלג".', allowText: false, optional: true, retryText: 'אפשר לשלוח קובץ או לכתוב "דלג".', next: undefined });
     for (const t of opts.tags) parts.push({ id: `${p}_tag${parts.length}`, type: 'tag', label: `תגית: ${t}`, tagId: tag(t), next: undefined });
-    parts.push({ id: `${p}_ho`, type: 'handoff', label: `העברה: ${opts.to}`, text: HANDOFF_TEXT, ...(opts.areas ? { areaVars: ['where', 'building'] } : {}) } as FlowNode);
+    parts.push({ id: `${p}_ho`, type: 'handoff', label: `העברה: ${opts.to}`, text: HANDOFF_TEXT, ...(opts.areas ? { areaVars: ['where', 'building'] } : {}), officerTopic: opts.tags[0] } as FlowNode);
     parts.forEach((n, i) => { if (i < parts.length - 1 && 'next' in n) (n as { next?: string }).next = parts[i + 1]!.id; chain.push(n.id); nodes.push(n); });
     return chain;
   };
@@ -90,7 +90,7 @@ export function buildSafetyFlow(tag: (name: string) => string, links: TemplateLi
   add({ id: 'chem_q', type: 'question', label: 'חומ"ס: השאלה', text: 'כתבו את שאלתכם:', save: 'question', optional: false, retryText: 'נא לכתוב את השאלה.', next: 'chem_tag' });
   add({ id: 'chem_tag', type: 'tag', label: 'תגית: חומ"ס', tagId: tag('חומ״ס'), next: 'chem_tag2' });
   add({ id: 'chem_tag2', type: 'tag', label: 'תגית: כימיקלים', tagId: tag('כימיקלים המחייבים ניטור'), next: 'chem_ho' });
-  add({ id: 'chem_ho', type: 'handoff', label: 'העברה: רוברט (חומ"ס)', text: HANDOFF_TEXT });
+  add({ id: 'chem_ho', type: 'handoff', label: 'העברה: רוברט (חומ"ס)', text: HANDOFF_TEXT, officerTopic: 'חומ״ס' });
 
   report('hz', { label: 'מפגע', mediaText: 'שלחו תמונה של המפגע או תארו אותו בכתב:', tags: ['מפגע'], to: 'הממונה לפי אזור', areas: true });
   report('rad', { label: 'קרינה', mediaText: 'שלחו תמונה של האזור או תארו בכתב את השאלה / הדיווח:', tags: ['קרינה מייננת'], to: 'מהנדס קרינה', areas: false, docs: true });

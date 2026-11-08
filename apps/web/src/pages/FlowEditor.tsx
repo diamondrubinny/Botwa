@@ -16,12 +16,12 @@ type Node = { id: string; label?: string } & (
   | { type: 'kb'; intro: string; found?: Id; notFound?: Id }
   | { type: 'referral'; text: string; contactName: string; phone: string; message: string; next?: Id }
   | { type: 'tag'; tagId: string; next?: Id }
-  | { type: 'handoff'; text: string; userId?: string; areaVars?: string[] }
+  | { type: 'handoff'; text: string; userId?: string; areaVars?: string[]; officerTopic?: string; showContact?: boolean }
   | { type: 'end'; text: string }
 );
 interface Flow { start: string; nodes: Node[]; labels?: Record<string, string> }
 interface FState { node: string | null; vars: Record<string, string>; invalid: number; done: boolean; endedAt?: number; files?: number; list?: string[] }
-interface Refs { users: { id: string; name: string }[]; tags: { id: string; name: string }[] }
+interface Refs { users: { id: string; name: string }[]; tags: { id: string; name: string }[]; officers?: { id: string; name: string; active: boolean; hasAccount: boolean; topics: string[] }[]; topics?: string[] }
 
 const TYPE_LABEL: Record<Node['type'], string> = { message: 'הודעה', menu: 'תפריט', question: 'שאלה (איסוף פרט)', media: 'קובץ, תמונה או טקסט', list: 'רשימה (הוסף עוד)', remember: 'שמירה בכרטיס איש הקשר', condition: 'תנאי', kb: 'מאגר ידע', referral: 'הפניה לווצאפ אישי', tag: 'הוספת תגית', handoff: 'העברה לנציג', end: 'סיום' };
 const TYPE_CLASS: Record<Node['type'], string> = { message: 'muted', menu: 'accent', question: 'accent', media: 'accent', list: 'accent', remember: 'muted', condition: 'warn', kb: 'ok', referral: 'ok', tag: 'muted', handoff: 'danger', end: 'muted' };
@@ -422,6 +422,17 @@ function NodeForm({ n, flow, refs, canEdit, upd, del, makeStart }: { n: Node; fl
           <input id={f('av')} dir="ltr" value={(n.areaVars ?? []).join(', ')} onChange={(e) => { const v = e.target.value.split(',').map((x) => x.trim()).filter((x) => VAR_RE.test(x)).slice(0, 4); set({ areaVars: v.length ? v : undefined }); }} placeholder="where, building" />
           <p className="hint">אם אחד הפרטים מכיל שם בניין או מקום שמוגדר ב<a href="#/safety">אזורי האחריות</a>, השיחה תועבר לאחראי עליו. אחרת לנציג שנבחר למטה.</p></div>
       )}
+      {n.type === 'handoff' && (() => {
+        const found = (refs.officers ?? []).filter((o) => o.active && n.officerTopic && o.topics.some((t) => t.toLowerCase() === n.officerTopic!.toLowerCase()));
+        return (
+          <div className="field"><label htmlFor={f('ot')}>ממונה בתחום (אופציונלי)</label>
+            <input id={f('ot')} list={f('otl')} maxLength={60} value={n.officerTopic ?? ''} onChange={(e) => set({ officerTopic: e.target.value.trim() ? e.target.value : undefined })} placeholder="למשל: לייזרים" aria-describedby={f('oth')} />
+            <datalist id={f('otl')}>{(refs.topics ?? []).map((t) => <option key={t} value={t} />)}</datalist>
+            <p id={f('oth')} className="hint">{n.officerTopic ? (found.length ? `ממונים בתחום "${n.officerTopic}": ${found.map((o) => `${o.name}${o.hasAccount ? '' : ' (בלי חשבון)'}`).join(', ')}.` : `אין עדיין ממונה פעיל בתחום "${n.officerTopic}". מוסיפים אותו ב`) : 'השיחה עוברת לממונה של הנושא שמוגדר ב'}<a href="#/safety">לוח בטיחות ← ממונים ונושאים</a>. שיוך לפי מקום (אזורי אחריות) גובר, והנציג שנבחר למטה הוא גיבוי.</p>
+            {n.officerTopic && <label><input type="checkbox" style={{ width: 'auto', minHeight: 'auto' }} checked={!!n.showContact} onChange={(e) => set({ showContact: e.target.checked || undefined })} /> להציג ללקוח את שם הממונה, הווצאפ והאימייל שלו</label>}
+          </div>
+        );
+      })()}
       {n.type === 'handoff' && <div className="field"><label htmlFor={f('us')}>נציג אחראי</label><select id={f('us')} value={n.userId ?? ''} onChange={(e) => set({ userId: e.target.value || undefined })}><option value="">לפי הקצאה רגילה</option>{refs.users.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}</select></div>}
       {'next' in n && n.type !== 'tag' ? <TargetSelect id={f('nx')} label="ממשיך אל" value={n.next} flow={flow} onChange={(v) => set({ next: v })} /> : null}
       {n.type === 'tag' && <TargetSelect id={f('nx')} label="ממשיך אל" value={n.next} flow={flow} onChange={(v) => set({ next: v })} />}

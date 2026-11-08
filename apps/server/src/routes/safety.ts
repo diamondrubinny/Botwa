@@ -9,6 +9,8 @@ import { sanitizeFileName } from '../media/validate.js';
 import { boardCategories, ensureBoardCategories } from '../safety/categories.js';
 import { importWorkbook, reapplyCategories } from '../safety/importer.js';
 import { areasTemplate, importAreas } from '../safety/areasImport.js';
+import { cleanTopics, importOfficers, listOfficers, normalizePhone, officersTemplate } from '../safety/officers.js';
+import { TEMPLATE_TAGS } from '../flow/safetyTemplate.js';
 
 const idParam = z.object({ id: z.string().uuid() });
 
@@ -184,6 +186,91 @@ export function safetyRoutes(app: FastifyInstance, db: Db, kb: KnowledgeBase) {
     const r = await db.query('DELETE FROM responsibility_areas WHERE id = $1', [p.data.id]);
     if (!r.rowCount) return reply.code(404).send({ error: 'not_found' });
     await audit(db, { actorId: req.user!.id, action: 'safety.area_delete', target: p.data.id, ip: req.ip });
+    return { ok: true };
+  });
+
+  // ---- officers by topic: names, e-mails, WhatsApp numbers, the topics they answer for, and optionally their account ----
+  const officerBody = z.object({
+    name: z.string().trim().min(1).max(100),
+    email: z.preprocess((v) => (typeof v === 'string' && v.trim() === '' ? null : v), z.string().trim().toLowerCase().email().max(254).nullable().default(null)),
+    phone: z.preprocess((v) => (typeof v === 'string' && v.trim() === '' ? null : v), z.string().trim().max(30).nullable().default(null)),
+    userId: z.string().uuid().nullable().default(null),
+    topics: z.array(z.string().trim().min(1).max(60)).max(30).default([]),
+    notes: z.string().trim().max(300).default(''),
+    active: z.boolean().default(true),
+  });
+  async function officerFields(b: z.infer<typeof officerBody>): Promise<{ phone: string | null } | { error: string }> {
+    let phone: string | null = null;
+    if (b.phone) { phone = normalizePhone(b.phone); if (!phone) return { error: 'bad_phone' }; }
+    if (b.userId && !(await db.query('SELECT 1 FROM users WHERE id = $1 AND active', [b.userId])).rowCount) return { error: 'unknown_user' };
+    return { phone };
+  }
+  async function setTopics(id: string, topics: string[]) {
+    await db.query('DELETE FROM officer_topics WHERE officer_id = $1', [id]);
+    for (const t of cleanTopics(topics)) await db.query('INSERT INTO officer_topics (officer_id, topic) VALUES ($1,$2) ON CONFLICT DO NOTHING', [id, t]);
+  }
+
+  app.get('/safety/officers', { preHandler: areaView }, async () => listOfficers(db));
+
+  /** Topic names to pick from: the board topics, the flow template's topics, and the ones already used. */
+  app.get('/safety/officer-topics', { preHandler: areaView }, async () => {
+    const used = (await db.query('SELECT DISTINCT topic FROM officer_topics')).rows.map((r) => r.topic as string);
+    const board = (await db.query('SELECT name FROM kb_categories WHERE board ORDER BY sort, name')).rows.map((r) => r.name as string);
+    return [...new Set([...TEMPLATE_TAGS, ...board, ...used])];
+  });
+
+  app.get('/safety/officers/template.xlsx', { preHandler: areaView }, async (_req, reply) => reply
+    .header('content-type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+    .header('content-disposition', 'attachment; filename="officers-template.xlsx"').send(await officersTemplate()));
+
+  app.post('/safety/officers/import', { preHandler: areaManage, config: { rateLimit: { max: 10, timeWindow: '10 minutes' } } }, async (req, reply) => {
+    const file = await req.file();
+    if (!file) return reply.code(400).send({ error: 'bad_request' });
+    if (!/\.xlsx$/i.test(sanitizeFileName(file.filename, 'x'))) return reply.code(415).send({ error: 'unsupported_file_type' });
+    let buf: Buffer;
+    try { buf = await file.toBuffer(); } catch { return reply.code(413).send({ error: 'too_large' }); }
+    if (file.file.truncated) return reply.code(413).send({ error: 'too_large' });
+    const scan = await kb.scanBinary(buf);
+    if (scan === 'infected') return reply.code(422).send({ error: 'file_infected' });
+    if (scan === 'unavailable') return reply.code(503).send({ error: 'scan_unavailable' });
+    try {
+      const r = await importOfficers(db, buf);
+      await audit(db, { actorId: req.user!.id, action: 'safety.officers_import', ip: req.ip, meta: { created: r.created, updated: r.updated, skipped: r.skipped.length } });
+      return r;
+    } catch (e) { return reply.code(422).send({ error: (e as Error).message === 'unknown_workbook' ? 'unknown_workbook' : 'extract_failed' }); }
+  });
+
+  app.post('/safety/officers', { preHandler: areaManage }, async (req, reply) => {
+    const b = officerBody.safeParse(req.body);
+    if (!b.success) return reply.code(400).send({ error: 'bad_request' });
+    const f = await officerFields(b.data);
+    if ('error' in f) return reply.code(400).send({ error: f.error });
+    if ((await db.query('SELECT count(*)::int AS n FROM officers')).rows[0].n >= 300) return reply.code(409).send({ error: 'too_many' });
+    const r = await db.query(`INSERT INTO officers (name, email, phone, user_id, notes, active, sort) VALUES ($1,$2,$3,$4,$5,$6, COALESCE((SELECT max(sort) + 1 FROM officers), 0)) RETURNING id`, [b.data.name, b.data.email, f.phone, b.data.userId, b.data.notes, b.data.active]);
+    await setTopics(r.rows[0].id, b.data.topics);
+    await audit(db, { actorId: req.user!.id, action: 'safety.officer_create', target: r.rows[0].id, ip: req.ip });
+    return reply.code(201).send({ id: r.rows[0].id });
+  });
+
+  app.put('/safety/officers/:id', { preHandler: areaManage }, async (req, reply) => {
+    const p = idParam.safeParse(req.params);
+    const b = officerBody.safeParse(req.body);
+    if (!p.success || !b.success) return reply.code(400).send({ error: 'bad_request' });
+    const f = await officerFields(b.data);
+    if ('error' in f) return reply.code(400).send({ error: f.error });
+    const r = await db.query('UPDATE officers SET name = $2, email = $3, phone = $4, user_id = $5, notes = $6, active = $7 WHERE id = $1', [p.data.id, b.data.name, b.data.email, f.phone, b.data.userId, b.data.notes, b.data.active]);
+    if (!r.rowCount) return reply.code(404).send({ error: 'not_found' });
+    await setTopics(p.data.id, b.data.topics);
+    await audit(db, { actorId: req.user!.id, action: 'safety.officer_update', target: p.data.id, ip: req.ip });
+    return { ok: true };
+  });
+
+  app.delete('/safety/officers/:id', { preHandler: areaManage }, async (req, reply) => {
+    const p = idParam.safeParse(req.params);
+    if (!p.success) return reply.code(400).send({ error: 'bad_request' });
+    const r = await db.query('DELETE FROM officers WHERE id = $1', [p.data.id]);
+    if (!r.rowCount) return reply.code(404).send({ error: 'not_found' });
+    await audit(db, { actorId: req.user!.id, action: 'safety.officer_delete', target: p.data.id, ip: req.ip });
     return { ok: true };
   });
 

@@ -14,6 +14,7 @@ import { conversationEventData, messageEventData } from '../integrations/events.
 import type { EventType, WebhookService } from '../integrations/webhooks.js';
 import { runFlow, type Effect, type FlowContext, type FlowInput, type FlowState } from '../flow/engine.js';
 import { resolveArea } from '../safety/areas.js';
+import { contactText, officerNote, officersForTopic, pickOfficer } from '../safety/officers.js';
 import { loadFlow } from '../flow/store.js';
 import { loadBusinessHours } from '../routes/settings.js';
 import { sendAlert } from '../alerts.js';
@@ -127,6 +128,8 @@ export class ChannelManager {
       }
     }
     this.emit({ channelId, type: 'status', status });
+    // back online: answer the customers whose messages the bot could not answer while the channel was down
+    if (status === 'connected' && prev !== 'connected') setTimeout(() => void this.catchUp(channelId).catch(() => undefined), this.cfg.NODE_ENV === 'test' ? 30 : 4000).unref?.();
   }
 
   async start(channelId: string, opts?: StartOptions): Promise<void> {
@@ -170,7 +173,7 @@ export class ChannelManager {
             if (r.needsRouting) await autoAssign(this.db, r.conversationId).catch(() => null);
           } else if (r.messageId && bot?.enabled) {
             // the menu bot owns new conversations; people are assigned only at hand-over
-            await this.runBot(channelId, r.conversationId, m.externalContactId, bot, m.text, !!m.media, m.externalMessageId).catch(() => undefined);
+            await this.attemptBot(channelId, r.conversationId, m.externalContactId, bot, { text: m.text, media: !!m.media, ext: m.externalMessageId }, true);
           } else if (r.messageId) {
             if (r.needsRouting) {
               const to = await autoAssign(this.db, r.conversationId).catch(() => null);
@@ -384,6 +387,49 @@ export class ChannelManager {
     } catch { return null; }
   }
 
+  /**
+   * Run the bot for one customer message, and remember the message until the bot has really answered it. If the channel is down or
+   * sending fails, the message stays "pending" and catchUp() answers it when the channel is back (see bot.catchupHours).
+   * Replies are sent before the bot's state changes, so running the same message again is safe.
+   */
+  private async attemptBot(channelId: string, convId: string, contact: string, bot: BotConfig, p: { text: string | null; media: boolean; ext: string }, fresh: boolean): Promise<boolean> {
+    if (fresh && bot.catchupHours > 0) await this.db.query('UPDATE conversations SET bot_pending_at = now(), bot_pending_ext = $2, bot_pending_text = $3, bot_pending_media = $4, bot_tries = 0 WHERE id = $1', [convId, p.ext, p.text, p.media]).catch(() => undefined);
+    try {
+      await this.runBot(channelId, convId, contact, bot, p.text, p.media, p.ext);
+      await this.db.query('UPDATE conversations SET bot_pending_at = NULL, bot_pending_text = NULL, bot_pending_ext = NULL WHERE id = $1 AND bot_pending_ext = $2', [convId, p.ext]).catch(() => undefined);
+      return true;
+    } catch {
+      if (fresh && bot.catchupHours > 0) await this.db.query(`INSERT INTO conversation_notes (conversation_id, body) VALUES ($1, 'הבוט לא הצליח לענות להודעה האחרונה (הערוץ מנותק או שהשליחה נכשלה). הוא ינסה שוב כשהחיבור יחזור.')`, [convId]).catch(() => undefined);
+      return false;
+    }
+  }
+
+  private catching = false;
+  /** Answer the customer messages the bot could not answer earlier, for connected channels, oldest first. Gives up after bot.catchupHours or 5 tries. */
+  async catchUp(only?: string): Promise<number> {
+    if (this.catching) return 0;
+    this.catching = true;
+    let answered = 0;
+    try {
+      const bot = await loadBot(this.db);
+      const { rows } = await this.db.query(
+        `SELECT c.id, c.channel_id AS "channelId", ct.external_id AS ext, c.bot_pending_ext AS "pendingExt", c.bot_pending_text AS text, c.bot_pending_media AS media, c.bot_pending_at AS "at", c.bot_tries AS tries
+           FROM conversations c JOIN contacts ct ON ct.id = c.contact_id WHERE c.bot_pending_at IS NOT NULL AND ($1::uuid IS NULL OR c.channel_id = $1) ORDER BY c.bot_pending_at LIMIT 30`, [only ?? null]);
+      for (const r of rows) {
+        if (this.statuses.get(r.channelId) !== 'connected') continue;           // wait for the channel
+        const ageH = (Date.now() - new Date(r.at).getTime()) / 3_600_000;
+        if (!bot.enabled || bot.catchupHours === 0 || ageH > bot.catchupHours || r.tries >= 5) {
+          await this.db.query('UPDATE conversations SET bot_pending_at = NULL, bot_pending_text = NULL, bot_pending_ext = NULL WHERE id = $1', [r.id]);
+          if (bot.enabled && bot.catchupHours > 0) await this.db.query(`INSERT INTO conversation_notes (conversation_id, body) VALUES ($1, 'הבוט לא ענה להודעה האחרונה של הלקוח (ניסיונות חוזרים נכשלו או שעבר זמן רב). יש לטפל בה ידנית.')`, [r.id]).catch(() => undefined);
+          continue;
+        }
+        await this.db.query('UPDATE conversations SET bot_tries = bot_tries + 1 WHERE id = $1', [r.id]);
+        if (await this.attemptBot(r.channelId, r.id, r.ext, bot, { text: r.text, media: r.media, ext: r.pendingExt }, false)) answered++;
+      }
+    } finally { this.catching = false; }
+    return answered;
+  }
+
   private async runBot(channelId: string, convId: string, ext: string, bot: BotConfig, rawText: string | null, hasMedia = false, inboundId?: string): Promise<void> {
     const rx = this.reactor(channelId, ext, inboundId, bot);
     let text: string | null = hasMedia ? null : rawText;
@@ -427,7 +473,7 @@ export class ChannelManager {
   }
 
   /** Hand a bot conversation to a person: note, assignment (the named person if active, else normal routing), then the hand-over or away notice. */
-  private async handoffNow(channelId: string, convId: string, ext: string, bot: BotConfig, why: string, topic?: { userId: string; topic: string }, customText?: string): Promise<void> {
+  private async handoffNow(channelId: string, convId: string, ext: string, bot: BotConfig, why: string, topic?: { userId: string; topic: string }, customText?: string, extra?: string): Promise<void> {
     await this.db.query(`INSERT INTO conversation_notes (conversation_id, body) VALUES ($1, $2)`, [convId, `מועבר מהבוט לנציג: ${why}.`]);
     let to: string | null = null;
     if (topic) {
@@ -440,7 +486,7 @@ export class ChannelManager {
     if (to && !topic) await audit(this.db, { action: 'conversation.auto_assign', target: convId, meta: { to, via: 'bot' } }).catch(() => undefined);
     const hours = await loadBusinessHours(this.db);
     const closed = hours.enabled && !isOpen(hours, new Date());
-    await this.botSay(channelId, convId, ext, closed ? hours.awayMessage : customText || bot.humanMessage);
+    await this.botSay(channelId, convId, ext, [closed ? hours.awayMessage : customText || bot.humanMessage, extra].filter(Boolean).join('\n\n'));
     if (closed) await this.db.query('UPDATE conversations SET last_away_at = now() WHERE id = $1', [convId]);
   }
 
@@ -472,7 +518,17 @@ export class ChannelManager {
     }
     if (handoff) {
       const why = { requested: 'הלקוח ביקש נציג', unrecognized: 'הלקוח שלח הודעה שהבוט לא זיהה', media: 'הלקוח שלח קובץ או תוכן שאינו טקסט', flow: 'לפי תרשים הזרימה' }[handoff.reason];
-      await this.handoffNow(channelId, convId, ext, bot, why, handoff.userId ? { userId: handoff.userId, topic: 'תרשים זרימה' } : undefined, handoff.text);
+      // the officer of the topic named in the node: gets the conversation when they have an account (a place-based choice wins), and is shown to the customer when asked
+      let userId = handoff.userId, extra: string | undefined;
+      if (handoff.officerTopic) {
+        const o = pickOfficer(await officersForTopic(this.db, handoff.officerTopic).catch(() => []));
+        if (o) {
+          if (!handoff.viaArea && o.userId && o.userActive) userId = o.userId;
+          await this.db.query('INSERT INTO conversation_notes (conversation_id, body) VALUES ($1, $2)', [convId, officerNote(handoff.officerTopic, o)]).catch(() => undefined);
+          if (handoff.showContact) extra = contactText(o);
+        }
+      }
+      await this.handoffNow(channelId, convId, ext, bot, why, userId ? { userId, topic: handoff.officerTopic ?? 'תרשים זרימה' } : undefined, handoff.text, extra);
     }
   }
 

@@ -53,6 +53,10 @@ export const flowNode = z.discriminatedUnion('type', [
     ...base, type: z.literal('handoff'), text: z.string().trim().max(500).default(''), userId: z.string().uuid().optional(),
     /** pick the person by responsibility area from these answers (first one that matches an area); userId is the fallback */
     areaVars: z.array(varName).max(4).optional(),
+    /** hand over to the officer of this topic (see the officers list); used when no area matched. userId stays as the last fallback */
+    officerTopic: z.string().trim().min(1).max(60).optional(),
+    /** tell the customer the officer's name and how to reach them */
+    showContact: z.boolean().optional(),
   }),
   z.object({ ...base, type: z.literal('end'), text: z.string().trim().max(500).default('') }),
 ]);

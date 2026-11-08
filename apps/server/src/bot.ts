@@ -57,6 +57,8 @@ export const botSchema = z.object({
   }).default({ enabled: false, minScore: 0.6, maxChars: 700, showSource: true, intro: 'מצאתי את זה במאגר המידע שלנו:' }),
   /** automatic emoji reactions on the customer's message: "working" while the bot searches, then "done" / "noAnswer", or "handoff" when a person takes over */
   reactions: z.object({ enabled: z.boolean(), working: emoji, done: emoji, noAnswer: emoji, handoff: emoji }).default(() => ({ ...DEFAULT_REACTIONS })),
+  /** a customer message the bot could not answer (channel down, sending failed) is answered when the channel is back, up to this many hours later (0 = never) */
+  catchupHours: z.number().int().min(0).max(72).default(12),
 });
 export type BotConfig = z.infer<typeof botSchema>;
 
@@ -77,6 +79,7 @@ export const DEFAULT_BOT: BotConfig = {
   footer: 'לחזרה לתפריט שלחו "תפריט". לנציג שלחו "נציג".',
   kb: { enabled: false, minScore: 0.6, maxChars: 700, showSource: true, intro: 'מצאתי את זה במאגר המידע שלנו:' },
   reactions: { ...DEFAULT_REACTIONS },
+  catchupHours: 12,
 };
 
 export async function loadBot(db: Db): Promise<BotConfig> {

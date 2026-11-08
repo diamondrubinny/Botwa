@@ -7,6 +7,7 @@ interface BotCfg {
   humanKeywords: string[]; humanMessage: string; invalidMessage: string; invalidRetries: number; footer: string; preview?: string; mode?: 'menu' | 'flow';
   kb: { enabled: boolean; minScore: number; maxChars: number; showSource: boolean; intro: string };
   reactions?: { enabled: boolean; working: string; done: string; noAnswer: string; handoff: string };
+  catchupHours?: number;
 }
 
 const RX = { enabled: false, working: '👀', done: '✅', noAnswer: '🤔', handoff: '🙋' };
@@ -147,6 +148,15 @@ export function Bot({ me }: { me: Me }) {
         </fieldset>
 
         <p className="card">מצב הבוט כעת: <strong>{b.mode === 'flow' ? 'תרשים זרימה' : 'תפריט ממוספר (העמוד הזה)'}</strong>. לבניית שיחה מתקדמת עם שאלות, תנאים והפניות: <a href="#/flow">תרשים זרימה</a>.</p>
+
+        <fieldset disabled={!canEdit}>
+          <legend>תשובה אחרי ניתוק החיבור</legend>
+          <p className="hint">אם הערוץ (למשל הטלפון) איבד תקשורת ובזמן הזה הבוט לא הצליח לענות, ההודעה של הלקוח נשמרת, והבוט עונה לה ברגע שהחיבור חוזר (בדרך כלל תוך כמה שניות, ובדיקה גם בכל דקה). אם הלקוח כתב כמה הודעות, הבוט עונה לאחרונה. אחרי חמישה ניסיונות או אחרי מספר השעות שמוגדר כאן הוא מפסיק ומשאיר הערה פנימית כדי שנציג יטפל בשיחה.</p>
+          <div className="field">
+            <label htmlFor="b-cu">להמשיך לענות עד כמה שעות אחרי ההודעה (0 = לא לענות אחרי ניתוק)</label>
+            <input id="b-cu" type="number" min={0} max={72} style={{ maxWidth: 120 }} value={b.catchupHours ?? 12} onChange={(e) => set({ catchupHours: Math.min(72, Math.max(0, Math.round(Number(e.target.value) || 0))) })} />
+          </div>
+        </fieldset>
 
         <fieldset disabled={!canEdit}>
           <legend>תגובות אוטומטיות (אימוג׳י על הודעת הלקוח)</legend>

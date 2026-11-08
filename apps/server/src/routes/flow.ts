@@ -8,6 +8,7 @@ import type { Db } from '../db.js';
 import { runFlow, type FlowState } from '../flow/engine.js';
 import { flowFromMenu } from '../flow/fromMenu.js';
 import { buildSafetyFlow, TEMPLATE_TAGS, templateLinksSchema } from '../flow/safetyTemplate.js';
+import { listOfficers } from '../safety/officers.js';
 import { flowSchema, unfinished, unreachable, validateFlow, type Flow } from '../flow/schema.js';
 import { loadFlow, saveFlow } from '../flow/store.js';
 import type { KnowledgeBase } from '../kb/service.js';
@@ -28,6 +29,9 @@ export function flowRoutes(app: FastifyInstance, db: Db, kb: KnowledgeBase) {
   app.get('/flow/refs', { preHandler: view }, async () => ({
     users: (await db.query('SELECT id, name FROM users WHERE active ORDER BY lower(name)')).rows,
     tags: (await db.query('SELECT id, name FROM tags ORDER BY lower(name)')).rows,
+    /** officers by topic, for the "hand over to the officer of a topic" choice */
+    officers: (await listOfficers(db)).map((o) => ({ id: o.id, name: o.name, active: o.active, hasAccount: !!o.userId && o.userActive, topics: o.topics })),
+    topics: [...new Set([...TEMPLATE_TAGS, ...(await db.query('SELECT DISTINCT topic FROM officer_topics')).rows.map((r) => r.topic as string)])],
   }));
 
   app.get('/flow', { preHandler: view }, async () => {

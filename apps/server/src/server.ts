@@ -17,6 +17,7 @@ const app = await buildApp(cfg, db, mgr, media);
 await mgr.startAll();
 // Knowledge base: resume unfinished link imports, re-read links whose refresh time has come, drop old question logs.
 void mgr.kb?.resumePending().catch((err) => app.log.error({ err }, 'kb resume failed'));
+setInterval(() => void mgr.catchUp().catch((err) => app.log.error({ err }, 'bot catch-up failed')), 60_000).unref();
 setInterval(() => void mgr.kb?.embedMissing().catch((err) => app.log.error({ err }, 'kb embed failed')), 600_000).unref();
 setInterval(() => void mgr.kb?.refreshDue().catch((err) => app.log.error({ err }, 'kb refresh failed')), 3600_000).unref();
 setInterval(() => void db.query(`DELETE FROM webchat_visitors WHERE last_seen_at < now() - interval '90 days'`).catch((err) => app.log.error({ err }, 'webchat purge failed')), 24 * 3600_000).unref();

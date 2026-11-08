@@ -18,7 +18,7 @@ export interface FlowState {
 export const NEW_FLOW_STATE: FlowState = { node: null, vars: {}, invalid: 0, done: false };
 
 export type Effect =
-  | { kind: 'handoff'; reason: 'requested' | 'flow' | 'unrecognized' | 'media'; userId?: string; text?: string }
+  | { kind: 'handoff'; reason: 'requested' | 'flow' | 'unrecognized' | 'media'; userId?: string; text?: string; /** the person was chosen by the place the customer named */ viaArea?: boolean; officerTopic?: string; showContact?: boolean }
   | { kind: 'tag'; tagId: string }
   | { kind: 'note'; text: string }
   | { kind: 'name'; value: string }
@@ -86,9 +86,9 @@ export async function runFlow(flow: Flow, prev: FlowState | null, input: FlowInp
     if (state.files) parts.push(`קבצים שנשלחו: ${state.files}`);
     if (parts.length) effects.push({ kind: 'note', text: `פרטים שנאספו בבוט:\n${parts.join('\n')}` });
   };
-  const handoff = (reason: 'requested' | 'flow' | 'unrecognized' | 'media', userId?: string, t?: string): FlowResult => {
+  const handoff = (reason: 'requested' | 'flow' | 'unrecognized' | 'media', userId?: string, t?: string, extra: { viaArea?: boolean; officerTopic?: string; showContact?: boolean } = {}): FlowResult => {
     summary();
-    effects.push({ kind: 'handoff', reason, userId, text: t });
+    effects.push({ kind: 'handoff', reason, userId, text: t, ...extra });
     return { replies, state: { ...state, node: null, list: undefined, done: true }, effects };
   };
   const finished = (): FlowResult => { summary(); return { replies, state: { ...state, node: null, list: undefined, done: true, endedAt: now }, effects }; };
@@ -238,10 +238,11 @@ export async function runFlow(flow: Flow, prev: FlowState | null, input: FlowInp
       case 'list': replies.push(n.text); return { replies, state: { ...state, node: n.id, invalid: 0, list: { items: [], phase: 'item' } }, effects };
       case 'handoff': {
         let who = n.userId;
+        let viaArea = false;
         if (n.areaVars?.length && ctx.resolveArea) {
-          for (const v of n.areaVars) { const hit = state.vars[v] ? await ctx.resolveArea(state.vars[v]!).catch(() => null) : null; if (hit) { who = hit; break; } }
+          for (const v of n.areaVars) { const hit = state.vars[v] ? await ctx.resolveArea(state.vars[v]!).catch(() => null) : null; if (hit) { who = hit; viaArea = true; break; } }
         }
-        return handoff('flow', who, n.text || undefined);
+        return handoff('flow', who, n.text || undefined, { viaArea, officerTopic: n.officerTopic, showContact: n.showContact });
       }
       case 'end': if (n.text) replies.push(n.text); return finished();
     }

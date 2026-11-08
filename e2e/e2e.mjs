@@ -244,6 +244,15 @@ await page.click('form:has(#ar-n) button:has-text("שמירה")');
 await page.waitForSelector('td:has-text("בניין 12, בניין 13")');
 check('safety board: a responsibility area is added', true);
 await axe('safety board: management');
+await page.click('summary:has-text("ממונים ונושאים")').catch(() => undefined);
+await page.click('button:has-text("הוספת ממונה")');
+await page.fill('#of-n', 'ממונה לדוגמה'); await page.fill('#of-e', 'officer@example.org'); await page.fill('#of-p', '050-123-4567');
+await page.click('#of-t ~ .chips >> text=לייזרים');
+await axe('safety board: officers form');
+await page.click('form:has(#of-n) button:has-text("שמירה")');
+await page.waitForSelector('th:has-text("ממונה לדוגמה")');
+check('safety board: an officer with topics is added', (await page.textContent('tr:has(th:has-text("ממונה לדוגמה"))')).includes('לייזרים') && (await page.getAttribute('tr:has(th:has-text("ממונה לדוגמה")) a[href^="https://wa.me/"]', 'href')) === 'https://wa.me/972501234567');
+await axe('safety board: officers');
 
 // branding: name, logo, colour (adapted for contrast), colours pulled from a site (internal addresses are refused)
 await page.click('aside.sidebar nav >> text=הגדרות');
