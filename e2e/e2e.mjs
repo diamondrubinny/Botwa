@@ -248,7 +248,7 @@ await page.setInputFiles('#br-logo', '/tmp/e2e-logo.png'); await page.click('but
 await page.waitForSelector('text=הלוגו הוחלף.');
 check('branding: the logo shows in the menu', (await page.locator('aside.sidebar img.brand-logo').count()) === 1);
 await page.fill('#br-site', 'http://127.0.0.1'); await page.click('button:has-text("משיכת צבעים ולוגו")');
-await page.waitForSelector('text=הכתובת נחסמה');
+await page.waitForSelector('text=הכתובת חסומה');
 check('branding: an internal address is refused', true);
 await axe('settings: branding');
 await page.fill('#br-color', ''); await page.click('button:has-text("שמירת שם וצבע")'); await page.waitForSelector('text=המיתוג נשמר.');
