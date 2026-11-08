@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api, can, type Me } from './api';
 import { logoSrc, useBrand } from './brand';
+import { SB_MAX, SB_MIN, useSidebar } from './sidebar';
 import { A11yWidget } from './components/A11yWidget';
 import { Icon } from './components/Icon';
 import { ThemeMenu } from './components/ThemeMenu';
@@ -61,6 +62,7 @@ function Shell({ me, reloadMe, onLogout }: { me: Me; reloadMe: () => Promise<voi
   const [unread, setUnread] = useState(0);
   const sheet = useRef<HTMLDialogElement>(null);
   const brand = useBrand();
+  const sb = useSidebar();
 
   const page = me.mfaEnrollmentRequired ? 'account' : route;
   const visible = NAV.filter((n) => n.allowed(me));
@@ -96,8 +98,8 @@ function Shell({ me, reloadMe, onLogout }: { me: Me; reloadMe: () => Promise<voi
 
   const link = (n: NavItem) => (
     <li key={n.r}>
-      <a className="nav-link" href={`#/${n.r}`} aria-current={page === n.r ? 'page' : undefined} onClick={() => sheet.current?.close()}>
-        <Icon name={n.icon} />{n.label}
+      <a className="nav-link" href={`#/${n.r}`} title={sb.mode === 'compact' ? n.label : undefined} aria-current={page === n.r ? 'page' : undefined} onClick={() => sheet.current?.close()}>
+        <Icon name={n.icon} /><span className="nav-text">{n.label}</span>
         {n.r === 'inbox' && unread > 0 && <span className="unread" style={{ marginInlineStart: 'auto' }}><span className="sr-only">הודעות שלא נקראו: </span>{unread}</span>}
       </a>
     </li>
@@ -110,10 +112,14 @@ function Shell({ me, reloadMe, onLogout }: { me: Me; reloadMe: () => Promise<voi
   );
 
   return (
-    <div className="app">
+    <div className="app" style={{ '--sb-w': `${sb.px}px` } as React.CSSProperties} data-sb={sb.mode}>
       <a className="skip" href="#main" onClick={(e) => { e.preventDefault(); document.querySelector<HTMLElement>('main h1')?.focus(); }}>{t.skip}</a>
 
-      <aside className="sidebar" aria-label="תפריט צד">
+      <aside className="sidebar" id="sidebar" aria-label="תפריט צד" hidden={sb.mode === 'hidden'}>
+        <div className="sb-tools">
+          <button type="button" className="icon-btn" onClick={() => sb.setMode(sb.mode === 'compact' ? 'full' : 'compact')} aria-pressed={sb.mode === 'compact'} aria-controls="sidebar" aria-label={sb.mode === 'compact' ? 'הרחבת התפריט' : 'כיווץ התפריט לסמלים'} title={sb.mode === 'compact' ? 'הרחבת התפריט' : 'כיווץ התפריט לסמלים'}><Icon name="chevron" size={18} /></button>
+          <button type="button" className="icon-btn" onClick={() => sb.setMode('hidden')} aria-label="הסתרת התפריט" title="הסתרת התפריט"><Icon name="close" size={18} /></button>
+        </div>
         <div className="brand">{brand.hasLogo ? <img className="brand-logo" src={logoSrc(brand)} alt="" /> : <span className="brand-mark"><Icon name="chat" /></span>}<strong>{brand.appName}</strong></div>
         <nav aria-label="ניווט ראשי"><ul className="nav-list">{visible.map(link)}</ul></nav>
         <div className="side-foot">
@@ -124,9 +130,27 @@ function Shell({ me, reloadMe, onLogout }: { me: Me; reloadMe: () => Promise<voi
             <span className="spacer" />
             <ThemeMenu align="start" />
           </div>
-          <button onClick={logout}><Icon name="logout" size={18} />{t.nav.logout}</button>
+          <button onClick={logout} title={sb.mode === 'compact' ? t.nav.logout : undefined}><Icon name="logout" size={18} /><span className="nav-text">{t.nav.logout}</span></button>
         </div>
       </aside>
+
+      {sb.mode === 'full' && (
+        <div className="sb-handle" role="separator" aria-orientation="vertical" tabIndex={0} aria-label="שינוי רוחב התפריט (חצים ימינה ושמאלה, Enter לכיווץ)"
+          aria-valuemin={SB_MIN} aria-valuemax={SB_MAX} aria-valuenow={sb.width}
+          onPointerDown={(e) => { e.currentTarget.setPointerCapture(e.pointerId); }}
+          onPointerMove={(e) => { if (e.buttons !== 1 || !e.currentTarget.hasPointerCapture(e.pointerId)) return; const rtl = getComputedStyle(document.documentElement).direction === 'rtl'; sb.setWidth(rtl ? window.innerWidth - e.clientX : e.clientX); }}
+          onDoubleClick={() => sb.reset()}
+          onKeyDown={(e) => {
+            const rtl = getComputedStyle(document.documentElement).direction === 'rtl';
+            const grow = rtl ? 'ArrowLeft' : 'ArrowRight', shrink = rtl ? 'ArrowRight' : 'ArrowLeft';
+            if (e.key === grow) { e.preventDefault(); sb.setWidth(sb.width + 16); }
+            else if (e.key === shrink) { e.preventDefault(); sb.setWidth(sb.width - 16); }
+            else if (e.key === 'Enter') { e.preventDefault(); sb.setMode('compact'); }
+          }} />
+      )}
+      {sb.mode === 'hidden' && (
+        <button type="button" className="sb-show" onClick={() => sb.setMode('full')} aria-controls="sidebar" aria-label="הצגת התפריט" title="הצגת התפריט"><Icon name="menu" size={20} /></button>
+      )}
 
       <div className="content">
         <header className="topbar">

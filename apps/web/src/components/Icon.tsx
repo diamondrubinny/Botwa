@@ -23,6 +23,9 @@ const P: Record<string, string> = {
   plus: 'M12 5v14M5 12h14',
   check: 'M20 6L9 17l-5-5',
   flow: 'M3 5h6v4H3zM15 3h6v4h-6zM15 15h6v4h-6zM9 7h3a3 3 0 0 1 3 3v0M12 10v7a3 3 0 0 0 3 3h0',
+  chevron: 'M13 17l5-5-5-5M6 17l5-5-5-5',
+  close: 'M18 6L6 18M6 6l12 12',
+  menu: 'M3 6h18M3 12h18M3 18h18',
   book: 'M4 19.500A2.500 2.500 0 0 1 6.500 17H20V3H6.500A2.500 2.500 0 0 0 4 5.500v14zM4 19.500A2.500 2.500 0 0 0 6.500 22H20v-5',
 };
 

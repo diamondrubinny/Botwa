@@ -255,6 +255,26 @@ await page.fill('#br-color', ''); await page.click('button:has-text("שמירת 
 await page.click('button:has-text("הסרת הלוגו")'); await page.waitForSelector('text=הלוגו הוסר.');
 await page.fill('#br-name', 'Botwa'); await page.click('button:has-text("שמירת שם וצבע")'); await page.waitForSelector('text=המיתוג נשמר.');
 
+// side menu: resize with the keyboard, collapse to icons, hide and show again
+const sbw = () => page.evaluate(() => Math.round(document.querySelector('aside.sidebar').getBoundingClientRect().width));
+const w0 = await sbw();
+await page.focus('.sb-handle'); await page.keyboard.press('ArrowLeft'); await page.keyboard.press('ArrowLeft');
+check('side menu: the keyboard widens it', (await sbw()) === w0 + 32, `${w0} -> ${await sbw()}`);
+await page.keyboard.press('ArrowRight');
+check('side menu: the keyboard narrows it', (await sbw()) === w0 + 16);
+await page.click('button[aria-label="כיווץ התפריט לסמלים"]');
+check('side menu: collapses to icons', (await sbw()) < 100 && (await page.locator('aside.sidebar .nav-link').first().getAttribute('title')) !== null);
+await axe('side menu: icons only');
+await page.click('button[aria-label="הרחבת התפריט"]');
+await page.click('button[aria-label="הסתרת התפריט"]');
+check('side menu: hides', !(await page.locator('aside.sidebar').isVisible()));
+await axe('side menu: hidden');
+await page.click('button[aria-label="הצגת התפריט"]');
+check('side menu: shows again', await page.locator('aside.sidebar').isVisible());
+await page.focus('.sb-handle'); await page.keyboard.press('ArrowRight'); await page.keyboard.press('ArrowRight');
+await page.dblclick('.sb-handle', { force: true });
+check('side menu: double click restores the width', (await sbw()) === 264);
+
 // website chat widget: configure, embed on a "customer site", chat both ways, blocked on an unlisted site
 await page.click('aside.sidebar nav >> text=ערוצים');
 await page.fill('#ch-label', 'האתר שלנו'); await page.selectOption('#ch-type', 'webchat'); await page.click('button:has-text("יצירה")');
