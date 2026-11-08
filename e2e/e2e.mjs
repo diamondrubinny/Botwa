@@ -211,7 +211,7 @@ await page.waitForSelector('text=הבוט עובד כעת לפי התפריט ה
 page.removeAllListeners('dialog'); page.once('dialog', (d) => d.accept());
 await page.click('button:has-text("יצירת תרשים בטיחות לפי האפיון")');
 await page.waitForSelector('[role="note"]:has-text("טרם הושלמו")');
-check('safety template: unfinished placeholders are listed', (await page.locator('[role="note"] li').count()) === 4);
+check('safety template: unfinished placeholders are listed', (await page.locator('[role="note"] li').count()) === 1);
 await page.click('button:has-text("שמירה")');
 await page.waitForSelector('text=התרשים נשמר.');
 check('safety template: activation is blocked while placeholders remain', await page.isDisabled('button:has-text("הפעלת התרשים כמצב הבוט")'));

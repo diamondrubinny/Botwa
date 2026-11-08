@@ -8,6 +8,7 @@ import type { KnowledgeBase } from '../kb/service.js';
 import { sanitizeFileName } from '../media/validate.js';
 import { boardCategories, ensureBoardCategories } from '../safety/categories.js';
 import { importWorkbook, reapplyCategories } from '../safety/importer.js';
+import { areasTemplate, importAreas } from '../safety/areasImport.js';
 
 const idParam = z.object({ id: z.string().uuid() });
 
@@ -132,6 +133,29 @@ export function safetyRoutes(app: FastifyInstance, db: Db, kb: KnowledgeBase) {
 
   app.get('/safety/areas', { preHandler: areaView }, async () => (await db.query(
     `SELECT a.id, a.name, a.keywords, a.user_id AS "userId", u.name AS "userName", u.active AS "userActive" FROM responsibility_areas a JOIN users u ON u.id = a.user_id ORDER BY a.sort, a.created_at`)).rows);
+
+  app.get('/safety/areas/template.xlsx', { preHandler: areaView }, async (_req, reply) => reply
+    .header('content-type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+    .header('content-disposition', 'attachment; filename="areas-template.xlsx"').send(await areasTemplate()));
+
+  app.post('/safety/areas/import', { preHandler: areaManage, config: { rateLimit: { max: 10, timeWindow: '10 minutes' } } }, async (req, reply) => {
+    const file = await req.file();
+    if (!file) return reply.code(400).send({ error: 'bad_request' });
+    if (!/\.xlsx$/i.test(sanitizeFileName(file.filename, 'x'))) return reply.code(415).send({ error: 'unsupported_file_type' });
+    let buf: Buffer;
+    try { buf = await file.toBuffer(); } catch { return reply.code(413).send({ error: 'too_large' }); }
+    if (file.file.truncated) return reply.code(413).send({ error: 'too_large' });
+    const scan = await kb.scanBinary(buf);
+    if (scan === 'infected') return reply.code(422).send({ error: 'file_infected' });
+    if (scan === 'unavailable') return reply.code(503).send({ error: 'scan_unavailable' });
+    try {
+      const r = await importAreas(db, buf);
+      await audit(db, { actorId: req.user!.id, action: 'safety.areas_import', ip: req.ip, meta: { created: r.created, updated: r.updated, skipped: r.skipped.length } });
+      return r;
+    } catch (e) {
+      return reply.code(422).send({ error: (e as Error).message === 'unknown_workbook' ? 'unknown_workbook' : 'extract_failed' });
+    }
+  });
 
   app.post('/safety/areas', { preHandler: areaManage }, async (req, reply) => {
     const b = areaBody.safeParse(req.body);

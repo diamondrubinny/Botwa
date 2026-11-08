@@ -1,3 +1,4 @@
+import ExcelJS from 'exceljs';
 import { randomBytes } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { buildApp } from '../src/app.js';
@@ -351,7 +352,7 @@ describe('the safety unit template', () => {
   const byId = new Map(t.nodes.map((n) => [n.id, n]));
   const U = '77777777-7777-4777-8777-777777777777';
 
-  it('is a valid flow that follows the specification: 15 topics, 9 statuses, forms as links still to be filled in', () => {
+  it('is a valid flow that follows the specification: 15 topics, 9 statuses, forms as links', () => {
     expect(validateFlow(t)).toEqual([]);
     expect(unreachable(t)).toEqual([]);
     expect(t.nodes.length).toBeLessThanOrEqual(150);
@@ -359,7 +360,7 @@ describe('the safety unit template', () => {
     expect(topics.type === 'menu' && topics.options.length).toBe(15);
     expect(byId.get('m_status')!.type === 'menu' && (byId.get('m_status') as { options: unknown[] }).options.length).toBe(STATUSES.length);
     expect(STATUSES).toHaveLength(9);
-    expect(unfinished(t).sort()).toEqual(['accident', 'event', 'offsite', 'waste']);          // the four form links
+    expect(unfinished(t)).toEqual(['offsite']);                                              // only the 07-0124 link is unknown
     const required = ['q_name', 'q_faculty', 'q_pi'].map((id) => (byId.get(id) as { optional: boolean }).optional);
     expect(required).toEqual([false, false, false]);                                         // name, faculty, PI are mandatory
     expect(['q_building', 'q_room'].map((id) => (byId.get(id) as { optional: boolean }).optional)).toEqual([true, true]);
@@ -402,7 +403,7 @@ describe('the safety unit template', () => {
     const known = { profile: { fullName: 'דנה', faculty: 'x', pi: 'y', status: 'משתלם', building: 'בניין 7' } };
     let r = await run(null, 'x', known);
     r = await run(r.state, '1');                                                                 // waste form
-    expect(r.replies[0]).toContain('[להשלים: קישור לטופס פינוי פסולת כימית]');
+    expect(r.replies[0]).toContain('https://forms.office.com/Pages/ResponsePage.aspx');
     expect(r.replies[1]).toContain('1. שאלתא'.slice(0, 0) + 'שאילתא בנושא פינוי פסולת כימית');       // back at the topics
     r = await run(r.state, '5');                                                                 // chemicals
     r = await run(r.state, 'אצטון');
@@ -504,7 +505,7 @@ describe('safety flow live: areas, template endpoint, placeholders, profile, fil
     expect(tpl.flow.nodes.length).toBeGreaterThan(60);
     expect((await db.query(`SELECT count(*)::int AS n FROM tags WHERE name IN ('לייזרים','חומ״ס','מפגע','Biosafety','סולמות')`)).rows[0].n).toBe(5);
     expect((await call('PUT', '/flow', 'admin@t.io', { flow: tpl.flow })).statusCode).toBe(200);
-    expect((await call('GET', '/flow', 'admin@t.io')).json().unfinished.sort()).toEqual(['accident', 'event', 'offsite', 'waste']);
+    expect((await call('GET', '/flow', 'admin@t.io')).json().unfinished).toEqual(['offsite']);   // only the 07-0124 link is unknown; the other forms come from the unit's site
     const blocked = await call('PUT', '/flow/mode', 'admin@t.io', { mode: 'flow' });
     expect(blocked.statusCode).toBe(409);
     expect(blocked.json()).toMatchObject({ error: 'unfinished_flow' });
@@ -545,5 +546,46 @@ describe('safety flow live: areas, template endpoint, placeholders, profile, fil
     const c2 = await conv('wa1');
     expect(c2.assigned_to).toBe(ids.o2);                                                     // the chemicals officer chosen in the flow
     expect((await db.query(`SELECT t.name FROM conversation_tags x JOIN tags t ON t.id = x.tag_id WHERE x.conversation_id = $1 ORDER BY t.name`, [c2.id])).rows.map((r) => r.name)).toEqual(['חומ״ס', 'כימיקלים המחייבים ניטור', 'מפגע']);  // the earlier hazard tag stays on the same thread
+  });
+});
+
+describe('areas workbook import', () => {
+  const ORIGIN = 'https://panel.test';
+  const cfg = loadConfig({ NODE_ENV: 'test', DATABASE_URL: process.env.TEST_DATABASE_URL ?? 'postgres://postgres@localhost:5432/botwa_test', ENCRYPTION_KEY: randomBytes(32).toString('base64'), APP_ORIGIN: ORIGIN, COOKIE_SECURE: 'false', REQUIRE_MFA_FOR_PRIVILEGED: 'false', MEDIA_ALLOW_UNSCANNED: 'true' });
+  const db = createDb(cfg.DATABASE_URL);
+  let app: Awaited<ReturnType<typeof buildApp>>;
+  let mgr: ChannelManager;
+  let cookie = '';
+  let uid = '';
+  beforeAll(async () => {
+    await db.query('DROP SCHEMA public CASCADE; CREATE SCHEMA public;');
+    await migrate(db);
+    mgr = new ChannelManager(db, cfg, () => null);
+    app = await buildApp(cfg, db, mgr);
+    uid = (await db.query('INSERT INTO users (email,name,role,password_hash) VALUES ($1,$2,$3,$4) RETURNING id', ['boss@t.io', 'boss', 'admin', await hashPassword('correct-horse-battery')])).rows[0].id;
+    await db.query(`INSERT INTO users (email,name,role,password_hash) VALUES ('o@t.io','officer','agent',$1)`, [await hashPassword('correct-horse-battery')]);
+    cookie = `botwa_sid=${(await app.inject({ method: 'POST', url: '/auth/login', payload: { email: 'boss@t.io', password: 'correct-horse-battery' }, remoteAddress: '10.69.0.1', headers: { origin: ORIGIN } })).cookies[0]!.value}`;
+  });
+  afterAll(async () => { await mgr.stopAll(); await app.close(); await db.end(); });
+
+  async function upload(rows: string[][]) {
+    const wb = new ExcelJS.Workbook(); const ws = wb.addWorksheet('x'); rows.forEach((r) => ws.addRow(r));
+    const buf = Buffer.from(await wb.xlsx.writeBuffer());
+    const b = '----t';
+    const body = Buffer.concat([Buffer.from(`--${b}\r\nContent-Disposition: form-data; name="file"; filename="a.xlsx"\r\nContent-Type: application/octet-stream\r\n\r\n`), buf, Buffer.from(`\r\n--${b}--\r\n`)]);
+    return app.inject({ method: 'POST', url: '/safety/areas/import', payload: body, remoteAddress: '10.69.0.2', headers: { origin: ORIGIN, cookie, 'content-type': `multipart/form-data; boundary=${b}` } });
+  }
+
+  it('serves a template, imports rows by officer e-mail, updates by name, and reports what it skipped', async () => {
+    expect((await app.inject({ method: 'GET', url: '/safety/areas/template.xlsx', headers: { cookie } })).statusCode).toBe(200);
+    const head = ['שם האזור', 'מילות זיהוי', 'אימייל הממונה'];
+    const r1 = await upload([head, ['בניין 12', 'בניין 12\nבניין י״ב', 'O@t.io'], ['הנדסה', 'בניין 5', 'nobody@t.io'], ['ריק', '', 'o@t.io']]);
+    expect(r1.statusCode).toBe(200);
+    expect(r1.json()).toEqual({ created: 1, updated: 0, skipped: [{ row: 3, reason: 'unknown_officer' }, { row: 4, reason: 'missing_fields' }] });
+    const r2 = await upload([head, ['בניין 12', 'בניין 12, בניין 13', 'o@t.io']]);
+    expect(r2.json()).toMatchObject({ created: 0, updated: 1 });
+    expect((await db.query('SELECT keywords FROM responsibility_areas')).rows).toEqual([{ keywords: ['בניין 12', 'בניין 13'] }]);
+    expect((await upload([['a', 'b'], ['c', 'd']])).json()).toEqual({ error: 'unknown_workbook' });
+    void uid;
   });
 });

@@ -61,6 +61,10 @@ export async function purgeOldMessages(db: Db, retentionDays: number, media?: Me
   if (retentionDays <= 0) return 0;
   await media?.purgeFiles('m.created_at < now() - make_interval(days => $1)', [retentionDays]);
   const del = await db.query(`DELETE FROM messages WHERE created_at < now() - make_interval(days => $1)`, [retentionDays]);
+  // identification details kept on a contact card (name, faculty, PI, status) go too, once the person has been inactive that long
+  await db.query(
+    `UPDATE contacts ct SET profile = '{}'::jsonb WHERE ct.profile <> '{}'::jsonb
+        AND NOT EXISTS (SELECT 1 FROM conversations c WHERE c.contact_id = ct.id AND c.last_message_at >= now() - make_interval(days => $1))`, [retentionDays]);
   await db.query(
     `DELETE FROM conversations c WHERE c.status='closed' AND NOT EXISTS (SELECT 1 FROM messages m WHERE m.conversation_id = c.id)`,
   );

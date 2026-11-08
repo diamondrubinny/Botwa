@@ -198,6 +198,21 @@ function Areas({ canEdit }: { canEdit: boolean }) {
   };
   useEffect(() => { void load(); }, []);
   const start = (a?: Area) => { setEditId(a?.id ?? ''); setName(a?.name ?? ''); setKw(a?.keywords.join('\n') ?? ''); setUserId(a?.userId ?? users[0]?.id ?? ''); setMsg(null); };
+  async function importAreas(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault(); setMsg(null);
+    const f = (e.currentTarget.elements.namedItem('areasxlsx') as HTMLInputElement).files?.[0];
+    if (!f) return;
+    const fd = new FormData(); fd.append('file', f);
+    try {
+      const res = await fetch('/safety/areas/import', { method: 'POST', credentials: 'same-origin', body: fd });
+      const j = (await res.json().catch(() => ({}))) as { error?: string; created?: number; updated?: number; skipped?: { row: number; reason: string }[] };
+      if (!res.ok) throw new ApiError(res.status, j.error ?? 'error');
+      const why: Record<string, string> = { unknown_officer: 'אימייל שאינו של משתמש פעיל', missing_fields: 'חסר שם, מילות זיהוי או אימייל', name_too_long: 'שם ארוך מדי' };
+      const sk = j.skipped ?? [];
+      setMsg({ ok: sk.length === 0, text: `יובא: ${j.created} חדשים, ${j.updated} עודכנו.${sk.length ? ` דולגו ${sk.length} שורות: ${sk.slice(0, 8).map((x) => `שורה ${x.row} (${why[x.reason] ?? x.reason})`).join(', ')}.` : ''}` });
+      (e.target as HTMLFormElement).reset(); await load();
+    } catch (er) { setMsg({ ok: false, text: er instanceof ApiError && er.code === 'unknown_workbook' ? 'מבנה הקובץ לא מוכר. הורידו את התבנית ומלאו אותה.' : errText(er instanceof ApiError ? er.code : 'generic') }); }
+  }
   async function submit(e: FormEvent) {
     e.preventDefault(); setMsg(null);
     const body = { name: name.trim(), keywords: kw.split(/[\n,]/).map((x) => x.trim()).filter(Boolean), userId };
@@ -222,6 +237,14 @@ function Areas({ canEdit }: { canEdit: boolean }) {
         </table>
       )}
       {canEdit && editId === null && <button type="button" onClick={() => start()}>הוספת אזור</button>}
+      {canEdit && (
+        <form onSubmit={importAreas} style={{ marginTop: '.75rem' }}>
+          <h3>ייבוא מאקסל</h3>
+          <p className="hint">שלוש עמודות: שם האזור, מילות זיהוי, אימייל הממונה. הממונים צריכים להיות כבר פתוחים כמשתמשים בעמוד "צוות" (הייבוא לא פותח חשבונות). שורה עם שם אזור שכבר קיים מעדכנת אותו. <a href="/safety/areas/template.xlsx" download>הורדת תבנית</a></p>
+          <div className="field"><label htmlFor="ar-f">קובץ (xlsx)</label><input id="ar-f" name="areasxlsx" type="file" accept=".xlsx" required /></div>
+          <button type="submit">ייבוא אזורים</button>
+        </form>
+      )}
       {canEdit && editId !== null && (
         <form onSubmit={submit}>
           <div className="field"><label htmlFor="ar-n">שם האזור</label><input id="ar-n" required maxLength={80} value={name} onChange={(e) => setName(e.target.value)} /></div>

@@ -284,7 +284,7 @@ export function conversationRoutes(app: FastifyInstance, db: Db, mgr: ChannelMan
   app.get('/contacts/:id/export', { preHandler: adminOnly }, async (req, reply) => {
     const p = idParam.safeParse(req.params);
     if (!p.success) return reply.code(400).send({ error: 'bad_request' });
-    const c = await db.query('SELECT id, channel_id, external_id, display_name, created_at FROM contacts WHERE id=$1', [p.data.id]);
+    const c = await db.query('SELECT id, channel_id, external_id, display_name, profile, created_at FROM contacts WHERE id=$1', [p.data.id]);
     if (!c.rows[0]) return reply.code(404).send({ error: 'not_found' });
     const m = await db.query(
       `SELECT m.direction, m.body, m.created_at, a.file_name AS "attachmentName", a.status AS "attachmentStatus"
