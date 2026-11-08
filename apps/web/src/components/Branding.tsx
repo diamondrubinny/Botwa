@@ -130,7 +130,7 @@ export function Branding() {
 
       <h3>משיכה מאתר או ממותג</h3>
       <form onSubmit={extract}>
-        <div className="field"><label htmlFor="br-site">כתובת האתר של המותג</label><input id="br-site" dir="ltr" required maxLength={500} value={site} onChange={(e) => setSite(e.target.value)} placeholder="https://www.technion.ac.il" /></div>
+        <div className="field"><label htmlFor="br-site">כתובת האתר של המותג</label><input id="br-site" dir="ltr" required maxLength={500} value={site} onChange={(e) => setSite(e.target.value)} placeholder="https://www.example.com" /></div>
         <button type="submit" disabled={busy}>{busy ? 'בודק…' : 'משיכת צבעים ולוגו'}</button>
       </form>
       <p className="hint">השרת קורא את דף הבית ואת קובצי העיצוב שלו ומציע צבעים, ולוגואים שהאתר מצהיר עליהם. זה רק הצעה: בוחרים בעצמם. יש לוודא שיש רשות להשתמש בלוגו ובמותג.</p>

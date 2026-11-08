@@ -122,13 +122,14 @@ export function FlowEditor({ me }: { me: Me }) {
     const d = await api<{ flow: Flow }>('POST', '/flow/from-menu').catch(() => null);
     if (d) { setFlow(d.flow); setOpen(null); setMsg({ ok: true, text: 'נוצר תרשים מהתפריט. בדקו ושמרו.' }); }
   }
+  const [tplLinks, setTplLinks] = useState<Record<string, string>>({});
   async function safetyTemplate() {
     if (flow && !confirm('להחליף את התרשים הנוכחי בתבנית יחידת הבטיחות? (לא נשמר עד שתלחצו על שמירה)')) return;
     setMsg(null);
     try {
-      const d = await api<{ flow: Flow }>('POST', '/flow/templates/safety');
+      const d = await api<{ flow: Flow }>('POST', '/flow/templates/safety', { links: tplLinks });
       setFlow(d.flow); setOpen(null);
-      setMsg({ ok: true, text: 'נוצרה תבנית יחידת הבטיחות. השלימו את הטקסטים המסומנים "[להשלים" ושמרו.' });
+      setMsg({ ok: true, text: 'נוצרה תבנית יחידת הבטיחות. בדקו את הטקסטים, בחרו ממונים בצמתי ההעברה ושמרו.' });
       refreshRefs();
     } catch (e) { fail(e); }
   }
@@ -212,6 +213,15 @@ export function FlowEditor({ me }: { me: Me }) {
               <button onClick={safetyTemplate}>יצירת תרשים בטיחות לפי האפיון</button>
               {dirty && <span className="hint">יש שינויים שלא נשמרו.</span>}
             </div>
+          )}
+          {canEdit && (
+            <details className="card">
+              <summary><strong>קישורים לתבנית הבטיחות</strong> (אופציונלי, יוכנסו להודעות כשתיצרו את התבנית)</summary>
+              <p className="hint">כתובות https של הטפסים של היחידה. נושא בלי קישור יאמר ללקוח לפנות ליחידה. אפשר גם להוסיף או לערוך קישור בכל צומת אחר כך.</p>
+              {([['waste', 'טופס פינוי פסולת כימית'], ['accident', 'טופס דיווח תאונה / כמעט-ונפגע'], ['event', 'טופס אישור אירוע'], ['offsite', 'טופס ניסוי מחוץ לקמפוס'], ['training', 'הרשמה להדרכות'], ['privacy', 'מדיניות הפרטיות']] as const).map(([k, label]) => (
+                <div className="field" key={k}><label htmlFor={`tl-${k}`}>{label}</label><input id={`tl-${k}`} type="url" dir="ltr" maxLength={500} placeholder="https://" value={tplLinks[k] ?? ''} onChange={(e) => setTplLinks({ ...tplLinks, [k]: e.target.value })} /></div>
+              ))}
+            </details>
           )}
           {!flow && <p className="empty">עוד אין תרשים. אפשר ליצור מהתפריט הקיים, או להוסיף צומת ראשון.</p>}
 

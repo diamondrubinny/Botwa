@@ -352,6 +352,18 @@ describe('the safety unit template', () => {
   const byId = new Map(t.nodes.map((n) => [n.id, n]));
   const U = '77777777-7777-4777-8777-777777777777';
 
+  it('links given for the forms, training and privacy are placed in the messages; none are invented', () => {
+    const t = buildSafetyFlow((n) => tagIds.get(n as never) ?? '', { waste: 'https://forms.example/waste', accident: 'https://forms.example/accident', training: 'https://train.example/', privacy: 'https://example.org/privacy' });
+    const text = (id: string) => (t.nodes.find((n) => n.id === id) as { text: string }).text;
+    expect(text('waste')).toContain('https://forms.example/waste');
+    expect(text('accident')).toContain('https://forms.example/accident');
+    expect(text('event')).not.toContain('https://');
+    expect(text('id_intro')).toContain('https://example.org/privacy');
+    expect(JSON.stringify(t)).toContain('https://train.example/');
+    expect(JSON.stringify(buildSafetyFlow((n) => tagIds.get(n as never) ?? ''))).not.toMatch(/https?:\/\//);
+    expect(unfinished(t)).toEqual([]);
+  });
+
   it('is a valid flow that follows the specification: 15 topics, 9 statuses, forms as links', () => {
     expect(validateFlow(t)).toEqual([]);
     expect(unreachable(t)).toEqual([]);
@@ -403,7 +415,8 @@ describe('the safety unit template', () => {
     const known = { profile: { fullName: 'דנה', faculty: 'x', pi: 'y', status: 'משתלם', building: 'בניין 7' } };
     let r = await run(null, 'x', known);
     r = await run(r.state, '1');                                                                 // waste form
-    expect(r.replies[0]).toContain('https://forms.office.com/Pages/ResponsePage.aspx');
+    expect(r.replies[0]).toContain('פינוי פסולת כימית');
+    expect(r.replies[0]).toContain('פנו ליחידת הבטיחות');                                      // no link given: the customer is told to ask the unit
     expect(r.replies[1]).toContain('1. שאלתא'.slice(0, 0) + 'שאילתא בנושא פינוי פסולת כימית');       // back at the topics
     r = await run(r.state, '5');                                                                 // chemicals
     r = await run(r.state, 'אצטון');
@@ -501,6 +514,10 @@ describe('safety flow live: areas, template endpoint, placeholders, profile, fil
 
   it('the template endpoint creates the tags, and the bot cannot be switched on while placeholders remain', async () => {
     expect((await call('POST', '/flow/templates/safety', 'sup@t.io')).statusCode).toBe(403);
+    expect((await call('POST', '/flow/templates/safety', 'admin@t.io', { links: { waste: 'http://insecure.example/x' } })).statusCode).toBe(400);   // https only
+    expect((await call('POST', '/flow/templates/safety', 'admin@t.io', { links: { waste: 'javascript:alert(1)' } })).statusCode).toBe(400);
+    const withLink = (await call('POST', '/flow/templates/safety', 'admin@t.io', { links: { waste: 'https://forms.example/waste', event: '' } })).json();
+    expect((withLink.flow.nodes.find((n: { id: string }) => n.id === 'waste') as { text: string }).text).toContain('https://forms.example/waste');
     const tpl = (await call('POST', '/flow/templates/safety', 'admin@t.io')).json();
     expect(tpl.flow.nodes.length).toBeGreaterThan(60);
     expect((await db.query(`SELECT count(*)::int AS n FROM tags WHERE name IN ('לייזרים','חומ״ס','מפגע','Biosafety','סולמות')`)).rows[0].n).toBe(5);

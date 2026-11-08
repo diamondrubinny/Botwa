@@ -7,7 +7,7 @@ import { isOpen } from '../business-hours.js';
 import type { Db } from '../db.js';
 import { runFlow, type FlowState } from '../flow/engine.js';
 import { flowFromMenu } from '../flow/fromMenu.js';
-import { buildSafetyFlow, TEMPLATE_TAGS } from '../flow/safetyTemplate.js';
+import { buildSafetyFlow, TEMPLATE_TAGS, templateLinksSchema } from '../flow/safetyTemplate.js';
 import { flowSchema, unfinished, unreachable, validateFlow, type Flow } from '../flow/schema.js';
 import { loadFlow, saveFlow } from '../flow/store.js';
 import type { KnowledgeBase } from '../kb/service.js';
@@ -66,14 +66,16 @@ export function flowRoutes(app: FastifyInstance, db: Db, kb: KnowledgeBase) {
   });
 
   // The safety unit's flow (identification, forms, reports with photos, officers by area). Creates the tags it uses; not saved until PUT.
-  app.post('/flow/templates/safety', { preHandler: manage, config: { rateLimit: { max: 10, timeWindow: '1 minute' } } }, async (req) => {
+  app.post('/flow/templates/safety', { preHandler: manage, config: { rateLimit: { max: 10, timeWindow: '1 minute' } } }, async (req, reply) => {
+    const links = z.object({ links: templateLinksSchema.default(() => ({})) }).safeParse(req.body ?? {});
+    if (!links.success) return reply.code(400).send({ error: 'bad_request' });
     const ids = new Map<string, string>();
     for (const name of TEMPLATE_TAGS) {
       await db.query('INSERT INTO tags (name) VALUES ($1) ON CONFLICT DO NOTHING', [name]);
       ids.set(name, (await db.query('SELECT id FROM tags WHERE lower(name) = lower($1)', [name])).rows[0].id as string);
     }
     await audit(db, { actorId: req.user!.id, action: 'flow.template_safety', ip: req.ip });
-    return { flow: buildSafetyFlow((n) => ids.get(n) ?? ids.get('שאלה כללית')!), unfinished: [] as string[] };
+    return { flow: buildSafetyFlow((n) => ids.get(n) ?? ids.get('שאלה כללית')!, links.data.links), unfinished: [] as string[] };
   });
 
   // A flow equivalent to today's numbered menu: a starting point to edit (not saved until PUT).
