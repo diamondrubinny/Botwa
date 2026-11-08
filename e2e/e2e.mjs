@@ -642,6 +642,7 @@ await page.click('button:has-text("יצירת משתמש")');
 await page.waitForSelector('td:has-text("ana@e2e.io")');
 
 // reset password and delete a user
+await page.waitForFunction(() => document.querySelector('#u-name').value === '', null, { timeout: 5000 });   // the form clears itself after a creation
 await page.fill('#u-name', 'זמני'); await page.fill('#u-email', 'tmp@e2e.io'); await page.fill('#u-pw', 'temporary-password-1');
 await page.click('button:has-text("יצירת משתמש")');
 await page.waitForSelector('td:has-text("tmp@e2e.io")');
