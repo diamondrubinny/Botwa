@@ -43,7 +43,7 @@ services:
     restart: unless-stopped
     command: ["node", "dist/browser-server.js"]
     environment:
-      BROWSER_TOKEN: ${BROWSER_TOKEN:?set BROWSER_TOKEN in .env (scripts/enable-browser.sh does it)}
+      BROWSER_TOKEN: ${BROWSER_TOKEN:-}   # empty unless the browser profile is on: scripts/enable-browser.sh sets it (the service refuses to start without a token)
       BROWSER_NO_SANDBOX: "true"
       BROWSER_PATH: /usr/bin/chromium
       PORT: "3100"
