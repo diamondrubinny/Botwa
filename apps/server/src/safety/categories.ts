@@ -64,7 +64,22 @@ export function matchCategories(text: string, cats: BoardCategory[], max = 3): s
 /** Replace the board categories of a source by those its text matches. */
 export async function assignCategories(db: Db, sourceId: string, text: string, cats: BoardCategory[]): Promise<number> {
   const ids = matchCategories(text, cats);
-  await db.query('DELETE FROM kb_source_cats WHERE source_id = $1', [sourceId]);
-  for (const id of ids) await db.query('INSERT INTO kb_source_cats (source_id, category_id) VALUES ($1,$2) ON CONFLICT DO NOTHING', [sourceId, id]);
+  await db.query(`DELETE FROM kb_source_cats WHERE source_id = $1 AND via = 'keywords'`, [sourceId]);   // categories the file itself states are kept
+  for (const id of ids) await db.query(`INSERT INTO kb_source_cats (source_id, category_id, via) VALUES ($1,$2,'keywords') ON CONFLICT DO NOTHING`, [sourceId, id]);
   return ids.length;
+}
+
+/** A category named by the workbook (a "category" column value or a tab name). Reuses a board category with the same name. */
+export async function ensureWorkbookCategory(db: Db, name: string): Promise<string> {
+  const clean = name.replace(/\s+/g, ' ').trim().slice(0, 60);
+  const r = await db.query(
+    `INSERT INTO kb_categories (name, keywords, board, sort, origin) VALUES ($1, '{}', true, COALESCE((SELECT max(sort) FROM kb_categories WHERE origin = 'workbook'), 1000) + 1, 'workbook')
+     ON CONFLICT (name) DO UPDATE SET board = true RETURNING id`, [clean]);
+  return r.rows[0].id as string;
+}
+
+/** The workbook's own category of a source (replaces an earlier one from an earlier import). */
+export async function assignWorkbookCategory(db: Db, sourceId: string, categoryId: string): Promise<void> {
+  await db.query(`DELETE FROM kb_source_cats WHERE source_id = $1 AND via = 'workbook' AND category_id <> $2`, [sourceId, categoryId]);
+  await db.query(`INSERT INTO kb_source_cats (source_id, category_id, via) VALUES ($1,$2,'workbook') ON CONFLICT (source_id, category_id) DO UPDATE SET via = 'workbook'`, [sourceId, categoryId]);
 }

@@ -2,7 +2,8 @@ import { useEffect, useState, type FormEvent } from 'react';
 import { api, ApiError, can, type Me } from '../api';
 import { errText } from '../strings';
 
-interface Cat { id: string; name: string; keywords: string[]; count: number }
+interface Cat { id: string; name: string; keywords: string[]; count: number; origin?: string }
+interface TabReport { name: string; rows: number; added: number; duplicates: number; skipped: number }
 interface Item { sourceId?: string; id?: string; title: string; reference: string | null; url: string | null; excerpt: string; related: string | null; difference: string | null; subtopic?: string | null; date?: string | null; score?: number }
 interface Group { instrument: string; items: Item[] }
 
@@ -86,7 +87,12 @@ export function Safety({ me }: { me: Me }) {
         <label htmlFor="sf-cat">נושא</label>
         <select id="sf-cat" value={cat} onChange={(e) => setCat(e.target.value)}>
           <option value="">כל הנושאים ({stats.total})</option>
-          {cats.map((c) => <option key={c.id} value={c.id}>{c.name} ({c.count})</option>)}
+          {cats.some((c) => c.origin === 'workbook') ? (
+            <>
+              <optgroup label="נושאי הלוח">{cats.filter((c) => c.origin !== 'workbook').map((c) => <option key={c.id} value={c.id}>{c.name} ({c.count})</option>)}</optgroup>
+              <optgroup label="קטגוריות מהקבצים שיובאו">{cats.filter((c) => c.origin === 'workbook').map((c) => <option key={c.id} value={c.id}>{c.name} ({c.count})</option>)}</optgroup>
+            </>
+          ) : cats.map((c) => <option key={c.id} value={c.id}>{c.name} ({c.count})</option>)}
         </select>
       </div>
       <div className="chips" role="group" aria-label="תצוגה">
@@ -131,6 +137,7 @@ function Manage({ cats, onChanged, stats }: { cats: Cat[]; onChanged: () => Prom
   const [kw, setKw] = useState('');
   const [audience, setAudience] = useState<'staff' | 'both' | 'bot'>('staff');
   const [busy, setBusy] = useState(false);
+  const [tabs, setTabs] = useState<TabReport[]>([]);
   const cur = cats.find((c) => c.id === editId);
   useEffect(() => { setKw(cur ? cur.keywords.join('\n') : ''); }, [cur?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -141,9 +148,10 @@ function Manage({ cats, onChanged, stats }: { cats: Cat[]; onChanged: () => Prom
     const fd = new FormData(); fd.append('audience', audience); fd.append('file', f);
     try {
       const res = await fetch('/kb/import/xlsx', { method: 'POST', credentials: 'same-origin', body: fd });
-      const j = (await res.json().catch(() => ({}))) as { error?: string; kind?: string; created?: number; updated?: number; unchanged?: number; categorized?: number; uncategorized?: number };
+      const j = (await res.json().catch(() => ({}))) as { error?: string; kind?: string; created?: number; updated?: number; unchanged?: number; categorized?: number; uncategorized?: number; sheets?: TabReport[]; categories?: string[] };
       if (!res.ok) throw new ApiError(res.status, j.error ?? 'error');
       setMsg({ ok: true, text: `יובא (${j.kind === 'weekly' ? 'תשובת השבוע' : 'חוק ופקודה'}): ${j.created} חדשים, ${j.updated} עודכנו, ${j.unchanged} ללא שינוי. ${j.categorized} שויכו לנושאים, ${j.uncategorized} לא שויכו לאף נושא.` });
+      setTabs(j.sheets ?? []);
       await onChanged();
     } catch (er) { setMsg({ ok: false, text: er instanceof ApiError && er.code === 'unknown_workbook' ? 'מבנה הקובץ לא מוכר. נתמכים: קובץ מיון חוק ופקודה (גיליון "כל_הסעיפים") וקובץ "תשובת השבוע" (גיליון "כל התשובות").' : errText(er instanceof ApiError ? er.code : 'generic') }); }
     setBusy(false);
@@ -161,6 +169,17 @@ function Manage({ cats, onChanged, stats }: { cats: Cat[]; onChanged: () => Prom
           <button className="primary" type="submit" disabled={busy}>{busy ? 'מייבא…' : 'ייבוא'}</button>
         </form>
         <p role="status" className={msg?.ok ? 'ok' : 'error'}>{msg?.text}</p>
+        {tabs.length > 0 && (
+          <details>
+            <summary>מה נקרא בכל לשונית ({tabs.length} לשוניות, {tabs.reduce((n, t) => n + t.rows, 0)} שורות)</summary>
+            <table>
+              <caption className="sr-only">דוח קריאה לפי לשונית</caption>
+              <thead><tr><th scope="col">לשונית</th><th scope="col">שורות</th><th scope="col">נוספו</th><th scope="col">כבר נקראו בלשונית אחרת</th><th scope="col">דולגו (חסר מזהה או שאלה)</th></tr></thead>
+              <tbody>{tabs.map((t) => <tr key={t.name}><th scope="row">{t.name}</th><td>{t.rows}</td><td>{t.added}</td><td>{t.duplicates}</td><td>{t.skipped}</td></tr>)}</tbody>
+            </table>
+            <p className="hint">כל לשונית שיש בה עמודות של סעיפים או של שאלות נקראת. שורה שמופיעה גם בלשונית הראשית וגם בלשונית נושא נשמרת פעם אחת, ושורה שיש רק בלשונית נושא נשמרת. הקטגוריה לכל שורה היא זו שבקובץ (עמודת הקטגוריה, ואם אין, שם הלשונית).</p>
+          </details>
+        )}
         <p className="hint">{stats.total} רשומות מיובאות, מהן {stats.uncategorized} שלא שייכות לאף נושא בלוח (כמו הגדרות וסמכויות פיקוח). הן עדיין ניתנות לחיפוש ב"כל הנושאים".</p>
       </section>
       <section aria-labelledby="sf-kw">

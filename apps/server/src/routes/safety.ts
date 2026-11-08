@@ -48,7 +48,7 @@ export function safetyRoutes(app: FastifyInstance, db: Db, kb: KnowledgeBase) {
   app.get('/safety/categories', { preHandler: view }, async () => {
     await ensureBoardCategories(db);
     const rows = (await db.query(
-      `SELECT c.id, c.name, c.keywords, c.sort, (SELECT count(*)::int FROM kb_source_cats x JOIN kb_sources s ON s.id = x.source_id WHERE x.category_id = c.id AND s.enabled AND s.status = 'ready') AS count
+      `SELECT c.id, c.name, c.keywords, c.sort, c.origin, (SELECT count(*)::int FROM kb_source_cats x JOIN kb_sources s ON s.id = x.source_id WHERE x.category_id = c.id AND s.enabled AND s.status = 'ready') AS count
          FROM kb_categories c WHERE c.board ORDER BY c.sort, c.name`)).rows;
     const t = (await db.query(`SELECT count(*)::int AS total, count(*) FILTER (WHERE NOT EXISTS (SELECT 1 FROM kb_source_cats x WHERE x.source_id = s.id))::int AS uncategorized FROM kb_sources s WHERE s.origin IS NOT NULL AND s.enabled AND s.status = 'ready'`)).rows[0];
     return { categories: rows, total: t.total as number, uncategorized: t.uncategorized as number };

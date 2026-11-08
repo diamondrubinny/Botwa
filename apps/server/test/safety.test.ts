@@ -102,13 +102,14 @@ describe('importing standards and the safety board', () => {
   it('safety.view sees the board; categories carry counts and editable keywords', async () => {
     expect((await call('GET', '/safety/categories', 'sup@t.io')).statusCode).toBe(200);
     const g = (await call('GET', '/safety/categories', 'officer@t.io')).json();
-    expect(g.categories).toHaveLength(21);                 // the 22 listed topics, "כלי לחץ" appears once
+    expect(g.categories.filter((c: { origin: string }) => c.origin === 'spec')).toHaveLength(21);   // the 22 listed topics, "כלי לחץ" appears once
+    expect(g.categories.filter((c: { origin: string }) => c.origin === 'workbook').map((c: { name: string }) => c.name).sort()).toEqual(['הגדרות', 'חשמל']);   // categories the files name that are not in the list (a name that is in the list reuses it)
     catIds = Object.fromEntries(g.categories.map((c: { name: string; id: string }) => [c.name, c.id]));
     const n = (name: string) => g.categories.find((c: { name: string }) => c.name === name).count;
     expect(n('פיגומים')).toBeGreaterThanOrEqual(1);
     expect(n('סולמות')).toBeGreaterThanOrEqual(2);
     expect(g.total).toBe(6);
-    expect(g.uncategorized).toBeGreaterThanOrEqual(2);
+    expect(g.uncategorized).toBe(0);                       // every row has the category its file states
     expect((await call('PUT', `/safety/categories/${catIds['תאורה']}`, 'officer@t.io', { keywords: ['x1'] })).statusCode).toBe(403); // officers read, managers edit
     expect((await call('PUT', `/safety/categories/${catIds['תאורה']}`, 'admin@t.io', { keywords: ['חשמל', 'ארון חשמל'] })).statusCode).toBe(200);
     const re = (await call('POST', '/safety/categories/reapply', 'admin@t.io')).json();
@@ -163,5 +164,36 @@ describe('importing standards and the safety board', () => {
     const full = (await call('GET', `/safety/source/${reg.id}`, 'officer@t.io')).json();
     expect(full.body).toContain('סולם נייד');
     expect((await call('GET', '/safety/category/00000000-0000-4000-8000-000000000000/items', 'officer@t.io')).statusCode).toBe(404);
+  });
+
+  it('reads every tab: rows found only in a topic tab are kept, the category comes from the file, and the report counts each tab', async () => {
+    const wk = await workbook([
+      { name: 'כל התשובות', rows: [['כל התשובות שנאספו'], WEEK_HEAD,
+        ['1800', '2026-04-01', 'דגל קטגוריה א', 'נושא', 'שאלה ראשונה בלשונית הכללית על דבר מסוים?', 'תשובה ראשונה.', 'תקנות', 'מי', 'https://example.org/q/1800']] },
+      { name: 'נושא חדש בלשונית', rows: [['תשובות בנושא: נושא חדש בלשונית'], WEEK_HEAD,
+        ['1800', '2026-04-01', 'דגל קטגוריה א', 'נושא', 'שאלה ראשונה בלשונית הכללית על דבר מסוים?', 'תשובה ראשונה.', 'תקנות', 'מי', 'https://example.org/q/1800'],
+        ['1801', '2026-04-02', '', 'נושא', 'שאלה שנמצאת רק בלשונית הנושא ולא בכללית?', 'תשובה שנייה.', 'תקנות', 'מי', ''],
+        ['', '', '', '', '', '', '', '', ''],
+        ['1802', '', '', '', '', 'שורה בלי שאלה', '', '', '']] },
+    ]);
+    const r = (await upload(wk)).json();
+    expect(r).toMatchObject({ kind: 'weekly', created: 2 });
+    expect(r.sheets).toEqual([
+      { name: 'כל התשובות', rows: 1, added: 1, duplicates: 0, skipped: 0 },
+      { name: 'נושא חדש בלשונית', rows: 3, added: 1, duplicates: 1, skipped: 1 },
+    ]);
+    expect([...r.categories].sort()).toEqual(['דגל קטגוריה א', 'נושא חדש בלשונית']);
+    // the row that only lives in the topic tab got that tab's topic as its category
+    const cats = (await db.query(`SELECT s.external_id, c.name, x.via FROM kb_sources s JOIN kb_source_cats x ON x.source_id = s.id JOIN kb_categories c ON c.id = x.category_id WHERE s.external_id IN ('weekly:1800','weekly:1801') AND x.via = 'workbook' ORDER BY 1`)).rows;
+    expect(cats).toEqual([{ external_id: 'weekly:1800', name: 'דגל קטגוריה א', via: 'workbook' }, { external_id: 'weekly:1801', name: 'נושא חדש בלשונית', via: 'workbook' }]);
+    // the board lists those categories (with counts) and "re-apply keywords" does not throw them away
+    const list = (await call('GET', '/safety/categories', 'officer@t.io')).json().categories as { id: string; name: string; count: number; origin: string }[];
+    expect(list.find((c) => c.name === 'נושא חדש בלשונית')).toMatchObject({ count: 1, origin: 'workbook' });
+    await call('POST', '/safety/categories/reapply', 'admin@t.io');
+    expect((await db.query(`SELECT count(*)::int AS n FROM kb_source_cats WHERE via = 'workbook'`)).rows[0].n).toBeGreaterThanOrEqual(2);
+    // asking inside that category finds its row
+    const id = list.find((c) => c.name === 'נושא חדש בלשונית')!.id;
+    const ask = (await call('POST', '/safety/ask', 'officer@t.io', { q: 'שאלה שנמצאת רק בלשונית הנושא', categoryId: id })).json();
+    expect(JSON.stringify(ask)).toContain('weekly:1801'.slice(0, 0) + 'שאלה שנמצאת רק בלשונית הנושא');
   });
 });
