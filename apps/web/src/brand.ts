@@ -4,6 +4,10 @@ export interface Brand { appName: string; color: string | null; hasLogo: boolean
 const DEFAULT: Brand = { appName: 'Botwa', color: null, hasLogo: false, v: 0 };
 
 let current: Brand = DEFAULT;
+const USER_COLOR_KEY = 'botwa_theme_color';
+/** A colour this person chose in the appearance menu (kept in this browser); it wins over the brand colour. */
+export function getUserColor(): string | null { try { const v = localStorage.getItem(USER_COLOR_KEY); return v && /^#[0-9a-f]{6}$/i.test(v) ? v.toLowerCase() : null; } catch { return null; } }
+export function setUserColor(c: string | null): void { try { if (c) localStorage.setItem(USER_COLOR_KEY, c.toLowerCase()); else localStorage.removeItem(USER_COLOR_KEY); } catch { /* storage unavailable */ } applyBrand(); listeners.forEach((l) => l(current)); }
 const listeners = new Set<(b: Brand) => void>();
 
 // ---- WCAG contrast (same formula as the server) ----
@@ -33,10 +37,11 @@ const cssColor = (name: string, fallback: string) => {
 export function applyBrand(): void {
   const r = document.documentElement;
   const props = ['--accent', '--on-accent', '--accent-soft'];
-  if (!current.color || r.dataset.contrast === 'high') { props.forEach((p) => r.style.removeProperty(p)); return; }
+  const color = getUserColor() ?? current.color;
+  if (!color || r.dataset.contrast === 'high') { props.forEach((p) => r.style.removeProperty(p)); return; }
   const dark = r.dataset.theme === 'dark';
   r.style.removeProperty('--accent'); // read the theme's own background without our override influencing anything
-  const a = adapt(current.color, cssColor('--bg', dark ? '#0f1220' : '#ffffff'), cssColor('--surface', dark ? '#171a2b' : '#ffffff'), dark);
+  const a = adapt(color, cssColor('--bg', dark ? '#0f1220' : '#ffffff'), cssColor('--surface', dark ? '#171a2b' : '#ffffff'), dark);
   const [x, y, z] = rgb(a.hex);
   r.style.setProperty('--accent', a.hex);
   r.style.setProperty('--on-accent', onColor(a.hex));

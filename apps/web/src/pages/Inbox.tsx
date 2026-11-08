@@ -67,7 +67,19 @@ export function Inbox({ me }: { me: Me }) {
   const [sugg, setSugg] = useState<{ sourceId: string; title: string; url: string | null; score: number; text: string }[]>([]);
   const [safety, setSafety] = useState<{ topics: string[]; hits: { topic: string; sourceId: string; title: string; reference: string | null; url: string | null; excerpt: string; instrument: string }[] }>({ topics: [], hits: [] });
   const [bump, setBump] = useState(0); // local refetch trigger after an action
+  // list preferences, kept in this browser: sort order, channel, and "only unread / only waiting for an answer"
+  const [lp, setLp] = useState<{ sort: 'recent' | 'waiting' | 'unread'; channel: string; unreadOnly: boolean; waitingOnly: boolean }>(() => {
+    try { const v = JSON.parse(localStorage.getItem('botwa_inbox_prefs') ?? '{}') as Partial<{ sort: string; channel: string; unreadOnly: boolean; waitingOnly: boolean }>; return { sort: v.sort === 'waiting' || v.sort === 'unread' ? v.sort : 'recent', channel: v.channel ?? '', unreadOnly: !!v.unreadOnly, waitingOnly: !!v.waitingOnly }; } catch { return { sort: 'recent', channel: '', unreadOnly: false, waitingOnly: false }; }
+  });
+  const setPref = (p: Partial<typeof lp>) => setLp((x) => { const n = { ...x, ...p }; try { localStorage.setItem('botwa_inbox_prefs', JSON.stringify(n)); } catch { /* storage unavailable */ } return n; });
 
+  const channels = [...new Set(convs.map((c) => c.channelLabel))];
+  const view = convs
+    .filter((c) => (!lp.channel || c.channelLabel === lp.channel) && (!lp.unreadOnly || c.unreadCount > 0) && (!lp.waitingOnly || !!c.waitingSince))
+    .sort((a, b) => lp.sort === 'waiting' ? (a.waitingSince ? new Date(a.waitingSince).getTime() : Infinity) - (b.waitingSince ? new Date(b.waitingSince).getTime() : Infinity)
+      : lp.sort === 'unread' ? (b.unreadCount > 0 ? 1 : 0) - (a.unreadCount > 0 ? 1 : 0) || new Date(b.lastMessageAt).getTime() - new Date(a.lastMessageAt).getTime()
+      : 0);
+  const advActive = lp.sort !== 'recent' || !!lp.channel || lp.unreadOnly || lp.waitingOnly;
   const sel = convs.find((c) => c.id === selId) ?? (pinned && pinned.id === selId ? pinned : null);
   // lets the shell hide floating widgets while a conversation fills the phone screen
   useEffect(() => { document.body.classList.toggle('chat-open', !!sel); return () => document.body.classList.remove('chat-open'); }, [sel]);
@@ -224,9 +236,21 @@ export function Inbox({ me }: { me: Me }) {
               </select>
             </div>
           )}
-          {convs.length === 0 ? <p className="empty">אין שיחות להצגה.</p> : (
+          <details className="inbox-adv" open={advActive || undefined}>
+            <summary>אפשרויות מתקדמות{advActive ? ' (פעילות)' : ''}</summary>
+            <div className="grid2">
+              <div className="field"><label htmlFor="lp-sort">מיון</label>
+                <select id="lp-sort" value={lp.sort} onChange={(e) => setPref({ sort: e.target.value as typeof lp.sort })}><option value="recent">אחרונות קודם</option><option value="waiting">ממתינות הכי הרבה זמן</option><option value="unread">לא נקראו קודם</option></select></div>
+              <div className="field"><label htmlFor="lp-ch">ערוץ</label>
+                <select id="lp-ch" value={lp.channel} onChange={(e) => setPref({ channel: e.target.value })}><option value="">כל הערוצים</option>{channels.map((c) => <option key={c} value={c}>{c}</option>)}</select></div>
+            </div>
+            <label className="row" style={{ fontWeight: 400 }}><input type="checkbox" style={{ width: 'auto', minHeight: 'auto' }} checked={lp.unreadOnly} onChange={(e) => setPref({ unreadOnly: e.target.checked })} /> רק עם הודעות שלא נקראו</label>
+            <label className="row" style={{ fontWeight: 400 }}><input type="checkbox" style={{ width: 'auto', minHeight: 'auto' }} checked={lp.waitingOnly} onChange={(e) => setPref({ waitingOnly: e.target.checked })} /> רק שממתינות לתשובה שלנו</label>
+            {advActive && <button type="button" onClick={() => setPref({ sort: 'recent', channel: '', unreadOnly: false, waitingOnly: false })}>ניקוי הסינון המתקדם</button>}
+          </details>
+          {view.length === 0 ? <p className="empty">{convs.length === 0 ? 'אין שיחות להצגה.' : 'אין שיחות שמתאימות לסינון המתקדם.'}</p> : (
             <ul className="conv-list">
-              {convs.map((c) => {
+              {view.map((c) => {
                 const w = waitLabel(c.waitingSince);
                 return (
                   <li key={c.id}>

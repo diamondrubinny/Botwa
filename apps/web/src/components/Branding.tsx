@@ -86,7 +86,7 @@ export function Branding() {
   const cs = (n: string, f: string) => getComputedStyle(document.documentElement).getPropertyValue(n).trim() || f;
   const ad = valid ? adapt(color, cs('--bg', '#fff'), cs('--surface', '#fff'), dark) : null;
   const sw = (s: Swatch) => (
-    <button key={s.hex + s.source} type="button" className="swatch" onClick={() => setColor(s.hex)} aria-label={`בחירת הצבע ${s.hex} (${SOURCE[s.source] ?? s.source})`}>
+    <button key={s.hex + s.source} type="button" className="bswatch" onClick={() => setColor(s.hex)} aria-label={`בחירת הצבע ${s.hex} (${SOURCE[s.source] ?? s.source})`}>
       <i style={{ background: s.hex }} aria-hidden="true" /><span dir="ltr">{s.hex}</span>
     </button>
   );
@@ -112,7 +112,7 @@ export function Branding() {
             </p>
           )}
         </div>
-        {fromLogo.length > 0 && <div><strong>צבעים מהלוגו</strong><div className="swatches">{fromLogo.map(sw)}</div></div>}
+        {fromLogo.length > 0 && <div><strong>צבעים מהלוגו</strong><div className="bswatches">{fromLogo.map(sw)}</div></div>}
         <button className="primary" type="submit">שמירת שם וצבע</button>
         {color !== '' && <button type="button" onClick={() => setColor('')} style={{ marginInlineStart: '.5rem' }}>חזרה לערכות המובנות</button>}
       </form>
@@ -137,7 +137,7 @@ export function Branding() {
       {found && (
         <div aria-live="polite">
           <p>נמצא באתר {found.title ? `"${found.title}"` : found.url}:</p>
-          {found.colors.length === 0 ? <p>לא נמצאו צבעים בולטים.</p> : <div className="swatches">{found.colors.map(sw)}</div>}
+          {found.colors.length === 0 ? <p>לא נמצאו צבעים בולטים.</p> : <div className="bswatches">{found.colors.map(sw)}</div>}
           {found.logos.length > 0 && (
             <div>
               <strong>לוגואים אפשריים</strong>

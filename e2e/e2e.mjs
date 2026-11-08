@@ -621,6 +621,31 @@ check('custom role is refused by the API too', (await page.request.get(BASE + '/
 await page.click('aside.sidebar >> button:has-text("התנתקות")');
 await page.waitForSelector('#email');
 
+// ============ appearance menu stays on screen; advanced options; inbox filters do not get cut off ============
+await page.click('aside.sidebar nav >> text=שיחות');
+await page.waitForSelector('.list-pane');
+const inside = (sel, box) => page.evaluate(([q, b]) => { const els = [...document.querySelectorAll(q)]; const r0 = document.querySelector(b).getBoundingClientRect(); return els.length > 0 && els.every((e) => { const r = e.getBoundingClientRect(); return r.left >= r0.left - 1 && r.right <= r0.right + 1; }); }, [sel, box]);
+check('inbox: every filter chip is fully inside the list', await inside('.list-pane .chips .chip', '.list-pane'));
+await page.click('.inbox-adv summary');
+await page.selectOption('#lp-sort', 'waiting'); await page.check('text=רק עם הודעות שלא נקראו');
+check('inbox: advanced filter is applied and marked active', (await page.textContent('.inbox-adv summary')).includes('פעילות'));
+await axe('inbox: advanced options');
+await page.click('button:has-text("ניקוי הסינון המתקדם")');
+await page.click('aside.sidebar button[aria-label="מראה המערכת"]');
+await page.waitForSelector('#theme-pop');
+check('appearance menu: fully inside the window', await page.evaluate(() => { const r = document.querySelector('#theme-pop').getBoundingClientRect(); return r.top >= 0 && r.left >= 0 && r.bottom <= window.innerHeight && r.right <= window.innerWidth; }));
+await page.click('#theme-pop summary:has-text("אפשרויות מתקדמות")');
+await page.waitForTimeout(150);
+check('appearance menu: still inside the window with the advanced part open', await page.evaluate(() => { const r = document.querySelector('#theme-pop').getBoundingClientRect(); return r.top >= 0 && r.bottom <= window.innerHeight + 1; }));
+await page.click('#theme-pop button[role=radio]:has-text("גדול מאוד")');
+await page.click('#theme-pop button[role=radio]:has-text("צפופה")');
+await page.fill('#th-hex', '#0f766e');
+check('appearance: text size, density and own colour are applied', await page.evaluate(() => document.documentElement.dataset.font === 'xl' && document.documentElement.dataset.density === 'compact' && document.documentElement.style.getPropertyValue('--accent') !== ''));
+await axe('appearance menu with advanced options');
+await page.click('#theme-pop button:has-text("איפוס כל ההגדרות")');
+check('appearance: reset restores the defaults', await page.evaluate(() => document.documentElement.dataset.font === 'm' && document.documentElement.dataset.density === 'comfortable' && document.documentElement.style.getPropertyValue('--accent') === ''));
+await page.keyboard.press('Escape');
+
 // ============ themes: every accent in light and dark passes axe; choice persists ============
 await page.fill('#email', 'ana@e2e.io'); await page.fill('#pw', 'analyst-password-1'); await page.click('button[type=submit]');
 await page.waitForSelector('aside.sidebar nav');

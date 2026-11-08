@@ -117,8 +117,8 @@ function Shell({ me, reloadMe, onLogout }: { me: Me; reloadMe: () => Promise<voi
 
       <aside className="sidebar" id="sidebar" aria-label="תפריט צד" hidden={sb.mode === 'hidden'}>
         <div className="sb-tools">
-          <button type="button" className="icon-btn" onClick={() => sb.setMode(sb.mode === 'compact' ? 'full' : 'compact')} aria-pressed={sb.mode === 'compact'} aria-controls="sidebar" aria-label={sb.mode === 'compact' ? 'הרחבת התפריט' : 'כיווץ התפריט לסמלים'} title={sb.mode === 'compact' ? 'הרחבת התפריט' : 'כיווץ התפריט לסמלים'}><Icon name="chevron" size={18} /></button>
-          <button type="button" className="icon-btn" onClick={() => sb.setMode('hidden')} aria-label="הסתרת התפריט" title="הסתרת התפריט"><Icon name="close" size={18} /></button>
+          <button type="button" className="sb-btn" onClick={() => sb.setMode(sb.mode === 'compact' ? 'full' : 'compact')} aria-pressed={sb.mode === 'compact'} aria-controls="sidebar" aria-label={sb.mode === 'compact' ? 'הרחבת התפריט' : 'כיווץ התפריט לסמלים'} title={sb.mode === 'compact' ? 'הרחבת התפריט' : 'כיווץ התפריט לסמלים'}><Icon name="chevron" size={18} /></button>
+          <button type="button" className="sb-btn" onClick={() => sb.setMode('hidden')} aria-label="הסתרת התפריט" title="הסתרת התפריט"><Icon name="close" size={18} /></button>
         </div>
         <div className="brand">{brand.hasLogo ? <img className="brand-logo" src={logoSrc(brand)} alt="" /> : <span className="brand-mark"><Icon name="chat" /></span>}<strong>{brand.appName}</strong></div>
         <nav aria-label="ניווט ראשי"><ul className="nav-list">{visible.map(link)}</ul></nav>
