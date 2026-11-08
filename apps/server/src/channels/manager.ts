@@ -3,7 +3,7 @@ import QRCode from 'qrcode';
 import type { Config } from '../config.js';
 import type { Db } from '../db.js';
 import { ingestInbound } from '../inbox.js';
-import { decide, loadBot, type BotConfig } from '../bot.js';
+import { decide, loadBot, normalize, type BotConfig } from '../bot.js';
 import { isStopMessage } from '../optout.js';
 import { isOpen } from '../business-hours.js';
 import { autoAssign } from '../routing.js';
@@ -170,7 +170,7 @@ export class ChannelManager {
             if (r.needsRouting) await autoAssign(this.db, r.conversationId).catch(() => null);
           } else if (r.messageId && bot?.enabled) {
             // the menu bot owns new conversations; people are assigned only at hand-over
-            await this.runBot(channelId, r.conversationId, m.externalContactId, bot, m.text, !!m.media).catch(() => undefined);
+            await this.runBot(channelId, r.conversationId, m.externalContactId, bot, m.text, !!m.media, m.externalMessageId).catch(() => undefined);
           } else if (r.messageId) {
             if (r.needsRouting) {
               const to = await autoAssign(this.db, r.conversationId).catch(() => null);
@@ -245,6 +245,42 @@ export class ChannelManager {
       },
       { maxWaitMs: opts.background ? 45_000 : 8_000 },
     );
+  }
+
+  private reactLog = new Map<string, { minute: number[]; day: number; dayStart: number }>();
+
+  /**
+   * An emoji reaction on the customer's message. Reactions answer a message the customer just sent, so they are the safest kind of
+   * traffic; still capped per channel (30 a minute, 600 a day), skipped when the channel is not connected, paused or restricted, never
+   * waits in the pacing queue (it must appear at once), and never throws: a reaction is a courtesy, not part of the answer.
+   */
+  async react(channelId: string, externalContactId: string, externalMessageId: string, emoji: string): Promise<boolean> {
+    const a = this.adapters.get(channelId);
+    if (!a?.react || this.statuses.get(channelId) !== 'connected') return false;
+    try { await this.assertNotPaused(channelId); } catch { return false; }
+    const now = Date.now();
+    const l = this.reactLog.get(channelId) ?? { minute: [], day: 0, dayStart: now };
+    if (now - l.dayStart > 86_400_000) { l.day = 0; l.dayStart = now; }
+    l.minute = l.minute.filter((t) => now - t < 60_000);
+    if (l.minute.length >= 30 || l.day >= 600) { this.reactLog.set(channelId, l); return false; }
+    l.minute.push(now); l.day++; this.reactLog.set(channelId, l);
+    try {
+      await Promise.race([a.react(externalContactId, externalMessageId, emoji), new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 4000))]);
+      return true;
+    } catch { return false; }
+  }
+
+  /** What the bot does with the reactions of one incoming message: show it is working, then replace that by how it went. */
+  private reactor(channelId: string, ext: string, inboundId: string | undefined, bot: BotConfig) {
+    let cur = '';
+    return {
+      set: async (ev: 'working' | 'done' | 'noAnswer' | 'handoff'): Promise<void> => {
+        if (!bot.reactions.enabled || !inboundId) return;
+        const e = bot.reactions[ev];
+        if (e === cur) return;                       // same reaction already there (or none to remove)
+        if (await this.react(channelId, ext, inboundId, e)) cur = e;
+      },
+    };
   }
 
   /** The official API needs no human-like pacing or warm-up (Meta enforces its own limits); the per-minute/day caps still apply. */
@@ -333,18 +369,23 @@ export class ChannelManager {
 
   /** Menu bot: answer, or hand over to a person (assign via routing, leave a note, away notice outside hours). */
   /** A confident knowledge-base answer for a free-text message, formatted for the customer; null when unsure (then the normal menu flow applies). */
-  private async kbAnswer(bot: BotConfig, state: string | null, text: string | null, inFlow = false): Promise<string | null> {
+  private async kbAnswer(bot: BotConfig, state: string | null, text: string | null, inFlow = false, onSearch?: () => Promise<void>): Promise<string | null> {
     if (!this.kb || (!bot.kb.enabled && !inFlow) || state === 'human' || !text) return null;
     const t = text.trim();
     if (/^\d{1,2}$/.test(t) || t.length < 3) return null;
+    // a request for a person is answered by handing over, not by a search (the decision below would ignore the answer anyway)
+    const norm = normalize(t);
+    if (bot.humanKeywords.some((k) => norm.includes(normalize(k)))) return null;
     try {
+      await onSearch?.();
       const a = await this.kb.answer(t, { minScore: bot.kb.minScore, maxChars: bot.kb.maxChars });
       if (!a) return null;
       return [bot.kb.intro, a.text, bot.kb.showSource ? `מקור: ${a.url ?? a.title}` : ''].filter(Boolean).join('\n\n');
     } catch { return null; }
   }
 
-  private async runBot(channelId: string, convId: string, ext: string, bot: BotConfig, rawText: string | null, hasMedia = false): Promise<void> {
+  private async runBot(channelId: string, convId: string, ext: string, bot: BotConfig, rawText: string | null, hasMedia = false, inboundId?: string): Promise<void> {
+    const rx = this.reactor(channelId, ext, inboundId, bot);
     let text: string | null = hasMedia ? null : rawText;
     const { rows } = await this.db.query('SELECT bot_state, bot_invalid, bot_item, assigned_to FROM conversations WHERE id = $1', [convId]);
     const c = rows[0];
@@ -362,13 +403,17 @@ export class ChannelManager {
 
     if (bot.mode === 'flow') {
       const flow = await loadFlow(this.db);
-      if (flow) { await this.runFlowStep(channelId, convId, ext, bot, flow, { text: rawText !== null && rawText.trim() === '[unsupported message type]' ? null : rawText, media: hasMedia }); return; }
+      if (flow) { await this.runFlowStep(channelId, convId, ext, bot, flow, { text: rawText !== null && rawText.trim() === '[unsupported message type]' ? null : rawText, media: hasMedia }, rx); return; }
     }
 
-    const d = decide(bot, { state: c.bot_state, invalid: c.bot_invalid, item: c.bot_item }, text, c.bot_state === 'area' ? null : await this.kbAnswer(bot, c.bot_state, text));
+    let searched = false;
+    const kbText = c.bot_state === 'area' ? null : await this.kbAnswer(bot, c.bot_state, text, false, async () => { searched = true; await rx.set('working'); });
+    const d = decide(bot, { state: c.bot_state, invalid: c.bot_invalid, item: c.bot_item }, text, kbText);
     for (const reply of d.replies) await this.botSay(channelId, convId, ext, reply);
     await this.db.query('UPDATE conversations SET bot_state = $2, bot_invalid = $3, bot_item = $4 WHERE id = $1', [convId, d.next.state, d.next.invalid, d.next.state === 'area' ? d.next.item ?? null : null]);
 
+    if (d.handoff) await rx.set('handoff');
+    else if (searched) await rx.set(kbText ? 'done' : 'noAnswer');
     if (d.handoff) {
       const why = { requested: 'הלקוח ביקש נציג', unrecognized: 'הלקוח שלח הודעה שהבוט לא זיהה', media: 'הלקוח שלח קובץ או תוכן שאינו טקסט', topic: `הלקוח בחר בנושא "${d.topic?.title ?? ''}"` }[d.handoff];
       let userId = d.topic?.userId;
@@ -400,7 +445,8 @@ export class ChannelManager {
   }
 
   /** The flow chart bot: one customer message in, replies + side effects out (see flow/engine.ts). */
-  private async runFlowStep(channelId: string, convId: string, ext: string, bot: BotConfig, flow: NonNullable<Awaited<ReturnType<typeof loadFlow>>>, input: FlowInput): Promise<void> {
+  private async runFlowStep(channelId: string, convId: string, ext: string, bot: BotConfig, flow: NonNullable<Awaited<ReturnType<typeof loadFlow>>>, input: FlowInput, rx: ReturnType<ChannelManager['reactor']>): Promise<void> {
+    let searched = false, found = false;
     const row = (await this.db.query('SELECT c.flow_state, ct.profile FROM conversations c JOIN contacts ct ON ct.id = c.contact_id WHERE c.id = $1', [convId])).rows[0];
     const st = row?.flow_state as FlowState | null;
     const hours = await loadBusinessHours(this.db);
@@ -410,12 +456,13 @@ export class ChannelManager {
       humanKeywords: bot.humanKeywords, humanOption: bot.humanOption, invalidRetries: bot.invalidRetries, invalidMessage: bot.invalidMessage,
       profile: (row?.profile ?? {}) as Record<string, string>,
       resolveArea: (t) => resolveArea(this.db, t),
-      kbAnswer: (t) => this.kbAnswer(bot, null, t, true),
+      kbAnswer: async (t) => { const a = await this.kbAnswer(bot, null, t, true, async () => { searched = true; await rx.set('working'); }); if (a) found = true; return a; },
       matchOption: async (t, options) => this.kb?.matchOption(t, options) ?? null,
     };
     const r = await runFlow(flow, st, input, ctx, bot.humanLabel);
     for (const reply of r.replies) await this.botSay(channelId, convId, ext, reply);
     const handoff = r.effects.find((e): e is Extract<Effect, { kind: 'handoff' }> => e.kind === 'handoff');
+    if (handoff) await rx.set('handoff'); else if (searched) await rx.set(found ? 'done' : 'noAnswer');
     await this.db.query('UPDATE conversations SET flow_state = $2, bot_state = $3 WHERE id = $1', [convId, JSON.stringify(r.state), handoff ? 'human' : 'menu']);
     for (const e of r.effects) {
       if (e.kind === 'note') await this.db.query('INSERT INTO conversation_notes (conversation_id, body) VALUES ($1, $2)', [convId, e.text]).catch(() => undefined);

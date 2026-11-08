@@ -1,6 +1,17 @@
 import { z } from 'zod';
 import type { Db } from './db.js';
 
+/** One emoji (a single user-perceived character, possibly with a skin tone or joiner) or empty for "do not react". */
+export function isSingleEmoji(v: string): boolean {
+  if (v === '') return true;
+  if (v.length > 20) return false;
+  const seg = [...new Intl.Segmenter('en', { granularity: 'grapheme' }).segment(v)];
+  return seg.length === 1 && /\p{Extended_Pictographic}/u.test(v);
+}
+const emoji = z.string().refine(isSingleEmoji, 'emoji');
+/** Automatic reactions to the customer's message by what the bot is doing. Off until switched on. */
+export const DEFAULT_REACTIONS = { enabled: false, working: '👀', done: '✅', noAnswer: '🤔', handoff: '🙋' };
+
 export const botSchema = z.object({
   enabled: z.boolean(),
   /** menu = the numbered menu below; flow = the flow chart (Bot > Flow chart) */
@@ -44,6 +55,8 @@ export const botSchema = z.object({
     showSource: z.boolean(),
     intro: z.string().trim().max(120),
   }).default({ enabled: false, minScore: 0.6, maxChars: 700, showSource: true, intro: 'מצאתי את זה במאגר המידע שלנו:' }),
+  /** automatic emoji reactions on the customer's message: "working" while the bot searches, then "done" / "noAnswer", or "handoff" when a person takes over */
+  reactions: z.object({ enabled: z.boolean(), working: emoji, done: emoji, noAnswer: emoji, handoff: emoji }).default(() => ({ ...DEFAULT_REACTIONS })),
 });
 export type BotConfig = z.infer<typeof botSchema>;
 
@@ -63,6 +76,7 @@ export const DEFAULT_BOT: BotConfig = {
   invalidRetries: 1,
   footer: 'לחזרה לתפריט שלחו "תפריט". לנציג שלחו "נציג".',
   kb: { enabled: false, minScore: 0.6, maxChars: 700, showSource: true, intro: 'מצאתי את זה במאגר המידע שלנו:' },
+  reactions: { ...DEFAULT_REACTIONS },
 };
 
 export async function loadBot(db: Db): Promise<BotConfig> {

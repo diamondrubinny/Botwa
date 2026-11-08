@@ -164,6 +164,11 @@ export class WhatsAppCloudAdapter implements ChannelAdapter {
     return { externalMessageId: out.messages?.[0]?.id };
   }
 
+  /** Reaction to a customer message (inside the 24-hour window). An empty emoji removes ours. Parameters: docs verification needed against the current Cloud API reference. */
+  async react(externalContactId: string, externalMessageId: string, emoji: string): Promise<void> {
+    await this.post(`${this.creds?.phoneNumberId}/messages`, { messaging_product: 'whatsapp', recipient_type: 'individual', to: externalContactId.split('@')[0], type: 'reaction', reaction: emoji ? { message_id: externalMessageId, emoji } : { message_id: externalMessageId } });
+  }
+
   async markRead(_externalContactId: string, externalMessageIds: string[]): Promise<void> {
     const last = externalMessageIds[externalMessageIds.length - 1];
     if (last) await this.post(`${this.creds?.phoneNumberId}/messages`, { messaging_product: 'whatsapp', status: 'read', message_id: last }).catch(() => undefined);

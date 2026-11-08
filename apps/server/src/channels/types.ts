@@ -57,6 +57,8 @@ export interface ChannelAdapter {
   typing?(externalContactId: string, ms: number): Promise<void>;
   /** Tell the platform the customer's messages were read (best effort). */
   markRead?(externalContactId: string, externalMessageIds: string[]): Promise<void>;
+  /** React to a customer's message with an emoji (empty string removes our reaction). Best effort; not every platform has it. */
+  react?(externalContactId: string, externalMessageId: string, emoji: string): Promise<void>;
   sendMedia?(externalContactId: string, media: OutboundMedia): Promise<{ externalMessageId?: string }>;
 }
 

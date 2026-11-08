@@ -206,6 +206,13 @@ export class TelegramAdapter implements ChannelAdapter {
     }
   }
 
+  /** Telegram only accepts its own fixed set of reaction emoji; others are refused by the server (ignored). An empty emoji removes ours. */
+  async react(externalContactId: string, externalMessageId: string, emoji: string): Promise<void> {
+    if (!this.client) throw new Error('channel_not_connected');
+    const { userId, accessHash } = parseTgContactId(externalContactId);
+    await this.client.invoke(new Api.messages.SendReaction({ peer: new Api.InputPeerUser({ userId: bigInt(userId), accessHash: bigInt(accessHash) }), msgId: Number(externalMessageId), reaction: emoji ? [new Api.ReactionEmoji({ emoticon: emoji })] : [] }));
+  }
+
   async markRead(externalContactId: string): Promise<void> {
     if (!this.client) return;
     const { userId, accessHash } = parseTgContactId(externalContactId);

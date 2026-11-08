@@ -6,8 +6,10 @@ interface BotCfg {
   enabled: boolean; welcome: string; items: { title: string; answer: string; contact?: { name: string; phone: string; message: string }; route?: { userId: string; byArea?: boolean } }[]; humanOption: boolean; humanLabel: string;
   humanKeywords: string[]; humanMessage: string; invalidMessage: string; invalidRetries: number; footer: string; preview?: string; mode?: 'menu' | 'flow';
   kb: { enabled: boolean; minScore: number; maxChars: number; showSource: boolean; intro: string };
+  reactions?: { enabled: boolean; working: string; done: string; noAnswer: string; handoff: string };
 }
 
+const RX = { enabled: false, working: '👀', done: '✅', noAnswer: '🤔', handoff: '🙋' };
 const menuText = (b: BotCfg) =>
   `${b.welcome}\n\n${[...b.items.map((it, i) => `${i + 1}. ${it.title}`), ...(b.humanOption ? [`0. ${b.humanLabel}`] : [])].join('\n')}`;
 
@@ -145,6 +147,21 @@ export function Bot({ me }: { me: Me }) {
         </fieldset>
 
         <p className="card">מצב הבוט כעת: <strong>{b.mode === 'flow' ? 'תרשים זרימה' : 'תפריט ממוספר (העמוד הזה)'}</strong>. לבניית שיחה מתקדמת עם שאלות, תנאים והפניות: <a href="#/flow">תרשים זרימה</a>.</p>
+
+        <fieldset disabled={!canEdit}>
+          <legend>תגובות אוטומטיות (אימוג׳י על הודעת הלקוח)</legend>
+          <p className="hint">הבוט מגיב באימוג׳י על ההודעה של הלקוח לפי מה שהוא עושה: כשהלקוח שואל והבוט מחפש במאגר הידע, מופיע "עיניים" על ההודעה, ואחרי שהתשובה נשלחה האימוג׳י מוחלף בסימון הצלחה (או "לא מצאתי"). כשהבוט מעביר לנציג יופיע אימוג׳י העברה. אימוג׳י ריק = בלי תגובה לאירוע הזה, ואם כבר הוצגה "עיניים" היא תוסר.</p>
+          <div className="field"><label><input type="checkbox" style={{ width: 'auto', minHeight: 'auto' }} checked={!!b.reactions?.enabled} onChange={(e) => set({ reactions: { ...(b.reactions ?? RX), enabled: e.target.checked } })} /> להפעיל תגובות אוטומטיות</label></div>
+          {b.reactions?.enabled && (
+            <div className="row">
+              {([['working', 'בזמן חיפוש'], ['done', 'נמצאה תשובה'], ['noAnswer', 'לא נמצאה תשובה'], ['handoff', 'העברה לנציג']] as const).map(([k, label]) => (
+                <div className="field" key={k}><label htmlFor={`rx-${k}`}>{label}</label>
+                  <input id={`rx-${k}`} style={{ width: 90, fontSize: '1.4rem', textAlign: 'center' }} maxLength={12} value={b.reactions![k]} onChange={(e) => set({ reactions: { ...b.reactions!, [k]: e.target.value.trim() } })} aria-describedby="rx-hint" /></div>
+              ))}
+            </div>
+          )}
+          <p id="rx-hint" className="hint">אימוג׳י אחד בכל שדה. עובד בווצאפ (QR ורשמי) ובטלגרם (טלגרם מאפשר רק קבוצה קבועה של אימוג׳י, למשל 👀 👍 🤔 🙏; אחרים לא יוצגו). בצ׳אט באתר אין תגובות. התגובות נשלחות רק בתגובה להודעה שהלקוח כתב, עד 30 בדקה לערוץ, ולכן הן לא מגדילות סיכון לחסימה כמו הודעות יזומות.</p>
+        </fieldset>
 
         <fieldset className="card" disabled={!canEdit}>
           <legend>מענה ממאגר הידע</legend>
