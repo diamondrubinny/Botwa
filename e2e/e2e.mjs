@@ -158,6 +158,13 @@ await page.waitForSelector('td:has-text("הפעלת אימות דו-שלבי")')
 // knowledge base: add a Q&A, test the search, check every tab for accessibility
 await page.click('aside.sidebar nav >> text=מאגר ידע');
 await page.waitForSelector('h1:has-text("מאגר ידע")');
+await page.click('button.chip:has-text("הבוט לומד")');
+await page.waitForSelector('#learn-h');
+await page.waitForSelector('#learn-fb');
+check('kb: the "bot learns" screen shows stats and the three suggestion lists', (await page.locator('section[aria-labelledby^="learn-"] h3').count()) >= 4);
+await page.waitForTimeout(400);
+await axe('kb: bot learns');
+await page.click('button.chip:has-text("מקורות")');
 await page.click('button:has-text("שאלה ותשובה")');
 await page.fill('#kb-t', 'מהן שעות הפעילות שלכם?');
 await page.fill('#kb-b', 'פתוחים בימים א׳–ה׳ בין 9:00 ל-17:00.');

@@ -16,6 +16,10 @@ export interface FlowState {
   list?: { items: string[]; phase: 'item' | 'more' };
   /** "did you mean" candidates offered after a question the knowledge base could not answer with confidence (picked by letter) */
   suggest?: { id: string; label: string }[];
+  /** the question those suggestions were for (learned as a new wording when one is picked) */
+  suggestFor?: string;
+  /** free text the menu did not understand; if the customer then picks an option, that text is a learning example for it */
+  freeText?: { node: string; text: string };
 }
 export const NEW_FLOW_STATE: FlowState = { node: null, vars: {}, invalid: 0, done: false };
 
@@ -24,7 +28,9 @@ export type Effect =
   | { kind: 'tag'; tagId: string }
   | { kind: 'note'; text: string }
   | { kind: 'name'; value: string }
-  | { kind: 'profile'; vars: Vars };
+  | { kind: 'profile'; vars: Vars }
+  /** the customer's free text turned out to mean this menu option (a suggestion for a person to approve) */
+  | { kind: 'learn_option'; node: string; label: string; text: string };
 
 /** What the customer sent: text (null for a message without any), and whether it carried a photo or file. */
 export interface FlowInput { text: string | null; media?: boolean }
@@ -138,32 +144,35 @@ export async function runFlow(flow: Flow, prev: FlowState | null, input: FlowInp
     const k = LETTERS.indexOf(t.replace(/[.'׳)]/g, ''));
     const pick = k >= 0 ? state.suggest[k] : undefined;
     if (pick && ctx.kbSource) {
-      const a = await ctx.kbSource(pick.id, pick.label).catch(() => null);
-      if (a) { replies.push(withHint(a)); return { replies, state: { ...state, suggest: undefined, invalid: 0 }, effects }; }
+      const a = await ctx.kbSource(pick.id, state.suggestFor ?? pick.label).catch(() => null);
+      if (a) { replies.push(withHint(a)); return { replies, state: { ...state, suggest: undefined, suggestFor: undefined, invalid: 0 }, effects }; }
     }
   }
   const hadSuggest = !!state.suggest?.length;
-  if (state.suggest) state = { ...state, suggest: undefined };
+  if (state.suggest) state = { ...state, suggest: undefined, suggestFor: undefined };
   if (w && state.node !== null) {
     if (w.type === 'menu') {
       let idx: number | null = null;
       if (ctx.humanOption && t === '0') return handoff('requested');
       if (/^\d{1,2}$/.test(t)) idx = Number(t) - 1 < w.options.length ? Number(t) - 1 : null;
       if (idx === null) { const k = w.options.findIndex((o) => normalize(o.label) === t); if (k >= 0) idx = k; }
+      const typedPick = idx !== null;   // a number or the exact label (not a guess from the meaning)
       if (idx === null && !/^\d{1,2}$/.test(t)) idx = await ctx.matchOption(inp.text!, w.options).catch(() => null);
       if (idx !== null && idx >= 0 && idx < w.options.length) {
-        state = { ...state, invalid: 0 };
+        if (typedPick && state.freeText?.node === w.id) effects.push({ kind: 'learn_option', node: w.id, label: w.options[idx]!.label, text: state.freeText.text });
+        state = { ...state, invalid: 0, freeText: undefined };
         if (w.save) state = { ...state, vars: { ...state.vars, [w.save]: w.options[idx]!.label } };
         cursor = w.options[idx]!.next;
         if (!cursor) return finished();
       } else {
+        if (hasText && !/^\d{1,2}$/.test(t) && t.length >= 3) state = { ...state, freeText: { node: w.id, text: inp.text!.trim().slice(0, 200) } };
         const a = w.kbOnFreeText && !/^\d{1,2}$/.test(t) ? await ctx.kbAnswer(inp.text!).catch(() => null) : null;
-        if (a) { replies.push(withHint(a)); return { replies, state: { ...state, invalid: 0 }, effects }; }
+        if (a) { replies.push(withHint(a)); return { replies, state: { ...state, invalid: 0, freeText: undefined }, effects }; }
         // no confident answer: offer the closest entries ("did you mean")
         const sug = w.kbOnFreeText && ctx.kbSuggest && !/^\d{1,2}$/.test(t) ? (await ctx.kbSuggest(inp.text!).catch(() => [])).slice(0, 3) : [];
         if (sug.length && state.invalid < ctx.invalidRetries) {
           replies.push(`לא מצאתי תשובה מדויקת. האם התכוונתם לאחד מאלה?\n${sug.map((x, i) => `${LETTERS[i]}. ${x.label}`).join('\n')}\n\nכתבו את האות. לתפריט כתבו "תפריט".`);
-          return { replies, state: { ...state, suggest: sug, invalid: state.invalid + 1 }, effects };
+          return { replies, state: { ...state, suggest: sug, suggestFor: inp.text!.slice(0, 300), invalid: state.invalid + 1 }, effects };
         }
         if (state.invalid < ctx.invalidRetries) { replies.push(`${ctx.invalidMessage}\n\n${menuText(w, ctx.humanOption, humanLabel)}`); return { replies, state: { ...state, invalid: state.invalid + 1 }, effects, menu: true }; }
         return handoff('unrecognized');
@@ -175,7 +184,7 @@ export async function runFlow(flow: Flow, prev: FlowState | null, input: FlowInp
       if (a) return { replies: [withHint(a)], state: { ...state, invalid: 0 }, effects };
       const sug = ctx.kbSuggest ? (await ctx.kbSuggest(inp.text!).catch(() => [])).slice(0, 3) : [];
       if (sug.length) {
-        return { replies: [`לא מצאתי תשובה מדויקת. האם התכוונתם לאחד מאלה?\n${sug.map((x, i) => `${LETTERS[i]}. ${x.label}`).join('\n')}\n\nכתבו את האות.`], state: { ...state, suggest: sug }, effects };
+        return { replies: [`לא מצאתי תשובה מדויקת. האם התכוונתם לאחד מאלה?\n${sug.map((x, i) => `${LETTERS[i]}. ${x.label}`).join('\n')}\n\nכתבו את האות.`], state: { ...state, suggest: sug, suggestFor: inp.text!.slice(0, 300) }, effects };
       }
       return { replies: ['לא מצאתי תשובה לשאלה הזו במאגר. אפשר לנסח אחרת, או לכתוב "נציג" ונציג יחזור אליכם.'], state, effects };
     } else if (w.type === 'question') {

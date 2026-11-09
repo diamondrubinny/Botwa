@@ -29,6 +29,8 @@ export interface AdapterEvents {
   onPairingCode?(code: string): void;
   onStatus(status: ChannelStatus): void;
   onMessage(msg: InboundMessage): void | Promise<void>;
+  /** the customer reacted to one of our messages (emoji '' = reaction removed) */
+  onReaction?(ev: { externalContactId: string; targetMessageId: string; emoji: string }): void;
 }
 
 /** Persistent encrypted key/value storage for one channel's platform session. */

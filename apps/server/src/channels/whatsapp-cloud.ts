@@ -41,7 +41,7 @@ interface WaMessage {
   text?: { body?: string };
   image?: { id?: string; caption?: string }; document?: { id?: string; caption?: string; filename?: string };
   audio?: { id?: string }; video?: { id?: string; caption?: string }; sticker?: { id?: string };
-  button?: { text?: string }; interactive?: { button_reply?: { id?: string; title?: string }; list_reply?: { id?: string; title?: string } };
+  button?: { text?: string }; reaction?: { message_id?: string; emoji?: string }; interactive?: { button_reply?: { id?: string; title?: string }; list_reply?: { id?: string; title?: string } };
 }
 interface WaValue { messages?: WaMessage[]; contacts?: { wa_id?: string; profile?: { name?: string } }[] }
 export interface WaWebhook { object?: string; entry?: { changes?: { field?: string; value?: WaValue }[] }[] }
@@ -96,6 +96,8 @@ export class WhatsAppCloudAdapter implements ChannelAdapter {
         const names = new Map((ch.value.contacts ?? []).map((c) => [c.wa_id ?? '', c.profile?.name]));
         for (const m of ch.value.messages ?? []) {
           if (!m.id || !m.from || !/^\d{5,20}$/.test(m.from)) continue;
+          // a reaction on one of our messages is feedback, not a message (shape per Meta's webhook docs; verify against the official reference)
+          if (m.type === 'reaction') { if (m.reaction?.message_id) this.ctx.events.onReaction?.({ externalContactId: `${m.from}@s.whatsapp.net`, targetMessageId: m.reaction.message_id, emoji: m.reaction.emoji ?? '' }); continue; }
           await this.ctx.events.onMessage(this.toInbound(m, names.get(m.from)));
           n++;
         }

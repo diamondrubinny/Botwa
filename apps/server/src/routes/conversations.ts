@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { audit } from '../audit.js';
 import { isManager, loadAccessible, sendBlock } from '../access.js';
 import { requireAuth } from '../auth.js';
+import { learnFromStaff } from '../learn.js';
 import { CANNED_VARIABLES, renderCanned, unknownVariables } from '../canned.js';
 import { loadBusinessHours } from './settings.js';
 import type { ChannelManager } from '../channels/manager.js';
@@ -152,6 +153,7 @@ export function conversationRoutes(app: FastifyInstance, db: Db, mgr: ChannelMan
     );
     mgr.notifyMessage(conv.channel_id, conv.id, rows[0].id);
     mgr.hookMessage('message.sent', conv.id, rows[0].id);
+    void learnFromStaff(db, mgr.kb, conv.id, b.data.text).catch(() => undefined);   // a question the bot could not answer: a draft FAQ for approval
     // Replying claims an unassigned conversation.
     await db.query(
       `UPDATE conversations SET last_message_at = now(), assigned_to = COALESCE(assigned_to, $2), bot_state = 'human' WHERE id = $1`,

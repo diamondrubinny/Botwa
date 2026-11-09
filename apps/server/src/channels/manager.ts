@@ -1,4 +1,5 @@
 import { runSlaCheck } from '../sla.js';
+import { learnNorm, reactionMeaning, recordLearn } from '../learn.js';
 import { EventEmitter } from 'node:events';
 import QRCode from 'qrcode';
 import type { Config } from '../config.js';
@@ -290,6 +291,7 @@ export class ChannelManager {
             this.emit({ channelId, type: 'qr', qr: url });
           });
         },
+        onReaction: (ev) => { void this.customerReaction(channelId, ev).catch(() => undefined); },
         onMessage: async (m) => {
           const r = await ingestInbound(this.db, channelId, m, { floodLimit: this.cfg.FLOOD_LIMIT });
           if (r.flooded) {
@@ -542,7 +544,7 @@ export class ChannelManager {
 
   /** Menu bot: answer, or hand over to a person (assign via routing, leave a note, away notice outside hours). */
   /** A confident knowledge-base answer for a free-text message, formatted for the customer; null when unsure (then the normal menu flow applies). */
-  private async kbAnswer(bot: BotConfig, state: string | null, text: string | null, inFlow = false, onSearch?: () => Promise<void>): Promise<string | null> {
+  private async kbAnswer(bot: BotConfig, state: string | null, text: string | null, inFlow = false, onSearch?: () => Promise<void>, onFound?: (sourceId: string) => void): Promise<string | null> {
     if (!this.kb || (!bot.kb.enabled && !inFlow) || state === 'human' || !text) return null;
     const t = text.trim();
     if (/^\d{1,2}$/.test(t) || t.length < 3) return null;
@@ -553,6 +555,7 @@ export class ChannelManager {
       await onSearch?.();
       const a = await this.kb.answer(t, { minScore: bot.kb.minScore, maxChars: bot.kb.maxChars });
       if (!a) return null;
+      onFound?.(a.sourceId);
       return [bot.kb.intro, a.text, bot.kb.showSource ? `מקור: ${a.url ?? a.title}` : ''].filter(Boolean).join('\n\n');
     } catch { return null; }
   }
@@ -632,9 +635,12 @@ export class ChannelManager {
     }
 
     let searched = false;
-    const kbText = c.bot_state === 'area' ? null : await this.kbAnswer(bot, c.bot_state, text, false, async () => { searched = true; await rx.set('working'); });
+    let answeredFrom: string | null = null;
+    const kbText = c.bot_state === 'area' ? null : await this.kbAnswer(bot, c.bot_state, text, false, async () => { searched = true; await rx.set('working'); }, (id) => { answeredFrom = id; });
     const d = decide(bot, { state: c.bot_state, invalid: c.bot_invalid, item: c.bot_item }, text, kbText);
+    const stepStart: Date = (await this.db.query('SELECT now() AS t')).rows[0].t;   // database clock, like the messages' own times
     await this.botSayAll(channelId, convId, ext, bot, d.replies, d.menu);
+    if (answeredFrom && kbText && d.replies.some((x) => x.includes(kbText))) await this.tagAnswer(convId, answeredFrom, stepStart);
     await this.db.query('UPDATE conversations SET bot_state = $2, bot_invalid = $3, bot_item = $4 WHERE id = $1', [convId, d.next.state, d.next.invalid, d.next.state === 'area' ? d.next.item ?? null : null]);
 
     if (d.handoff) await rx.set('handoff');
@@ -671,9 +677,27 @@ export class ChannelManager {
     void this.autoForward(convId).catch(() => undefined);
   }
 
+  /** Mark the bot messages just sent in this conversation as answered from a knowledge-base entry (for customers' reactions). */
+  private async tagAnswer(convId: string, sourceId: string, since: Date): Promise<void> {
+    await this.db.query(`UPDATE messages SET kb_source_id = $2 WHERE conversation_id = $1 AND direction = 'out' AND auto AND created_at >= $3`, [convId, sourceId, since]).catch(() => undefined);
+  }
+
+  /** A customer reacted to one of our messages: on a knowledge-base answer it counts as feedback (👍 helpful, 👎 not); removing it undoes it. */
+  async customerReaction(channelId: string, ev: { externalContactId: string; targetMessageId: string; emoji: string }): Promise<'counted' | 'removed' | 'ignored'> {
+    const m = (await this.db.query(
+      `SELECT m.id, m.kb_source_id FROM messages m JOIN conversations c ON c.id = m.conversation_id JOIN contacts ct ON ct.id = c.contact_id
+        WHERE c.channel_id = $1 AND ct.external_id = $2 AND m.external_id = $3 AND m.direction = 'out' LIMIT 1`, [channelId, ev.externalContactId, ev.targetMessageId])).rows[0];
+    if (!m?.kb_source_id) return 'ignored';
+    const meaning = reactionMeaning(ev.emoji);
+    if (meaning === null) { const d = await this.db.query('DELETE FROM kb_answer_reactions WHERE message_id = $1', [m.id]); return d.rowCount ? 'removed' : 'ignored'; }
+    await this.db.query(`INSERT INTO kb_answer_reactions (message_id, source_id, positive) VALUES ($1,$2,$3) ON CONFLICT (message_id) DO UPDATE SET positive = EXCLUDED.positive, created_at = now()`, [m.id, m.kb_source_id, meaning]);
+    return 'counted';
+  }
+
   /** The flow chart bot: one customer message in, replies + side effects out (see flow/engine.ts). */
   private async runFlowStep(channelId: string, convId: string, ext: string, bot: BotConfig, flow: NonNullable<Awaited<ReturnType<typeof loadFlow>>>, input: FlowInput, rx: ReturnType<ChannelManager['reactor']>): Promise<void> {
     let searched = false, found = false;
+    let answeredFrom: string | null = null;
     const row = (await this.db.query('SELECT c.flow_state, ct.profile FROM conversations c JOIN contacts ct ON ct.id = c.contact_id WHERE c.id = $1', [convId])).rows[0];
     const st = row?.flow_state as FlowState | null;
     const hours = await loadBusinessHours(this.db);
@@ -683,21 +707,28 @@ export class ChannelManager {
       humanKeywords: bot.humanKeywords, humanOption: bot.humanOption, invalidRetries: bot.invalidRetries, invalidMessage: bot.invalidMessage,
       profile: (row?.profile ?? {}) as Record<string, string>,
       resolveArea: (t) => resolveArea(this.db, t),
-      kbAnswer: async (t) => { const a = await this.kbAnswer(bot, null, t, true, async () => { searched = true; await rx.set('working'); }); if (a) found = true; return a; },
+      kbAnswer: async (t) => { const a = await this.kbAnswer(bot, null, t, true, async () => { searched = true; await rx.set('working'); }, (id) => { answeredFrom = id; }); if (a) found = true; return a; },
       matchOption: async (t, options) => this.kb?.matchOption(t, options) ?? null,
       kbSuggest: async (t) => {
         if (!this.kb || t.trim().length < 3) return [];
         const hits = await this.kb.search(t, { audience: 'bot', limit: 5 }).catch(() => []);
         // only entries with real evidence: two or more of the question's words, an exact phrase, or a strong meaning match
-        return hits.filter((h) => h.score >= bot.kb.minScore * 0.5 && (h.exact || h.matched >= 2 || h.sem >= bot.kb.minScore * 0.8)).slice(0, 3).map((h) => ({ id: h.sourceId, label: h.title.replace(/\s+/g, ' ').slice(0, 70) }));
+        return hits.filter((h) => h.score >= bot.kb.minScore * 0.4 && (h.exact || h.matched >= 2 || h.sem >= bot.kb.minScore * 0.8)).slice(0, 3).map((h) => ({ id: h.sourceId, label: h.title.replace(/\s+/g, ' ').slice(0, 70) }));
       },
       kbSource: async (id, q) => {
         const a = await this.kb?.answerFor(id, q, { minScore: bot.kb.minScore, maxChars: bot.kb.maxChars }).catch(() => null);
+        if (a) {
+          answeredFrom = id;
+          // the customer's own wording led to this entry: a new wording for it (applied when a person approves)
+          if (learnNorm(q) !== learnNorm(a.title)) void recordLearn(this.db, this.kb, { kind: 'variant', target: id, sourceId: id, text: q, conversationId: convId }).catch(() => undefined);
+        }
         return a ? [bot.kb.intro, a.text, bot.kb.showSource ? `מקור: ${a.url ?? a.title}` : ''].filter(Boolean).join('\n\n') : null;
       },
     };
     const r = await runFlow(flow, st, input, ctx, bot.humanLabel);
+    const stepStart: Date = (await this.db.query('SELECT now() AS t')).rows[0].t;   // database clock, like the messages' own times
     await this.botSayAll(channelId, convId, ext, bot, r.replies, r.menu);
+    if (answeredFrom) await this.tagAnswer(convId, answeredFrom, stepStart);
     const handoff = r.effects.find((e): e is Extract<Effect, { kind: 'handoff' }> => e.kind === 'handoff');
     if (handoff) await rx.set('handoff'); else if (searched) await rx.set(found ? 'done' : 'noAnswer'); else if (bot.reactions.ackAll) await rx.set('done');
     await this.db.query('UPDATE conversations SET flow_state = $2, bot_state = $3 WHERE id = $1', [convId, JSON.stringify(r.state), handoff ? 'human' : 'menu']);
@@ -706,6 +737,7 @@ export class ChannelManager {
       else if (e.kind === 'tag') await this.db.query('INSERT INTO conversation_tags (conversation_id, tag_id) SELECT $1, id FROM tags WHERE id = $2 ON CONFLICT DO NOTHING', [convId, e.tagId]).catch(() => undefined);
       else if (e.kind === 'profile') await this.db.query(`UPDATE contacts SET profile = profile || $2::jsonb WHERE id = (SELECT contact_id FROM conversations WHERE id = $1)`, [convId, JSON.stringify(e.vars)]).catch(() => undefined);
       else if (e.kind === 'name') await this.db.query(`UPDATE contacts SET display_name = $2 WHERE id = (SELECT contact_id FROM conversations WHERE id = $1) AND display_name IS NULL`, [convId, e.value]).catch(() => undefined);
+      else if (e.kind === 'learn_option') await recordLearn(this.db, this.kb, { kind: 'option_example', target: `${e.node}\n${e.label}`, text: e.text, conversationId: convId }).catch(() => undefined);
     }
     if (handoff) {
       const why = { requested: 'הלקוח ביקש נציג', unrecognized: 'הלקוח שלח הודעה שהבוט לא זיהה', media: 'הלקוח שלח קובץ או תוכן שאינו טקסט', flow: 'לפי תרשים הזרימה' }[handoff.reason];

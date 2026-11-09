@@ -126,6 +126,12 @@ export class WhatsAppAdapter implements ChannelAdapter {
         if (!jid || m.key.fromMe || !m.key.id) continue;
         if (jid.endsWith('@g.us') || jid === 'status@broadcast' || jid.endsWith('@broadcast') || jid.endsWith('@newsletter')) continue;
         const msg = m.message;
+        // a reaction is not a message: it is feedback on one of ours (never starts the bot)
+        if (msg?.reactionMessage) {
+          const rk = msg.reactionMessage.key;
+          if (rk?.id && rk.fromMe) events.onReaction?.({ externalContactId: jid, targetMessageId: rk.id, emoji: msg.reactionMessage.text ?? '' });
+          continue;
+        }
         const mediaMsg = msg?.imageMessage ?? msg?.documentMessage ?? msg?.audioMessage ?? msg?.videoMessage;
         const caption = msg?.imageMessage?.caption ?? msg?.documentMessage?.caption ?? msg?.videoMessage?.caption ?? undefined;
         const text = msg?.conversation ?? msg?.extendedTextMessage?.text ?? caption ?? (mediaMsg ? '' : '[unsupported message type]');

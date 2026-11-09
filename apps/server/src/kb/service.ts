@@ -1,3 +1,4 @@
+import { feedbackFor, isFlagged, isLiked } from '../learn.js';
 import { createHash } from 'node:crypto';
 import type { Config } from '../config.js';
 import type { Db } from '../db.js';
@@ -534,7 +535,9 @@ export class KnowledgeBase {
   async answer(question: string, s: AnswerSettings, audience: 'bot' | 'staff' = 'bot', via: 'bot' | 'staff' | 'test' = 'bot'): Promise<(Hit & { text: string }) | null> {
     const hits = await this.search(question, { audience, limit: 3 });
     const top = hits[0];
-    const ok = isConfident(top, hits[1], s.minScore);
+    // customers' reactions: an answer they keep marking unhelpful is only offered, not given; a well-liked one needs a little less evidence
+    const fb = top && audience === 'bot' ? await feedbackFor(this.db, top.sourceId).catch(() => ({ up: 0, down: 0 })) : { up: 0, down: 0 };
+    const ok = !isFlagged(fb) && isConfident(top, hits[1], isLiked(fb) ? s.minScore - 0.05 : s.minScore);
     await this.logQuery(question, via, ok, top?.score ?? null, ok ? top!.sourceId : null);
     if (!ok || !top) return null;
     await this.db.query('UPDATE kb_sources SET uses = uses + 1 WHERE id = $1', [top.sourceId]);

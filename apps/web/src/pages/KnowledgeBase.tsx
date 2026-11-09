@@ -1,3 +1,4 @@
+import { BotLearning } from '../components/BotLearning';
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { api, ApiError } from '../api';
 import { ConfirmDialog } from '../components/ConfirmDialog';
@@ -23,8 +24,8 @@ const ERR_SRC: Record<string, string> = {
 };
 interface CrawlReport { at: string; discovered: number; indexed: number; unchanged: number; failed: number; robots: number; filtered: number; duplicates: number; thin: number; gone: number; limited: boolean; sitemap: number; boilerplate?: number; rendered?: number }
 const reportText = (r: CrawlReport) => `נסרקו ${r.indexed + r.unchanged + r.failed + r.thin + r.duplicates} דפים: ${r.indexed} חדשים או עודכנו, ${r.unchanged} ללא שינוי${r.failed ? `, ${r.failed} נכשלו` : ''}${r.thin ? `, ${r.thin} כמעט ריקים (לא נשמרו)` : ''}${r.duplicates ? `, ${r.duplicates} כפילויות` : ''}${r.robots ? `, ${r.robots} נחסמו ב-robots.txt` : ''}${r.filtered ? `, ${r.filtered} מחוץ להיקף` : ''}${r.gone ? `, ${r.gone} כבר לא באתר (הושבתו)` : ''}${r.rendered ? `, ${r.rendered} נטענו בדפדפן` : ''}${r.boilerplate ? `, הוסרו ${r.boilerplate} קטעים שחוזרים בהרבה דפים (תפריטים וכותרות)` : ''}${r.limited ? '. הסריקה נעצרה במגבלת הדפים' : ''}`;
-type Tab = 'sources' | 'test' | 'gaps' | 'synonyms' | 'stats' | 'health';
-const TABS: [Tab, string][] = [['sources', 'מקורות'], ['test', 'בדיקת חיפוש'], ['gaps', 'שאלות ללא מענה'], ['synonyms', 'מילים נרדפות'], ['stats', 'סטטיסטיקה'], ['health', 'בריאות וכלים']];
+type Tab = 'sources' | 'learn' | 'test' | 'gaps' | 'synonyms' | 'stats' | 'health';
+const TABS: [Tab, string][] = [['sources', 'מקורות'], ['learn', 'הבוט לומד'], ['test', 'בדיקת חיפוש'], ['gaps', 'שאלות ללא מענה'], ['synonyms', 'מילים נרדפות'], ['stats', 'סטטיסטיקה'], ['health', 'בריאות וכלים']];
 
 export function KnowledgeBase() {
   const [tab, setTab] = useState<Tab>('sources');
@@ -36,6 +37,7 @@ export function KnowledgeBase() {
         {TABS.map(([k, l]) => <button key={k} className="chip" aria-pressed={tab === k} onClick={() => setTab(k)}>{l}</button>)}
       </div>
       {tab === 'sources' && <Sources />}
+      {tab === 'learn' && <BotLearning />}
       {tab === 'test' && <Playground />}
       {tab === 'gaps' && <Gaps onAnswer={() => setTab('sources')} />}
       {tab === 'synonyms' && <Synonyms />}

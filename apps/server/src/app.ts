@@ -16,6 +16,7 @@ import { roleRoutes } from './routes/roles.js';
 import { backupRoutes } from './routes/backups.js';
 import { pushRoutes } from './routes/push.js';
 import { webhookRoutes } from './routes/webhooks.js';
+import { learningRoutes } from './routes/learning.js';
 import { scheduledRoutes } from './routes/scheduled.js';
 import { PushService } from './push.js';
 import { KnowledgeBase } from './kb/service.js';
@@ -117,6 +118,7 @@ export async function buildApp(cfg: Config, db: Db, mgr: ChannelManager, media: 
   else if (cfg.BROWSER === 'local') kb.setRenderer(new BrowserRenderer({ path: cfg.BROWSER_PATH, noSandbox: cfg.BROWSER_NO_SANDBOX || undefined }));
   app.addHook('onClose', async () => { await kb.closeRenderer(); });
   kbRoutes(app, db, kb);
+  learningRoutes(app, db, kb);
   flowRoutes(app, db, kb);
   safetyRoutes(app, db, kb);
   brandingRoutes(app, db, kb);
