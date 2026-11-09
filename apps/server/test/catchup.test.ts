@@ -17,6 +17,7 @@ let mgr: ChannelManager;
 let ctxA: AdapterContext;
 let cookie = '';
 let down = false;
+let slow = 0;
 let ip = 0;
 const sent: string[] = [];
 class Fake implements ChannelAdapter {
@@ -24,7 +25,7 @@ class Fake implements ChannelAdapter {
   async start() { ctxA.events.onStatus('connected'); }
   async stop() {}
   async logout() {}
-  async sendText(_t: string, text: string) { if (down) throw new Error('channel_not_connected'); sent.push(text); return { externalMessageId: `s${sent.length}` }; }
+  async sendText(_t: string, text: string) { if (slow) await new Promise((r) => setTimeout(r, slow)); if (down) throw new Error('channel_not_connected'); sent.push(text); return { externalMessageId: `s${sent.length}` }; }
 }
 const call = (method: 'GET' | 'POST' | 'PUT', url: string, payload?: object) => app.inject({ method, url, payload, remoteAddress: `10.76.${Math.floor(++ip / 250)}.${ip % 250}`, headers: { origin: ORIGIN, cookie } });
 let mid = 0;
@@ -48,6 +49,16 @@ beforeAll(async () => {
 afterAll(async () => { await mgr.stopAll(); await app.close(); await db.end(); });
 
 describe('answering after the connection was lost', () => {
+  it('a catch-up running while the bot is still answering (slow sending) does not answer the same message twice', async () => {
+    sent.length = 0; slow = 300;
+    const p = hear('9725200099', 'שלום');
+    await new Promise((r) => setTimeout(r, 50));
+    expect(await mgr.catchUp()).toBe(0);                       // busy: skipped
+    await p;
+    await mgr.catchUp();
+    slow = 0;
+    expect(sent.filter((x) => x.includes('במה אפשר לעזור')).length).toBe(1);
+  });
   it('a message the bot could not answer is answered once, as soon as sending works again', async () => {
     down = true; sent.length = 0;
     await hear('9725200001', 'שלום');
@@ -133,4 +144,5 @@ describe('answering after the connection was lost', () => {
     expect((await setBot({ catchupHours: -1 })).statusCode).toBe(400);
     expect((await setBot({ catchupHours: 500 })).statusCode).toBe(400);
   });
+
 });

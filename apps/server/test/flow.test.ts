@@ -818,3 +818,35 @@ describe('after "did you mean" during identification', () => {
     expect(r.replies[0]).toContain('עזרה ראשונה');
   });
 });
+
+describe('a question that names a menu topic', () => {
+  const tagIds = new Map(TEMPLATE_TAGS.map((n, i) => [n, `00000000-0000-4000-8000-${String(i + 1).padStart(12, '0')}`]));
+  const t = buildSafetyFlow((n) => tagIds.get(n as never) ?? '');
+  const c = () => ctx({ matchOption: async (x, o) => matchOptionLexical(x, o) });
+  it('during identification: an information topic (form) is answered at once, and identification stays where it was', async () => {
+    const s0 = await runFlow(t, null, 'היי', c());
+    expect(s0.replies.join('\n')).toContain('שם מלא:');
+    const r = await runFlow(t, s0.state, 'איך אני מדווח על תאונה', c());
+    expect(r.replies).toHaveLength(1);
+    expect(r.replies[0]).toContain('תאונה');
+    expect(r.replies[0]).not.toContain('לא מצאתי');
+    expect(r.state.node).toBe('q_name');
+    expect(r.state.vars.fullName).toBeUndefined();
+  });
+  it('during identification: a report topic is remembered, and after identification the bot goes straight into it', async () => {
+    let r = await runFlow(t, null, 'היי', c());
+    r = await runFlow(t, r.state, 'יש לי שאלה על לייזר במעבדה', c());
+    expect(r.replies[0]).toContain('"לייזרים"');
+    expect(r.state.pendingTopic).toBeTruthy();
+    for (const a of ['דנה לוי', 'דלג', 'דלג', 'הנדסה', 'פרופ׳ כהן']) r = await runFlow(t, r.state, a, c());
+    r = await runFlow(t, r.state, '2', c());                                        // status
+    expect(r.replies.join('\n')).not.toContain('ברצוני לקבל מידע');                 // no topics menu
+    expect(r.replies.join('\n')).toContain('שלחו תמונה של האזור');                  // straight into the laser topic
+    expect(r.state.pendingTopic).toBeUndefined();
+  });
+  it('in the first message: a known customer goes straight into the topic', async () => {
+    const r = await runFlow(t, null, 'איך מדווחים על מפגע בטיחותי שראיתי', ctx({ matchOption: async (x, o) => matchOptionLexical(x, o), profile: { fullName: 'דנה', faculty: 'x', pi: 'y', status: 'משתלם' } }));
+    expect(r.replies.join('\n')).toContain('המפגע');
+    expect(r.replies.join('\n')).not.toContain('ברצוני לקבל מידע');
+  });
+});

@@ -20,6 +20,8 @@ export interface FlowState {
   suggestFor?: string;
   /** free text the menu did not understand; if the customer then picks an option, that text is a learning example for it */
   freeText?: { node: string; text: string };
+  /** a topic the customer already named (e.g. during identification): the menu that offers it opens straight at it */
+  pendingTopic?: { node: string; index: number };
 }
 export const NEW_FLOW_STATE: FlowState = { node: null, vars: {}, invalid: 0, done: false };
 
@@ -101,6 +103,20 @@ export async function runFlow(flow: Flow, prev: FlowState | null, input: FlowInp
   const replies: string[] = [];
   const effects: Effect[] = [];
   const labels = { ...DEFAULT_LABELS, ...(flow.labels ?? {}) };
+  /** the topic of the main menu(s) a free text names (menus that accept free text), other than the one being answered */
+  const findTopic = async (text: string, except?: string): Promise<{ node: Extract<FlowNode, { type: 'menu' }>; index: number } | null> => {
+    for (const n of flow.nodes) {
+      if (n.type !== 'menu' || !n.kbOnFreeText || n.id === except || n.options.length < 3) continue;
+      const i = await ctx.matchOption(text, n.options).catch(() => null);
+      if (i !== null && i >= 0 && i < n.options.length) return { node: n, index: i };
+    }
+    return null;
+  };
+  /** what to say for a named topic: an information topic (its next step is a message) is answered at once; others wait for the menu */
+  const topicReply = (m: { node: Extract<FlowNode, { type: 'menu' }>; index: number }): string | null => {
+    const nx = m.node.options[m.index]!.next ? nodes.get(m.node.options[m.index]!.next!) : undefined;
+    return nx?.type === 'message' ? nx.text : null;
+  };
 
   const summary = () => {
     const order = [...Object.keys(flow.labels ?? {}), ...Object.keys(state.vars)];
@@ -182,6 +198,13 @@ export async function runFlow(flow: Flow, prev: FlowState | null, input: FlowInp
       // a question instead of the answer: answer it from the knowledge base and ask again. It is never stored as the answer.
       const a = await ctx.kbAnswer(inp.text!).catch(() => null);
       if (a) return { replies: [withHint(a)], state: { ...state, invalid: 0 }, effects };
+      const topic = await findTopic(inp.text!, w.id);
+      if (topic) {
+        const info = topicReply(topic);
+        const label = topic.node.options[topic.index]!.label;
+        if (info) return { replies: [withHint(info)], state: { ...state, invalid: 0 }, effects };
+        return { replies: [`הבנתי, "${label}". נשלים קודם את הפרטים ואז נמשיך ישר לנושא.\n\n${w.text}`], state: { ...state, invalid: 0, pendingTopic: { node: topic.node.id, index: topic.index } }, effects };
+      }
       const sug = ctx.kbSuggest ? (await ctx.kbSuggest(inp.text!).catch(() => [])).slice(0, 3) : [];
       if (sug.length) {
         return { replies: [`לא מצאתי תשובה מדויקת. האם התכוונתם לאחד מאלה?\n${sug.map((x, i) => `${LETTERS[i]}. ${x.label}`).join('\n')}\n\nכתבו את האות.`], state: { ...state, suggest: sug, suggestFor: inp.text!.slice(0, 300) }, effects };
@@ -256,6 +279,14 @@ export async function runFlow(flow: Flow, prev: FlowState | null, input: FlowInp
       // answered: just the answer. The flow starts with the next message that is not another question.
       const a = await ctx.kbAnswer(inp.text!).catch(() => null);
       if (a) return { replies: [withHint(a)], state, effects };
+      // not in the knowledge base, but it names a topic of the menu: information topics answer now, others open once reached
+      const topic = await findTopic(inp.text!);
+      if (topic) {
+        const info = topicReply(topic);
+        if (info) return { replies: [withHint(info)], state, effects };
+        state = { ...state, pendingTopic: { node: topic.node.id, index: topic.index } };
+        replies.push(`הבנתי, "${topic.node.options[topic.index]!.label}".`);
+      }
     }
     // the very first message may already be a question the knowledge base can answer
     const first = nodes.get(flow.start);
@@ -293,7 +324,19 @@ export async function runFlow(flow: Flow, prev: FlowState | null, input: FlowInp
         cursor = a ? n.found : n.notFound;
         break;
       }
-      case 'menu': replies.push(menuText(n, ctx.humanOption, humanLabel)); return { replies, state: { ...state, node: n.id, invalid: 0 }, effects, menu: true };
+      case 'menu': {
+        const pt = state.pendingTopic;
+        if (pt && pt.node === n.id && n.options[pt.index]) {
+          // the customer already said what they want: go straight into that topic
+          const o = n.options[pt.index]!;
+          state = { ...state, pendingTopic: undefined, invalid: 0 };
+          if (n.save) state = { ...state, vars: { ...state.vars, [n.save]: o.label } };
+          cursor = o.next;
+          if (!cursor) return finished();
+          break;
+        }
+        replies.push(menuText(n, ctx.humanOption, humanLabel)); return { replies, state: { ...state, node: n.id, invalid: 0 }, effects, menu: true };
+      }
       case 'question': case 'media': replies.push(n.text); return { replies, state: { ...state, node: n.id, invalid: 0 }, effects };
       case 'list': replies.push(n.text); return { replies, state: { ...state, node: n.id, invalid: 0, list: { items: [], phase: 'item' } }, effects };
       case 'handoff': {

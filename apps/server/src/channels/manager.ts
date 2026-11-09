@@ -565,7 +565,27 @@ export class ChannelManager {
    * sending fails, the message stays "pending" and catchUp() answers it when the channel is back (see bot.catchupHours).
    * Replies are sent before the bot's state changes, so running the same message again is safe.
    */
-  private async attemptBot(channelId: string, convId: string, contact: string, bot: BotConfig, p: { text: string | null; media: boolean; ext: string }, fresh: boolean): Promise<boolean> {
+  /** One bot run at a time per conversation: two quick messages (or a catch-up during a slow reply) must not both answer from the same state. */
+  private botRuns = new Map<string, Promise<unknown>>();
+  private serial<T>(convId: string, fn: () => Promise<T>): Promise<T> {
+    const next = (this.botRuns.get(convId) ?? Promise.resolve()).catch(() => undefined).then(fn);
+    this.botRuns.set(convId, next);
+    void next.catch(() => undefined).finally(() => { if (this.botRuns.get(convId) === next) this.botRuns.delete(convId); });
+    return next;
+  }
+
+  private attemptBot(channelId: string, convId: string, contact: string, bot: BotConfig, p: { text: string | null; media: boolean; ext: string }, fresh: boolean): Promise<boolean> {
+    return this.serial(convId, async () => {
+      if (!fresh) {
+        // a catch-up: answer only if that exact message is still waiting (a run that just finished may have answered it)
+        const still = (await this.db.query('SELECT 1 FROM conversations WHERE id = $1 AND bot_pending_ext = $2', [convId, p.ext])).rowCount;
+        if (!still) return false;
+      }
+      return this.attemptBotNow(channelId, convId, contact, bot, p, fresh);
+    });
+  }
+
+  private async attemptBotNow(channelId: string, convId: string, contact: string, bot: BotConfig, p: { text: string | null; media: boolean; ext: string }, fresh: boolean): Promise<boolean> {
     if (fresh && bot.catchupHours > 0) await this.db.query('UPDATE conversations SET bot_pending_at = now(), bot_pending_ext = $2, bot_pending_text = $3, bot_pending_media = $4, bot_tries = 0 WHERE id = $1', [convId, p.ext, p.text, p.media]).catch(() => undefined);
     try {
       await this.runBot(channelId, convId, contact, bot, p.text, p.media, p.ext);
@@ -590,6 +610,7 @@ export class ChannelManager {
            FROM conversations c JOIN contacts ct ON ct.id = c.contact_id WHERE c.bot_pending_at IS NOT NULL AND ($1::uuid IS NULL OR c.channel_id = $1) ORDER BY c.bot_pending_at LIMIT 30`, [only ?? null]);
       for (const r of rows) {
         if (this.statuses.get(r.channelId) !== 'connected') continue;           // wait for the channel
+        if (this.botRuns.has(r.id)) continue;                                    // the bot is answering it right now
         const ageH = (Date.now() - new Date(r.at).getTime()) / 3_600_000;
         if (!bot.enabled || bot.catchupHours === 0 || ageH > bot.catchupHours || r.tries >= 5) {
           await this.db.query('UPDATE conversations SET bot_pending_at = NULL, bot_pending_text = NULL, bot_pending_ext = NULL WHERE id = $1', [r.id]);
