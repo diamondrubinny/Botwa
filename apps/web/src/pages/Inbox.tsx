@@ -451,7 +451,7 @@ export function Inbox({ me }: { me: Me }) {
                     <h3 id="notes-h">הערות פנימיות (לא נשלחות ללקוח)</h3>
                     {notes.length === 0 ? <p className="hint">אין הערות.</p> : (
                       <ul style={{ paddingInlineStart: '1.2rem' }}>
-                        {notes.map((n) => <li key={n.id}>{n.body} <small className="hint">— {n.authorName ?? 'צוות'}, {fmt(n.createdAt)}</small></li>)}
+                        {notes.map((n) => <li key={n.id}>{n.body} <small className="hint">— {n.authorName ?? 'מערכת (בוט)'}, {fmt(n.createdAt)}</small></li>)}
                       </ul>
                     )}
                     <form onSubmit={addNote}>
