@@ -15,6 +15,7 @@ const shortTime = (iso: string) => {
 const nameOf = (c: Pick<Conversation, 'contactName' | 'contactId'>) => c.contactName ?? c.contactId.split(/[@:]/)[0]!;
 
 const SLA_WARN_MIN = 15;
+const schedErr: Record<string, string> = { contact_blocked: 'הלקוח חסום', contact_opted_out: 'הלקוח ביקש להפסיק', outside_reply_window: 'חלון המענה נסגר', expired_channel_not_connected: 'הערוץ היה מנותק', send_failed: 'השליחה נכשלה' };
 function waitLabel(since: string | null, sla: { enabled: boolean; targetMinutes: number } | null): { text: string; late: boolean } | null {
   if (!since) return null;
   const min = Math.max(0, Math.floor((Date.now() - new Date(since).getTime()) / 60000));
@@ -236,6 +237,17 @@ export function Inbox({ me }: { me: Me }) {
   }
 
   const assignTo = (userId: string | null, note?: string) => act(() => api('POST', `/conversations/${selId}/assign`, { userId, note }));
+  const [sched, setSched] = useState<{ id: string; body: string; sendAt: string; status: string; error: string | null }[]>([]);
+  const [schedAt, setSchedAt] = useState('');
+  const loadSched = async () => { if (selId) setSched(await api<typeof sched>('GET', `/conversations/${selId}/scheduled`).catch(() => [])); else setSched([]); };
+  useEffect(() => { setSchedAt(''); void loadSched(); }, [selId]);  // eslint-disable-line react-hooks/exhaustive-deps
+  async function schedule() {
+    if (!selId || !text.trim() || !schedAt) return;
+    await act(async () => {
+      await api('POST', `/conversations/${selId}/scheduled`, { text: text.trim(), sendAt: new Date(schedAt).toISOString() });
+      edit(''); setSchedAt(''); await loadSched();
+    });
+  }
   const [ho, setHo] = useState<{ to: string; note: string } | null>(null);
   const [mates, setMates] = useState<{ id: string; name: string }[]>([]);
   useEffect(() => { setHo(null); }, [selId]);
@@ -565,6 +577,25 @@ export function Inbox({ me }: { me: Me }) {
                     </select>
                   </div>
                 )}
+                <details className="sched">
+                  <summary>תזמון שליחה{sched.some((x) => x.status === 'pending') ? ` (${sched.filter((x) => x.status === 'pending').length} ממתינות)` : ''}</summary>
+                  <p className="hint">ההודעה (מהתיבה למטה) תישלח בשעה שתבחרו, בכפוף לאותם כללים כמו תשובה רגילה: לא נשלח ללקוח חסום, שביקש להפסיק או שלא פנה אליכם לאחרונה. אפשר להשתמש במשתנים כמו {'{שם}'}.</p>
+                  <div className="row">
+                    <label htmlFor="sched-at" className="sr-only">מועד שליחה</label>
+                    <input id="sched-at" type="datetime-local" value={schedAt} min={new Date(Date.now() - new Date().getTimezoneOffset() * 60000 + 120000).toISOString().slice(0, 16)} onChange={(e) => setSchedAt(e.target.value)} style={{ maxWidth: 230 }} />
+                    <button type="button" disabled={!text.trim() || !schedAt || !!sel.blocked || !!sel.optedOut} onClick={() => void schedule()}>תזמון ההודעה</button>
+                  </div>
+                  {sched.length > 0 && (
+                    <ul className="plain">
+                      {sched.map((x) => (
+                        <li key={x.id}>
+                          <span dir="ltr">{new Date(x.sendAt).toLocaleString('he-IL', { dateStyle: 'short', timeStyle: 'short' })}</span> · {x.status === 'pending' ? 'ממתינה' : x.status === 'sent' ? 'נשלחה' : x.status === 'cancelled' ? 'בוטלה' : `נכשלה${x.error ? ` (${schedErr[x.error] ?? x.error})` : ''}`}: {x.body.length > 60 ? `${x.body.slice(0, 60)}…` : x.body}
+                          {x.status === 'pending' && <button type="button" style={{ minHeight: 32, marginInlineStart: '.5rem' }} onClick={() => void act(async () => { await api('DELETE', `/scheduled/${x.id}`); await loadSched(); })}>ביטול<span className="sr-only"> הודעה מתוזמנת</span></button>}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </details>
                 {file && <p className="picked-file"><Icon name="clip" size={16} />{file.name} <button type="button" style={{ minHeight: 32 }} onClick={() => { setFile(null); if (fileRef.current) fileRef.current.value = ''; }}>הסרה</button></p>}
                 <div className="composer-row">
                   <button type="button" className="attach" onClick={() => fileRef.current?.click()} aria-label="צירוף קובץ"><Icon name="clip" /></button>

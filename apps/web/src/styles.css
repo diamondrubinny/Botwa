@@ -322,3 +322,8 @@ html[data-font='xl'] { font-size: 125%; }
 .inbox-adv { padding: 0 .9rem .5rem; }
 .inbox-adv summary { cursor: pointer; min-height: 36px; display: flex; align-items: center; font-weight: 600; font-size: .9rem; }
 .inbox-adv .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: .5rem; }
+
+/* scheduled messages panel and plain lists */
+ul.plain { list-style: none; padding: 0; margin: .5rem 0 0; display: grid; gap: .35rem; }
+details.sched { margin: .4rem 0; }
+details.sched > summary { cursor: pointer; font-weight: 600; min-height: 32px; display: flex; align-items: center; }

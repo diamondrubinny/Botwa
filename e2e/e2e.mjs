@@ -261,6 +261,13 @@ await page.waitForSelector('#fw-h');
 check('settings: group forwarding card is there', true);
 if (await page.locator('button:has-text("הוספת כלל")').isEnabled()) await page.click('button:has-text("הוספת כלל")');
 await axe('settings: group forwarding');
+await page.waitForSelector('#csv-h');
+await page.waitForSelector('#csv-file');
+await page.setInputFiles('#csv-file', { name: 'c.csv', mimeType: 'text/csv', buffer: Buffer.from('phone,name\n0501112222,דנה\nbad,x\n') });
+await page.click('button:has-text("בדיקה מקדימה")');
+await page.waitForSelector('text=1 אנשי קשר חדשים');
+check('settings: contacts CSV preview works and counts invalid rows', (await page.textContent('#csv-h ~ div[role=status]')).includes('1 שורות לא תקינות'));
+await axe('settings: contacts import preview');
 await page.fill('#br-name', 'בטיחון'); await page.fill('#br-color', '#0f766e');
 await page.click('button:has-text("שמירת שם וצבע")');
 await page.waitForSelector('text=המיתוג נשמר.');
@@ -601,6 +608,10 @@ await page.waitForSelector('#handover');
 check('handover form needs a note and a target', await page.isDisabled('#handover button[type=submit]'));
 await axe('handover form');
 await page.click('#handover button:has-text("ביטול")');
+await page.click('details.sched summary');
+check('schedule button needs text and time', await page.isDisabled('details.sched button:has-text("תזמון ההודעה")'));
+await axe('inbox with scheduling panel');
+await page.click('details.sched summary');
 check('handover form closes', (await page.locator('#handover').count()) === 0);
 
 // keyboard & widget & mobile

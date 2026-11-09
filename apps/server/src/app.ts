@@ -16,6 +16,7 @@ import { roleRoutes } from './routes/roles.js';
 import { backupRoutes } from './routes/backups.js';
 import { pushRoutes } from './routes/push.js';
 import { webhookRoutes } from './routes/webhooks.js';
+import { scheduledRoutes } from './routes/scheduled.js';
 import { PushService } from './push.js';
 import { KnowledgeBase } from './kb/service.js';
 import { kbRoutes } from './routes/kb.js';
@@ -100,6 +101,7 @@ export async function buildApp(cfg: Config, db: Db, mgr: ChannelManager, media: 
   eventRoutes(app, db, mgr);
   tagRoutes(app, db);
   contactRoutes(app, db);
+  scheduledRoutes(app, db);
   settingsRoutes(app, db, mgr);
   backupRoutes(app, db, cfg);
   const push = new PushService(db, cfg);

@@ -1,3 +1,4 @@
+import { sendDueScheduled } from './scheduled.js';
 import { buildApp } from './app.js';
 import { ChannelManager } from './channels/manager.js';
 import { purgeOldMessages } from './inbox.js';
@@ -18,6 +19,7 @@ await mgr.startAll();
 // Knowledge base: resume unfinished link imports, re-read links whose refresh time has come, drop old question logs.
 void mgr.kb?.resumePending().catch((err) => app.log.error({ err }, 'kb resume failed'));
 setInterval(() => void mgr.supervise().catch((err) => app.log.error({ err }, 'channel supervision failed')), 60_000).unref();
+setInterval(() => void sendDueScheduled(db, mgr).catch((err) => app.log.error({ err }, 'scheduled send failed')), 60_000).unref();
 setInterval(() => void mgr.checkSla().catch((err) => app.log.error({ err }, 'sla check failed')), 60_000).unref();
 setInterval(() => void mgr.retryForwards().catch((err) => app.log.error({ err }, 'group forward retry failed')), 60_000).unref();
 setInterval(() => void mgr.catchUp().catch((err) => app.log.error({ err }, 'bot catch-up failed')), 60_000).unref();

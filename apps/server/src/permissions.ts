@@ -3,6 +3,7 @@ export const PERMISSIONS = [
   'inbox.view_all',            // see every conversation (without it: only own + unassigned)
   'conversations.assign_others', // assign conversations to other people
   'contacts.block',            // block / unblock customers, restore opt-in
+  'contacts.manage',           // import / export the contacts list (personal data)
   'tags.manage',
   'canned.manage',
   'reports.view',
