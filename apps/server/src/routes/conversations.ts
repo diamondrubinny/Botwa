@@ -203,6 +203,7 @@ export function conversationRoutes(app: FastifyInstance, db: Db, mgr: ChannelMan
     }
     await audit(db, { actorId: u.id, action: handover ? 'conversation.handover' : 'conversation.assign', target: conv.id, ip: req.ip, meta: { to: target, from: handover ? conv.assigned_to : undefined } });
     mgr.hookConversation('conversation.assigned', conv.id);
+    if (target && target !== u.id) mgr.onAssigned?.(conv.id, target, handover ? 'handover' : 'assigned');
     return { ok: true };
   });
 

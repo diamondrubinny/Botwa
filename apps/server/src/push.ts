@@ -57,6 +57,22 @@ export class PushService {
 
   getPublicKey(): string { return this.publicKey; }
 
+  /** Send one alert to these devices; a device the push service says is gone is forgotten. The payload never holds customer data. */
+  private async deliver(rows: { id: string; endpoint: string; p256dh: string; auth: string }[], payload: { title: string; tag: string; url?: string }, urgency: 'normal' | 'high' = 'normal'): Promise<number> {
+    let ok = 0;
+    for (const s of rows) {
+      try {
+        await webpush.sendNotification({ endpoint: s.endpoint, keys: { p256dh: s.p256dh, auth: s.auth } }, JSON.stringify(payload), { TTL: 3600, urgency, timeout: 8000 });
+        ok++;
+      } catch (e) {
+        const code = (e as { statusCode?: number }).statusCode;
+        if (code === 404 || code === 410) await this.db.query('DELETE FROM push_subscriptions WHERE id = $1', [s.id]).catch(() => undefined);
+      }
+    }
+    return ok;
+  }
+  private static convUrl = (id: string) => `/#/inbox?c=${id}`;
+
   /** Who should hear about a new customer message: the assignee, or everyone allowed to see an unassigned, non-bot conversation. */
   async notifyInbound(conversationId: string): Promise<void> {
     if (!this.ready) return;
@@ -64,7 +80,7 @@ export class PushService {
       `SELECT s.id, s.user_id, s.endpoint, s.p256dh, s.auth
          FROM conversations c
          JOIN push_subscriptions s ON true
-         JOIN users u ON u.id = s.user_id AND u.active
+         JOIN users u ON u.id = s.user_id AND u.active AND (u.push_prefs->>'messages')::boolean IS NOT FALSE
          JOIN roles r ON r.key = u.role
         WHERE c.id = $1 AND c.status = 'open'
           AND (c.assigned_to = u.id
@@ -73,20 +89,12 @@ export class PushService {
       [conversationId],
     );
     const now = Date.now();
-    for (const s of rows) {
-      if (now - (this.lastSent.get(s.user_id as string) ?? 0) < 15_000) continue; // at most one alert per person per 15s
+    const due = rows.filter((s) => {
+      if (now - (this.lastSent.get(s.user_id as string) ?? 0) < 15_000) return false; // at most one alert per person per 15s
       this.lastSent.set(s.user_id as string, now);
-      try {
-        await webpush.sendNotification(
-          { endpoint: s.endpoint, keys: { p256dh: s.p256dh, auth: s.auth } },
-          JSON.stringify({ title: 'הודעה חדשה בתיבת התמיכה', tag: 'botwa-new' }),
-          { TTL: 3600, urgency: 'normal', timeout: 8000 },
-        );
-      } catch (e) {
-        const code = (e as { statusCode?: number }).statusCode;
-        if (code === 404 || code === 410) await this.db.query('DELETE FROM push_subscriptions WHERE id = $1', [s.id]).catch(() => undefined);
-      }
-    }
+      return true;
+    });
+    await this.deliver(due, { title: 'הודעה חדשה בתיבת התמיכה', tag: 'botwa-new', url: PushService.convUrl(conversationId) });
   }
 
   /** SLA breach: tell the assignee, or the people who can see unassigned conversations when nobody has it. */
@@ -96,22 +104,27 @@ export class PushService {
       `SELECT s.id, s.user_id, s.endpoint, s.p256dh, s.auth
          FROM conversations c
          JOIN push_subscriptions s ON true
-         JOIN users u ON u.id = s.user_id AND u.active
+         JOIN users u ON u.id = s.user_id AND u.active AND (u.push_prefs->>'sla')::boolean IS NOT FALSE
          JOIN roles r ON r.key = u.role
         WHERE c.id = $1 AND (c.assigned_to = u.id OR ('conversations.assign_others' = ANY(r.permissions) AND c.assigned_to IS NULL))`,
       [conversationId],
     );
-    for (const s of rows) {
-      try {
-        await webpush.sendNotification(
-          { endpoint: s.endpoint, keys: { p256dh: s.p256dh, auth: s.auth } },
-          JSON.stringify({ title: 'לקוח ממתין מעבר ליעד השירות', tag: 'botwa-sla' }),
-          { TTL: 3600, urgency: 'high', timeout: 8000 },
-        );
-      } catch (e) {
-        const code = (e as { statusCode?: number }).statusCode;
-        if (code === 404 || code === 410) await this.db.query('DELETE FROM push_subscriptions WHERE id = $1', [s.id]).catch(() => undefined);
-      }
-    }
+    await this.deliver(rows, { title: 'לקוח ממתין מעבר ליעד השירות', tag: 'botwa-sla', url: PushService.convUrl(conversationId) }, 'high');
+  }
+
+  /** A conversation was given to this person (by a colleague, a hand-over, the bot or routing). */
+  async notifyAssigned(conversationId: string, userId: string, how: 'assigned' | 'handover' = 'assigned'): Promise<void> {
+    if (!this.ready) return;
+    const { rows } = await this.db.query(
+      `SELECT s.id, s.endpoint, s.p256dh, s.auth FROM push_subscriptions s JOIN users u ON u.id = s.user_id AND u.active AND (u.push_prefs->>'assigned')::boolean IS NOT FALSE
+        WHERE s.user_id = $1`, [userId]);
+    await this.deliver(rows, { title: how === 'handover' ? 'שיחה הועברה אליך' : 'שיחה שויכה אליך', tag: `botwa-asg-${conversationId}`, url: PushService.convUrl(conversationId) }, 'high');
+  }
+
+  /** "Send me a test alert": how many of this person's devices accepted it (0 = none registered or all failed). */
+  async test(userId: string): Promise<number> {
+    if (!this.ready) return 0;
+    const { rows } = await this.db.query('SELECT id, endpoint, p256dh, auth FROM push_subscriptions WHERE user_id = $1', [userId]);
+    return this.deliver(rows, { title: 'התראת בדיקה: ההתראות עובדות', tag: 'botwa-test', url: '/#/account' });
   }
 }

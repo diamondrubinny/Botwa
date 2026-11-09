@@ -1,6 +1,6 @@
 // Minimal service worker: makes the panel installable and keeps the app shell available when the connection drops.
 // API calls are never cached (customer data must not be stored by the worker).
-const CACHE = 'botwa-shell-v2';
+const CACHE = 'botwa-shell-v3';
 const SHELL = ['/', '/manifest.webmanifest', '/favicon.svg', '/icons/icon-192.png'];
 
 self.addEventListener('install', (e) => {
@@ -29,12 +29,16 @@ self.addEventListener('fetch', (e) => {
 self.addEventListener('push', (e) => {
   let d = {};
   try { d = e.data ? e.data.json() : {}; } catch (_) { /* ignore malformed payload */ }
-  e.waitUntil(self.registration.showNotification(d.title || 'הודעה חדשה', { tag: d.tag || 'botwa-new', icon: '/icons/icon-192.png', badge: '/icons/icon-192.png', lang: 'he', dir: 'rtl' }));
+  // only a same-site path is followed (the link opens the conversation; no customer data is in the payload)
+  const url = typeof d.url === 'string' && d.url.startsWith('/') && !d.url.startsWith('//') ? d.url : '/#/inbox';
+  e.waitUntil(self.registration.showNotification(d.title || 'הודעה חדשה', { tag: d.tag || 'botwa-new', icon: '/icons/icon-192.png', badge: '/icons/icon-192.png', lang: 'he', dir: 'rtl', renotify: true, data: { url } }));
 });
 self.addEventListener('notificationclick', (e) => {
   e.notification.close();
   e.waitUntil(self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((cs) => {
+    const url = (e.notification.data && e.notification.data.url) || '/#/inbox';
     const c = cs.find((x) => 'focus' in x);
-    return c ? c.focus() : self.clients.openWindow('/#/inbox');
+    if (c) { if ('navigate' in c) c.navigate(url).catch(() => undefined); return c.focus(); }
+    return self.clients.openWindow(url);
   }));
 });

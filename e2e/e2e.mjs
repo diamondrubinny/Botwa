@@ -661,6 +661,7 @@ await page.fill('#pk-name', 'מכשיר וירטואלי');
 await page.click('button:has-text("הוספת Passkey")');
 await page.waitForSelector('text=ה-Passkey נוסף.');
 await page.waitForSelector('li:has-text("מכשיר וירטואלי")');
+check('account: phone alerts card with what-to-alert choices', (await page.textContent('section[aria-labelledby="ntf-h"]'))?.includes('התראות'));
 check('account: "install the app" card with instructions', (await page.textContent('section[aria-labelledby="inst-h"]'))?.includes('אפליקציה'));
 const mf = await (await page.request.get(BASE + '/manifest.webmanifest')).json();
 check('PWA: manifest has an id and shortcuts to inbox / safety / reports', mf.id === '/' && mf.shortcuts?.length === 3);

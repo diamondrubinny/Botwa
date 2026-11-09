@@ -33,4 +33,18 @@ export function pushRoutes(app: FastifyInstance, db: Db, push: PushService) {
     await db.query('DELETE FROM push_subscriptions WHERE endpoint = $1 AND user_id = $2', [b.data.endpoint, req.user!.id]);
     return { ok: true };
   });
+
+  const prefs = z.object({ messages: z.boolean(), assigned: z.boolean(), sla: z.boolean() });
+  app.get('/push/status', { preHandler: any }, async (req) => {
+    const u = (await db.query('SELECT push_prefs FROM users WHERE id = $1', [req.user!.id])).rows[0];
+    const n = (await db.query('SELECT count(*)::int AS n FROM push_subscriptions WHERE user_id = $1', [req.user!.id])).rows[0].n;
+    return { prefs: prefs.parse({ messages: true, assigned: true, sla: true, ...(u?.push_prefs ?? {}) }), devices: n };
+  });
+  app.put('/push/prefs', { preHandler: any, config: limit }, async (req, reply) => {
+    const b = prefs.safeParse(req.body);
+    if (!b.success) return reply.code(400).send({ error: 'bad_request' });
+    await db.query('UPDATE users SET push_prefs = $2 WHERE id = $1', [req.user!.id, JSON.stringify(b.data)]);
+    return b.data;
+  });
+  app.post('/push/test', { preHandler: any, config: { rateLimit: { max: 5, timeWindow: '1 minute' } } }, async (req) => ({ delivered: await push.test(req.user!.id) }));
 }

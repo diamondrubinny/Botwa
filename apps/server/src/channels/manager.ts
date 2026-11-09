@@ -106,6 +106,9 @@ export class ChannelManager {
   /** Set by the app: called for each new customer message that reached staff (not blocked, not a duplicate). */
   onInbound?: (conversationId: string) => void;
 
+  /** Set by the app: a conversation was given to a person (alert on their phone). */
+  onAssigned?: (conversationId: string, userId: string, how?: 'assigned' | 'handover') => void;
+
   /** Set by the app: called once when a waiting customer passes the SLA target. */
   onSlaBreach?: (conversationId: string) => void;
 
@@ -318,6 +321,7 @@ export class ChannelManager {
             if (r.needsRouting) {
               const to = await autoAssign(this.db, r.conversationId).catch(() => null);
               if (to) await audit(this.db, { action: 'conversation.auto_assign', target: r.conversationId, meta: { to } }).catch(() => undefined);
+              if (to) this.onAssigned?.(r.conversationId, to);
             }
             await this.maybeAway(channelId, r.conversationId, m.externalContactId).catch(() => undefined);
           }
@@ -690,6 +694,7 @@ export class ChannelManager {
       if (to) await audit(this.db, { action: 'conversation.topic_assign', target: convId, meta: { to, topic: topic.topic } }).catch(() => undefined);
     }
     if (!to) to = await autoAssign(this.db, convId).catch(() => null);
+    if (to) this.onAssigned?.(convId, to);
     if (to && !topic) await audit(this.db, { action: 'conversation.auto_assign', target: convId, meta: { to, via: 'bot' } }).catch(() => undefined);
     const hours = await loadBusinessHours(this.db);
     const closed = hours.enabled && !isOpen(hours, new Date());
