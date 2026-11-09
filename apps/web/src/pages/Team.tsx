@@ -1,3 +1,4 @@
+import { Avatar, AvatarEditor } from '../components/Avatar';
 import { useRef, useState, type FormEvent } from 'react';
 import { api, ApiError, can, type Me, type RoleRow, type UserRow } from '../api';
 import { ConfirmDialog } from '../components/ConfirmDialog';
@@ -65,7 +66,8 @@ export function Team({ me }: { me: Me }) {
           <tbody>
             {users.map((u) => (
               <tr key={u.id}>
-                <th scope="row">{u.name}</th>
+                <th scope="row"><span className="row" style={{ flexWrap: 'nowrap' }}><Avatar userId={u.id} name={u.name} v={u.avatarV} size={32} />{u.name}</span>
+                  {isAdmin && assignable.some((r) => r.key === u.role) && <AvatarEditor compact userId={u.id} name={u.name} v={u.avatarV} uploadUrl={`/users/${u.id}/avatar`} onChanged={reload} />}</th>
                 <td dir="ltr">
                   {unFor?.id === u.id ? (
                     <form className="row" onSubmit={async (e) => { e.preventDefault(); await run(() => api('PATCH', `/users/${u.id}`, { username: unFor.value })); setUnFor(null); }}>

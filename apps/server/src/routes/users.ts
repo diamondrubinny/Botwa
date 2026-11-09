@@ -10,7 +10,7 @@ import { BUILTIN_ROLES, cleanPermissions, isSubset } from '../permissions.js';
 
 const idParam = z.object({ id: z.string().uuid() });
 const TEMP_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789';   // no look-alike characters
-const publicCols = 'id, email, username, name, role, active, available, totp_enabled AS "mfaEnabled", created_at AS "createdAt"';
+const publicCols = 'id, email, username, name, role, active, available, totp_enabled AS "mfaEnabled", created_at AS "createdAt", (SELECT floor(extract(epoch FROM a.updated_at))::float8 FROM user_avatars a WHERE a.user_id = users.id) AS "avatarV"';
 
 export async function permissionsOfRole(db: Db, key: string): Promise<string[] | null> {
   const { rows } = await db.query('SELECT permissions, builtin FROM roles WHERE key = $1', [key]);

@@ -4,6 +4,7 @@ import { startRegistration, browserSupportsWebAuthn } from '@simplewebauthn/brow
 import { api, ApiError, type Me, type PasskeyRow } from '../api';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { Icon } from '../components/Icon';
+import { AvatarEditor } from '../components/Avatar';
 import { InstallApp } from '../components/InstallApp';
 import { NotificationsCard } from '../components/NotificationsCard';
 import { ThemeMenu } from '../components/ThemeMenu';
@@ -79,6 +80,11 @@ export function Account({ me, onChanged }: { me: Me; onChanged: () => void }) {
     <>
       <h1 tabIndex={-1}>החשבון שלי</h1>
       <p>{me.name} · {me.email} · {me.roleName}{me.username ? <> · שם משתמש: <bdi dir="ltr">@{me.username}</bdi></> : null}</p>
+      <section className="card" aria-labelledby="av-h">
+        <h2 id="av-h">תמונת פרופיל</h2>
+        <p className="hint">מוצגת לצוות בלבד (לא ללקוחות). התמונה נחתכת לריבוע ומוקטנת בדפדפן, ופרטי מיקום ומצלמה מוסרים לפני השמירה.</p>
+        <AvatarEditor userId={me.id} name={me.name} v={me.avatarV} uploadUrl="/me/avatar" onChanged={onChanged} />
+      </section>
       <InstallApp />
       <NotificationsCard />
 

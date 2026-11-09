@@ -16,6 +16,7 @@ import { roleRoutes } from './routes/roles.js';
 import { backupRoutes } from './routes/backups.js';
 import { pushRoutes } from './routes/push.js';
 import { webhookRoutes } from './routes/webhooks.js';
+import { avatarRoutes } from './routes/avatars.js';
 import { learningRoutes } from './routes/learning.js';
 import { scheduledRoutes } from './routes/scheduled.js';
 import { PushService } from './push.js';
@@ -127,6 +128,7 @@ export async function buildApp(cfg: Config, db: Db, mgr: ChannelManager, media: 
   app.addHook('onClose', async () => { await kb.closeRenderer(); });
   kbRoutes(app, db, kb);
   learningRoutes(app, db, kb);
+  avatarRoutes(app, db, kb);
   flowRoutes(app, db, kb);
   safetyRoutes(app, db, kb);
   brandingRoutes(app, db, kb);

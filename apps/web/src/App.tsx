@@ -1,3 +1,4 @@
+import { Avatar } from './components/Avatar';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api, can, type Me } from './api';
 import { logoSrc, useBrand } from './brand';
@@ -125,7 +126,7 @@ function Shell({ me, reloadMe, onLogout }: { me: Me; reloadMe: () => Promise<voi
         <div className="side-foot">
           {availability}
           <div className="me-card">
-            <span className="avatar" aria-hidden="true">{me.name.slice(0, 1)}</span>
+            <Avatar userId={me.id} name={me.name} v={me.avatarV} />
             <div style={{ minWidth: 0 }}><strong>{me.name}</strong><small>{me.roleName}</small></div>
             <span className="spacer" />
             <ThemeMenu align="start" />
