@@ -4,6 +4,7 @@ import { startRegistration, browserSupportsWebAuthn } from '@simplewebauthn/brow
 import { api, ApiError, type Me, type PasskeyRow } from '../api';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { Icon } from '../components/Icon';
+import { InstallApp } from '../components/InstallApp';
 import { ThemeMenu } from '../components/ThemeMenu';
 import { usePoll } from '../hooks';
 import { errText } from '../strings';
@@ -77,6 +78,7 @@ export function Account({ me, onChanged }: { me: Me; onChanged: () => void }) {
     <>
       <h1 tabIndex={-1}>החשבון שלי</h1>
       <p>{me.name} · {me.email} · {me.roleName}</p>
+      <InstallApp />
 
       <section className="card" aria-labelledby="pk-h">
         <h2 id="pk-h"><Icon name="key" size={20} /> Passkey (כניסה בטביעת אצבע / זיהוי פנים / נעילת מכשיר)</h2>
