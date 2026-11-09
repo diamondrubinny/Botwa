@@ -105,6 +105,7 @@ export async function buildApp(cfg: Config, db: Db, mgr: ChannelManager, media: 
   const push = new PushService(db, cfg);
   await push.init();
   mgr.onInbound = (id) => void push.notifyInbound(id).catch(() => undefined);
+  mgr.onSlaBreach = (id) => void push.notifySla(id).catch(() => undefined);
   pushRoutes(app, db, push);
   webhookRoutes(app, db, mgr);
   const kb = new KnowledgeBase(db, cfg, media);

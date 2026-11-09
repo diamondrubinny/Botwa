@@ -160,19 +160,29 @@ export function conversationRoutes(app: FastifyInstance, db: Db, mgr: ChannelMan
     return reply.code(201).send(rows[0]);
   });
 
+  // Colleagues a conversation can be handed to (id + name only; the full user list needs users.view).
+  app.get('/handover-targets', { preHandler: any }, async (req) => {
+    const { rows } = await db.query('SELECT id, name FROM users WHERE active AND id <> $1 ORDER BY lower(name)', [req.user!.id]);
+    return rows;
+  });
+
   app.post('/conversations/:id/assign', { preHandler: any }, async (req, reply) => {
     const p = idParam.safeParse(req.params);
-    const b = z.object({ userId: z.string().uuid().nullable() }).safeParse(req.body);
+    const b = z.object({ userId: z.string().uuid().nullable(), note: z.string().trim().max(1000).optional() }).safeParse(req.body);
     if (!p.success || !b.success) return reply.code(400).send({ error: 'bad_request' });
     const u = req.user!;
     const conv = await loadAccessible(db, u, p.data.id);
     if (!conv) return reply.code(404).send({ error: 'not_found' });
     const target = b.data.userId;
+    // A handover = moving a conversation that someone already holds to a different person. It needs a note so the next agent has context.
+    const handover = target !== null && conv.assigned_to !== null && conv.assigned_to !== target;
     if (!isManager(u)) {
       const claim = target === u.id && conv.assigned_to === null;
       const release = target === null && conv.assigned_to === u.id;
-      if (!claim && !release) return reply.code(403).send({ error: 'forbidden' });
+      const handOff = handover && conv.assigned_to === u.id;   // the current holder may hand over to a colleague
+      if (!claim && !release && !handOff) return reply.code(403).send({ error: 'forbidden' });
     }
+    if (handover && !b.data.note) return reply.code(400).send({ error: 'note_required' });
     if (target) {
       const ok = await db.query('SELECT 1 FROM users WHERE id=$1 AND active', [target]);
       if (!ok.rowCount) return reply.code(400).send({ error: 'invalid_user' });
@@ -183,7 +193,13 @@ export function conversationRoutes(app: FastifyInstance, db: Db, mgr: ChannelMan
       : await db.query('UPDATE conversations SET assigned_to = $2 WHERE id = $1 AND assigned_to IS NOT DISTINCT FROM $3', [conv.id, target, conv.assigned_to]);
     if (!upd.rowCount) return reply.code(409).send({ error: 'conflict' });
     if (target) await db.query(`UPDATE conversations SET bot_state = 'human' WHERE id = $1`, [conv.id]);
-    await audit(db, { actorId: u.id, action: 'conversation.assign', target: conv.id, ip: req.ip, meta: { to: target } });
+    if (handover) {
+      const names = await db.query('SELECT id, name FROM users WHERE id = ANY($1::uuid[])', [[conv.assigned_to, target]]);
+      const nm = (id: string | null) => (names.rows.find((r) => r.id === id)?.name as string | undefined) ?? 'משתמש';
+      await db.query(`INSERT INTO conversation_notes (conversation_id, author_id, body) VALUES ($1,$2,$3)`,
+        [conv.id, u.id, `↪ הועברה מ${nm(conv.assigned_to)} אל ${nm(target)}: ${b.data.note}`]);
+    }
+    await audit(db, { actorId: u.id, action: handover ? 'conversation.handover' : 'conversation.assign', target: conv.id, ip: req.ip, meta: { to: target, from: handover ? conv.assigned_to : undefined } });
     mgr.hookConversation('conversation.assigned', conv.id);
     return { ok: true };
   });

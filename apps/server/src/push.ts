@@ -88,4 +88,30 @@ export class PushService {
       }
     }
   }
+
+  /** SLA breach: tell the assignee, or the people who can see unassigned conversations when nobody has it. */
+  async notifySla(conversationId: string): Promise<void> {
+    if (!this.ready) return;
+    const { rows } = await this.db.query(
+      `SELECT s.id, s.user_id, s.endpoint, s.p256dh, s.auth
+         FROM conversations c
+         JOIN push_subscriptions s ON true
+         JOIN users u ON u.id = s.user_id AND u.active
+         JOIN roles r ON r.key = u.role
+        WHERE c.id = $1 AND (c.assigned_to = u.id OR ('conversations.assign_others' = ANY(r.permissions) AND c.assigned_to IS NULL))`,
+      [conversationId],
+    );
+    for (const s of rows) {
+      try {
+        await webpush.sendNotification(
+          { endpoint: s.endpoint, keys: { p256dh: s.p256dh, auth: s.auth } },
+          JSON.stringify({ title: 'לקוח ממתין מעבר ליעד השירות', tag: 'botwa-sla' }),
+          { TTL: 3600, urgency: 'high', timeout: 8000 },
+        );
+      } catch (e) {
+        const code = (e as { statusCode?: number }).statusCode;
+        if (code === 404 || code === 410) await this.db.query('DELETE FROM push_subscriptions WHERE id = $1', [s.id]).catch(() => undefined);
+      }
+    }
+  }
 }

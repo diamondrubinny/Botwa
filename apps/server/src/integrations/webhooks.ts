@@ -4,7 +4,7 @@ import { decrypt } from '../crypto.js';
 import type { Db } from '../db.js';
 import { checkUrl, FetchError, safePost } from '../kb/fetch.js';
 
-export const EVENTS = ['message.received', 'message.sent', 'conversation.status_changed', 'conversation.assigned'] as const;
+export const EVENTS = ['message.received', 'message.sent', 'conversation.status_changed', 'conversation.assigned', 'conversation.sla_breached'] as const;
 export type EventType = (typeof EVENTS)[number];
 
 /** Header value: t=<unix seconds>,v1=<hex HMAC-SHA256(secret, "<t>.<raw body>")>  (the receiver must also check t is recent). */

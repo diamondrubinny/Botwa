@@ -15,11 +15,12 @@ const shortTime = (iso: string) => {
 const nameOf = (c: Pick<Conversation, 'contactName' | 'contactId'>) => c.contactName ?? c.contactId.split(/[@:]/)[0]!;
 
 const SLA_WARN_MIN = 15;
-function waitLabel(since: string | null): { text: string; late: boolean } | null {
+function waitLabel(since: string | null, sla: { enabled: boolean; targetMinutes: number } | null): { text: string; late: boolean } | null {
   if (!since) return null;
   const min = Math.max(0, Math.floor((Date.now() - new Date(since).getTime()) / 60000));
   const text = min < 1 ? 'ממתין עכשיו' : min < 60 ? `ממתין ${min} דק'` : `ממתין ${Math.floor(min / 60)} שע' ${min % 60} דק'`;
-  return { text, late: min >= SLA_WARN_MIN };
+  const target = sla?.enabled ? sla.targetMinutes : SLA_WARN_MIN;
+  return { text: sla?.enabled && min >= target ? `${text} · חריגה מיעד השירות` : text, late: min >= target };
 }
 
 function AttachmentView({ a }: { a: Attachment }) {
@@ -55,6 +56,8 @@ export function Inbox({ me }: { me: Me }) {
   const fileRef = useRef<HTMLInputElement>(null);
   const taRef = useRef<HTMLTextAreaElement>(null);
   const [canned, setCanned] = useState<Canned[]>([]);
+  const [sla, setSla] = useState<{ enabled: boolean; targetMinutes: number } | null>(null);
+  usePoll(async () => setSla(await api<{ enabled: boolean; targetMinutes: number }>('GET', '/settings/sla').catch(() => null)), 120000);
   const [allTags, setAllTags] = useState<Tag[]>([]);
   const [tagFilter, setTagFilter] = useState('');
   const [err, setErr] = useState('');
@@ -232,7 +235,14 @@ export function Inbox({ me }: { me: Me }) {
     if (c2) { setPinned(c2); setSelId(c2.id); setMsgQuery(''); }
   }
 
-  const assignTo = (userId: string | null) => act(() => api('POST', `/conversations/${selId}/assign`, { userId }));
+  const assignTo = (userId: string | null, note?: string) => act(() => api('POST', `/conversations/${selId}/assign`, { userId, note }));
+  const [ho, setHo] = useState<{ to: string; note: string } | null>(null);
+  const [mates, setMates] = useState<{ id: string; name: string }[]>([]);
+  useEffect(() => { setHo(null); }, [selId]);
+  const openHandover = async (to = '') => {
+    if (mates.length === 0) setMates(await api<{ id: string; name: string }[]>('GET', '/handover-targets').catch(() => []));
+    setHo({ to, note: '' });
+  };
   const FILTERS: [typeof filter, string][] = [['open', 'פתוחות'], ['mine', 'שלי'], ['starred', 'מסומנות'], ['snoozed', 'נדחו'], ['closed', 'סגורות'], ...(canBlock ? [['blocked', 'חסומים'] as [typeof filter, string]] : [])];
 
   return (
@@ -274,7 +284,7 @@ export function Inbox({ me }: { me: Me }) {
           {view.length === 0 ? <p className="empty">{convs.length === 0 ? 'אין שיחות להצגה.' : 'אין שיחות שמתאימות לסינון המתקדם.'}</p> : (
             <ul className="conv-list">
               {view.map((c) => {
-                const w = waitLabel(c.waitingSince);
+                const w = waitLabel(c.waitingSince, sla);
                 return (
                   <li key={c.id}>
                     <button className="conv-item" aria-current={c.id === selId} onClick={() => open(c)}>
@@ -316,16 +326,17 @@ export function Inbox({ me }: { me: Me }) {
                 {canAssignOthers && team.length > 0 ? (
                   <>
                     <label htmlFor="asg" className="sr-only">שיוך לנציג</label>
-                    <select id="asg" value={sel.assignedTo ?? ''} onChange={(e) => assignTo(e.target.value || null)}>
+                    <select id="asg" value={sel.assignedTo ?? ''} onChange={(e) => { const v = e.target.value || null; if (v && sel.assignedTo && v !== sel.assignedTo) void openHandover(v); else void assignTo(v); }}>
                       <option value="">לא משויך</option>
                       {team.filter((u) => u.active).map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
                     </select>
                   </>
                 ) : sel.assignedTo === me.id ? (
                   <button onClick={() => assignTo(null)}>שחרור שיחה</button>
-                ) : (
+                ) : sel.assignedTo ? null : (
                   <button onClick={() => assignTo(me.id)}>קח שיחה</button>
                 )}
+                {sel.assignedTo && (sel.assignedTo === me.id || canAssignOthers) && <button aria-expanded={!!ho} aria-controls="handover" onClick={() => (ho ? setHo(null) : void openHandover())}>העברה לנציג…</button>}
                 <button aria-pressed={!!sel.starred} onClick={() => act(() => api('POST', `/conversations/${sel.id}/star`, { starred: !sel.starred }))}>{sel.starred ? '★ הסרת סימון' : '☆ סימון'}</button>
                 <label htmlFor="snz" className="sr-only">דחיית שיחה</label>
                 <select id="snz" value="" onChange={(e) => { const m = Number(e.target.value); if (Number.isNaN(m)) return; void act(async () => { await api('POST', `/conversations/${sel.id}/snooze`, { minutes: m }); if (m > 0) setSelId(null); }); }}>
@@ -516,6 +527,18 @@ export function Inbox({ me }: { me: Me }) {
                     ))}
                   </ul>
                 </details>
+              )}
+              {ho && (
+                <form id="handover" className="card" aria-label="העברת שיחה לנציג" onSubmit={async (e) => { e.preventDefault(); await assignTo(ho.to, ho.note.trim()); setHo(null); }}>
+                  <div className="field"><label htmlFor="ho-to">העברה אל</label>
+                    <select id="ho-to" required value={ho.to} onChange={(e) => setHo({ ...ho, to: e.target.value })}>
+                      <option value="">בחירת נציג…</option>
+                      {mates.filter((u) => u.id !== sel.assignedTo).map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
+                    </select></div>
+                  <div className="field"><label htmlFor="ho-note">הערת העברה (חובה, לא נשלחת ללקוח)</label>
+                    <textarea id="ho-note" required rows={3} maxLength={1000} value={ho.note} onChange={(e) => setHo({ ...ho, note: e.target.value })} placeholder="מה כבר נעשה, מה הלקוח מחכה לו" /></div>
+                  <div className="row"><button className="primary" type="submit" disabled={!ho.to || !ho.note.trim()}>העברה</button><button type="button" onClick={() => setHo(null)}>ביטול</button></div>
+                </form>
               )}
               <form className="composer" onSubmit={send}>
                 {text.startsWith('/') && !text.includes('\n') && (

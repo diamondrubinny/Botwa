@@ -596,6 +596,12 @@ check('agent has no Channels/Team nav', (await page.locator('aside.sidebar nav >
 await page.click('.conv-list button:has-text("יוסי לקוח")');
 await page.click('text=קח שיחה'); await page.waitForSelector('text=שחרור שיחה');
 check('agent claimed conversation', true);
+await page.click('button:has-text("העברה לנציג")');
+await page.waitForSelector('#handover');
+check('handover form needs a note and a target', await page.isDisabled('#handover button[type=submit]'));
+await axe('handover form');
+await page.click('#handover button:has-text("ביטול")');
+check('handover form closes', (await page.locator('#handover').count()) === 0);
 
 // keyboard & widget & mobile
 await page.click('.a11y-widget button.primary'); await page.click('button:has-text("ניגודיות גבוהה")');

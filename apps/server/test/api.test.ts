@@ -181,7 +181,7 @@ describe('API keys, REST API and webhooks', () => {
     delivered.length = 0;
     await staff('POST', `/conversations/${bobConv}/messages`, 'admin@t.io', { text: 'בדקנו' });
     await staff('POST', `/conversations/${bobConv}/status`, 'admin@t.io', { status: 'closed' });
-    await staff('POST', `/conversations/${bobConv}/assign`, 'admin@t.io', { userId: ids.sup });
+    await staff('POST', `/conversations/${bobConv}/assign`, 'admin@t.io', { userId: ids.sup, note: 'handover for the test' });
     await flush();
     expect(delivered.map((d) => JSON.parse(d.body).type).sort()).toEqual(['conversation.assigned', 'conversation.status_changed', 'message.sent']);
     // no text mode

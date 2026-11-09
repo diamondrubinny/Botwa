@@ -9,7 +9,7 @@ interface Hook { id: string; name: string; url: string; events: string[]; includ
 interface Delivery { id: string; event: string; status: string; attempts: number; responseCode: number | null; lastError: string | null; createdAt: string }
 
 const SCOPE_LABEL: Record<string, string> = { read: 'קריאה (שיחות, הודעות, תגיות)', send: 'שליחת תשובות בשיחות קיימות', manage: 'ניהול (סטטוס, שיוך, תגיות)' };
-const EVENT_LABEL: Record<string, string> = { 'message.received': 'הודעה נכנסת מלקוח', 'message.sent': 'הודעה יוצאת (נציג, בוט או API)', 'conversation.status_changed': 'שינוי סטטוס שיחה', 'conversation.assigned': 'שיוך שיחה' };
+const EVENT_LABEL: Record<string, string> = { 'message.received': 'הודעה נכנסת מלקוח', 'message.sent': 'הודעה יוצאת (נציג, בוט או API)', 'conversation.status_changed': 'שינוי סטטוס שיחה', 'conversation.sla_breached': 'חריגה מיעד זמן המענה (SLA)', 'conversation.assigned': 'שיוך שיחה' };
 const DELIVERY_ERR: Record<string, string> = {
   dns_failed: 'הכתובת לא נמצאה (בעיית DNS). בדקו את שם האתר, ושהשרת של Botwa מגיע לאינטרנט.',
   connection_refused: 'השרת המקבל סירב לחיבור (הפורט סגור או השירות כבוי).',

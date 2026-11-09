@@ -32,8 +32,17 @@ export function Settings({ me }: { me: Me }) {
   const fmtMB = (n: number) => `${(n / 1024 / 1024).toFixed(1)} MB`;
   usePoll(async () => { if (!h) setH(await api<BusinessHours>('GET', '/settings/business-hours').catch(() => null)); }, 60000);
 
+
+  const [sla, setSla] = useState<{ enabled: boolean; targetMinutes: number } | null>(null);
+  const [slaMsg, setSlaMsg] = useState('');
+  usePoll(async () => { if (!sla && canView) setSla(await api<{ enabled: boolean; targetMinutes: number }>('GET', '/settings/sla').catch(() => null)); }, 60000);
+
   if (canView && !h) return <><h1 tabIndex={-1}>הגדרות</h1><p role="status">טוען…</p></>;
 
+  async function saveSla(e: FormEvent) {
+    e.preventDefault(); setSlaMsg('');
+    try { setSla(await api('PUT', '/settings/sla', sla)); setSlaMsg('יעד השירות נשמר.'); } catch { setSlaMsg('השמירה נכשלה. בדקו שהיעד בין 1 ל-10080 דקות.'); }
+  }
   const setDay = (i: number, v: { open: string; close: string } | null) => h && setH({ ...h, days: h.days.map((d, k) => (k === i ? v : d)) });
 
   async function save(e: FormEvent) {
@@ -53,6 +62,17 @@ export function Settings({ me }: { me: Me }) {
       {canView && !canEdit && <p className="banner" role="note">צפייה בלבד. אין לכם הרשאה לשנות הגדרות.</p>}
       {canView && h && (
       <fieldset disabled={!canEdit} style={{ border: 0, padding: 0, margin: 0 }}>
+      {sla && (
+        <form className="card" onSubmit={saveSla} aria-labelledby="sla-h">
+          <h2 id="sla-h">יעד זמן מענה (SLA)</h2>
+          <p className="hint">כשלקוח ממתין לתשובת נציג יותר מהיעד, השיחה מסומנת "חריגה", נשלחת התראה (דחיפה לנציג המשויך או למנהלים, ואירוע <code dir="ltr">conversation.sla_breached</code> ל-Webhooks) והחריגה נספרת בדוח. הזמן נמדד ברציפות, גם מחוץ לשעות הפעילות. בוט ומענה אוטומטי אינם נחשבים מענה.</p>
+          <div className="field"><label><input type="checkbox" style={{ width: 'auto', minHeight: 0, marginInlineEnd: '.5rem' }} checked={sla.enabled} onChange={(e) => setSla({ ...sla, enabled: e.target.checked })} />הפעלת התראות על חריגה מיעד</label></div>
+          <div className="field"><label htmlFor="sla-min">יעד תגובה בדקות</label>
+            <input id="sla-min" type="number" min={1} max={10080} required value={sla.targetMinutes} onChange={(e) => setSla({ ...sla, targetMinutes: Number(e.target.value) })} style={{ maxWidth: 140 }} /></div>
+          <button className="primary" type="submit">שמירת יעד</button>
+          <p role="status" className="hint">{slaMsg}</p>
+        </form>
+      )}
       <form className="card" onSubmit={save}>
         <h2>שעות פעילות ומענה אוטומטי</h2>
         <p className="hint">מחוץ לשעות הפעילות נשלחת ללקוח הודעה אוטומטית אחת (לכל היותר אחת ל-12 שעות לשיחה). ההודעה מסומנת כ"מענה אוטומטי" ואינה נחשבת תשובת נציג בדוחות.</p>

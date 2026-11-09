@@ -5,6 +5,7 @@ import { usePoll } from '../hooks';
 type Bucket = 'day' | 'week' | 'month';
 interface Summary {
   days: number; timezone: string; bucket: Bucket;
+  sla: { enabled: boolean; targetMinutes: number; withinTarget: number; breached: number; compliancePercent: number | null };
   previous: { newConversations: number; inbound: number; outbound: number };
   totals: { newConversations: number; inbound: number; outbound: number; openNow: number; unassignedNow: number };
   responseTime: { answered: number; unanswered: number; avgSeconds: number | null; medianSeconds: number | null };
@@ -106,6 +107,7 @@ export function Reports() {
                 ['שיחות פתוחות כרגע', data.totals.openNow], ['פתוחות ולא משויכות', data.totals.unassignedNow],
                 ['זמן תגובה ממוצע', fmtDuration(data.responseTime.avgSeconds)], ['זמן תגובה חציוני', fmtDuration(data.responseTime.medianSeconds)],
                 ['פניות שלא נענו', data.responseTime.unanswered],
+                ...(data.sla.enabled ? [[`עמידה ביעד (${data.sla.targetMinutes} דק')`, data.sla.compliancePercent == null ? '—' : `${data.sla.compliancePercent}%`], ['חריגות מהיעד', data.sla.breached]] as [string, string | number][] : []),
               ] as [string, string | number][]).map(([k, v]) => (
                 <div key={k}><dt className="hint">{k}</dt><dd style={{ margin: 0, fontSize: '1.4rem', fontWeight: 700 }}>{v}</dd>
                   {trend[k] && <dd className="hint" style={{ margin: 0 }}>{trend[k]}</dd>}</div>

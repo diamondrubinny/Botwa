@@ -1,3 +1,4 @@
+import { runSlaCheck } from '../sla.js';
 import { EventEmitter } from 'node:events';
 import QRCode from 'qrcode';
 import type { Config } from '../config.js';
@@ -103,6 +104,14 @@ export class ChannelManager {
 
   /** Set by the app: called for each new customer message that reached staff (not blocked, not a duplicate). */
   onInbound?: (conversationId: string) => void;
+
+  /** Set by the app: called once when a waiting customer passes the SLA target. */
+  onSlaBreach?: (conversationId: string) => void;
+
+  /** Raise SLA alerts for conversations that have waited past the target (webhook + push). */
+  async checkSla(): Promise<number> {
+    return runSlaCheck(this.db, (id) => { this.hookConversation('conversation.sla_breached', id); this.onSlaBreach?.(id); });
+  }
 
   private emit(e: BusEvent) {
     this.bus.emit('event', e);

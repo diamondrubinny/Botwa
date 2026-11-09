@@ -4,6 +4,7 @@ import { audit } from '../audit.js';
 import { requireAuth } from '../auth.js';
 import type { Config } from '../config.js';
 import type { Db } from '../db.js';
+import { loadSla } from '../sla.js';
 
 /** Aggregate support metrics (no message content). Supervisors/admins only. */
 /** Spreadsheet formula injection guard: cells starting with = + - @ (or tab/CR) are prefixed with an apostrophe. */
@@ -115,6 +116,19 @@ async function computeSummary(db: Db, cfg: Config, days: number, bucket: 'day' |
               (SELECT count(*) FROM messages WHERE direction='in' AND created_at >= now() - make_interval(days => $1 * 2) AND created_at < now() - make_interval(days => $1))::int AS inbound,
               (SELECT count(*) FROM messages WHERE direction='out' AND created_at >= now() - make_interval(days => $1 * 2) AND created_at < now() - make_interval(days => $1))::int AS outbound`,
       [days])).rows[0];
+    // SLA: customer waits (same definition as response time) that took longer than the target, or are still unanswered past it
+    const sla = await loadSla(db);
+    const slaRow = (await db.query(
+      `WITH m AS (
+         SELECT conversation_id, direction, created_at, LAG(direction) OVER (PARTITION BY conversation_id ORDER BY created_at) AS prev_dir
+           FROM messages WHERE NOT auto AND created_at >= now() - make_interval(days => $1)
+       ), w AS (SELECT conversation_id, created_at AS asked_at FROM m WHERE direction = 'in' AND (prev_dir IS NULL OR prev_dir = 'out')),
+       r AS (SELECT w.asked_at, o.created_at AS answered_at FROM w LEFT JOIN LATERAL (
+               SELECT created_at FROM messages o WHERE o.conversation_id = w.conversation_id AND o.direction = 'out' AND NOT o.auto AND o.created_at > w.asked_at ORDER BY o.created_at LIMIT 1) o ON true)
+       SELECT count(*) FILTER (WHERE extract(epoch FROM coalesce(answered_at, now()) - asked_at) <= $2 * 60)::int AS "withinTarget",
+              count(*) FILTER (WHERE extract(epoch FROM coalesce(answered_at, now()) - asked_at) > $2 * 60)::int AS breached FROM r`,
+      [days, sla.targetMinutes])).rows[0] as { withinTarget: number; breached: number };
+    const slaTotal = slaRow.withinTarget + slaRow.breached;
     const hours = Array.from({ length: 24 }, (_, h) => ({ hour: h, inbound: byHour.rows.find((r) => r.hour === h)?.inbound ?? 0 }));
 
     const overall = waits.rows.find((r) => r.isTotal === 1);
@@ -123,6 +137,7 @@ async function computeSummary(db: Db, cfg: Config, days: number, bucket: 'day' |
       days,
       bucket,
       previous: prev,
+      sla: { enabled: sla.enabled, targetMinutes: sla.targetMinutes, ...slaRow, compliancePercent: slaTotal ? Math.round((slaRow.withinTarget / slaTotal) * 100) : null },
       timezone: cfg.REPORT_TZ,
       totals: totals.rows[0],
       responseTime: overall

@@ -8,6 +8,7 @@ import { loadSending, sendingSchema } from '../channels/sender.js';
 import { loadRouting, routingSchema } from '../routing.js';
 import type { ChannelManager } from '../channels/manager.js';
 import { loadFlow } from '../flow/store.js';
+import { loadSla, slaSchema } from '../sla.js';
 
 export async function loadBusinessHours(db: Db): Promise<BusinessHours> {
   const { rows } = await db.query(`SELECT value FROM settings WHERE key = 'business_hours'`);
@@ -20,6 +21,15 @@ export function settingsRoutes(app: FastifyInstance, db: Db, mgrRef: Pick<Channe
   const view = requireAuth(db, 'settings.view');
   const botView = requireAuth(db, 'bot.view');
   const botManage = requireAuth(db, 'bot.manage');
+
+  app.get('/settings/sla', { preHandler: requireAuth(db) }, async () => loadSla(db));
+  app.put('/settings/sla', { preHandler: manage }, async (req, reply) => {
+    const b = slaSchema.safeParse(req.body);
+    if (!b.success) return reply.code(400).send({ error: 'bad_request' });
+    await db.query(`INSERT INTO settings (key, value) VALUES ('sla', $1) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()`, [JSON.stringify(b.data)]);
+    await audit(db, { actorId: req.user!.id, action: 'settings.sla', ip: req.ip, meta: b.data });
+    return b.data;
+  });
 
   app.get('/settings/business-hours', { preHandler: view }, async () => loadBusinessHours(db));
 
