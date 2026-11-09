@@ -1,8 +1,9 @@
 import ExcelJS from 'exceljs';
 import type { Db } from '../db.js';
 import { extract } from '../kb/extract.js';
+import { resolveUserRef } from '../usernames.js';
 
-export interface Officer { id: string; name: string; email: string | null; phone: string | null; userId: string | null; userName: string | null; userActive: boolean; notes: string; active: boolean; topics: string[] }
+export interface Officer { id: string; name: string; email: string | null; phone: string | null; userId: string | null; userName: string | null; userUsername?: string | null; userActive: boolean; notes: string; active: boolean; topics: string[] }
 
 /** Digits of a WhatsApp number with country code: "050-123 4567" becomes 972501234567. Null when it cannot be a phone number. */
 export function normalizePhone(raw: string): string | null {
@@ -13,7 +14,7 @@ export function normalizePhone(raw: string): string | null {
 export const cleanTopics = (list: string[]): string[] => [...new Set(list.map((t) => t.replace(/\s+/g, ' ').trim()).filter((t) => t.length > 0 && t.length <= 60))].slice(0, 30);
 const splitList = (s: string) => s.split(/[\n,;]/);
 
-const SELECT = `SELECT o.id, o.name, o.email, o.phone, o.user_id AS "userId", u.name AS "userName", COALESCE(u.active, false) AS "userActive", o.notes, o.active,
+const SELECT = `SELECT o.id, o.name, o.email, o.phone, o.user_id AS "userId", u.name AS "userName", u.username AS "userUsername", COALESCE(u.active, false) AS "userActive", o.notes, o.active,
                        COALESCE((SELECT array_agg(t.topic ORDER BY t.topic) FROM officer_topics t WHERE t.officer_id = o.id), '{}') AS topics
                   FROM officers o LEFT JOIN users u ON u.id = o.user_id`;
 
@@ -66,7 +67,7 @@ export async function importOfficers(db: Db, buf: Buffer): Promise<OfficerImport
     const topics = cleanTopics(splitList(cell(c.topics)));
     const acct = cell(c.user).toLowerCase();
     let userId: string | null = null;
-    if (acct) { userId = (await db.query('SELECT id FROM users WHERE lower(email) = $1 AND active', [acct])).rows[0]?.id ?? null; if (!userId) out.unlinked++; }
+    if (acct) { userId = await resolveUserRef(db, acct); if (!userId) out.unlinked++; }   // the account: @username, username or e-mail
     const existing = (await db.query(email ? 'SELECT id FROM officers WHERE lower(email) = $1' : 'SELECT id FROM officers WHERE lower(name) = lower($1)', [email || name])).rows[0]?.id as string | undefined;
     let id = existing;
     if (id) await db.query('UPDATE officers SET name = $2, email = $3, phone = $4, user_id = COALESCE($5, user_id), notes = $6 WHERE id = $1', [id, name, email || null, phone, userId, cell(c.notes).slice(0, 300)]);
@@ -81,8 +82,8 @@ export async function importOfficers(db: Db, buf: Buffer): Promise<OfficerImport
 export async function officersTemplate(): Promise<Buffer> {
   const wb = new ExcelJS.Workbook();
   const ws = wb.addWorksheet('ממונים', { views: [{ rightToLeft: true }] });
-  ws.columns = [{ header: 'שם', width: 24 }, { header: 'אימייל', width: 30 }, { header: 'ווצאפ', width: 18 }, { header: 'נושאים (אחד בכל שורה או מופרדים בפסיק)', width: 44 }, { header: 'אימייל החשבון במערכת (אם יש)', width: 32 }, { header: 'הערות', width: 30 }];
-  ws.addRow(['דוגמה: דנה כהן', 'dana@example.org', '050-123-4567', 'לייזרים\nקרינה מייננת / בלתי מייננת', 'dana@example.org', '']);
+  ws.columns = [{ header: 'שם', width: 24 }, { header: 'אימייל', width: 30 }, { header: 'ווצאפ', width: 18 }, { header: 'נושאים (אחד בכל שורה או מופרדים בפסיק)', width: 44 }, { header: 'חשבון במערכת: @שם משתמש או אימייל (אם יש)', width: 32 }, { header: 'הערות', width: 30 }];
+  ws.addRow(['דוגמה: דנה כהן', 'dana@example.org', '050-123-4567', 'לייזרים\nקרינה מייננת / בלתי מייננת', '@dana', '']);
   ws.getRow(1).font = { bold: true };
   return Buffer.from(await wb.xlsx.writeBuffer());
 }

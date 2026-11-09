@@ -18,13 +18,13 @@ export async function api<T = unknown>(method: string, url: string, body?: unkno
 
 export type Role = string; // role key: admin | supervisor | agent | custom (r_xxxx)
 export interface Me {
-  available?: boolean; id: string; email: string; name: string; role: Role; roleName: string; permissions: string[]; passkeys: number;
+  available?: boolean; id: string; email: string; username?: string; name: string; role: Role; roleName: string; permissions: string[]; passkeys: number;
   mfaEnabled: boolean; mfaEnrollmentRequired: boolean; passwordChangeRequired?: boolean;
 }
 export const can = (me: Pick<Me, 'permissions'>, p: string) => me.permissions.includes(p);
 export interface RoleRow { key: string; name: string; permissions: string[]; builtin: boolean; mfaRequired: boolean; userCount: number }
 export interface PasskeyRow { id: string; name: string; deviceType: string | null; backedUp: boolean; createdAt: string; lastUsedAt: string | null }
-export interface UserRow { available?: boolean; id: string; email: string; name: string; role: Role; active: boolean; mfaEnabled: boolean }
+export interface UserRow { available?: boolean; id: string; email: string; username?: string; name: string; role: Role; active: boolean; mfaEnabled: boolean }
 export interface Channel { id: string; type: 'whatsapp' | 'whatsapp_cloud' | 'telegram' | 'webchat'; label: string; status: string }
 export interface Conversation {
   id: string; channelId: string; status: 'open' | 'closed'; assignedTo: string | null; assignedName: string | null;
@@ -55,3 +55,6 @@ export interface ChannelHealth {
   inboundLast24h: number; paused: boolean; autoPausedUntil: string | null; risk: { level: 'low' | 'medium' | 'high'; reasons: string[] };
 }
 export interface SendingCfg { minDelayMs: number; maxDelayMs: number; perMinute: number; perDay: number; warmup: boolean; typing: boolean; replyWindowHours: number; failuresBeforePause: number; pauseMinutes: number; readReceipts: boolean }
+
+/** "Dana Levi (@dana.levi)" for people pickers */
+export const personLabel = (u: { name: string; username?: string | null }) => (u.username ? `${u.name} (@${u.username})` : u.name);

@@ -5,11 +5,12 @@ import { audit } from '../audit.js';
 import { requireAuth, type AuthUser } from '../auth.js';
 import type { Db } from '../db.js';
 import { hashPassword, PASSWORD_MIN } from '../password.js';
+import { usernameSchema } from '../usernames.js';
 import { BUILTIN_ROLES, cleanPermissions, isSubset } from '../permissions.js';
 
 const idParam = z.object({ id: z.string().uuid() });
 const TEMP_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789';   // no look-alike characters
-const publicCols = 'id, email, name, role, active, available, totp_enabled AS "mfaEnabled", created_at AS "createdAt"';
+const publicCols = 'id, email, username, name, role, active, available, totp_enabled AS "mfaEnabled", created_at AS "createdAt"';
 
 export async function permissionsOfRole(db: Db, key: string): Promise<string[] | null> {
   const { rows } = await db.query('SELECT permissions, builtin FROM roles WHERE key = $1', [key]);
@@ -43,6 +44,7 @@ export function userRoutes(app: FastifyInstance, db: Db) {
         name: z.string().min(1).max(100),
         role: z.string().min(1).max(41),
         password: z.string().min(PASSWORD_MIN).max(256),
+        username: usernameSchema.optional(),
       })
       .safeParse(req.body);
     if (!body.success) return reply.code(400).send({ error: 'bad_request' });
@@ -51,13 +53,13 @@ export function userRoutes(app: FastifyInstance, db: Db) {
     if (!(await mayUseRole(db, req.user!, b.role))) return reply.code(403).send({ error: 'role_exceeds_permissions' });
     try {
       const { rows } = await db.query(
-        `INSERT INTO users (email, name, role, password_hash) VALUES ($1,$2,$3,$4) RETURNING ${publicCols}`,
-        [b.email, b.name, b.role, await hashPassword(b.password)],
+        `INSERT INTO users (email, name, role, password_hash, username) VALUES ($1,$2,$3,$4,$5) RETURNING ${publicCols}`,
+        [b.email, b.name, b.role, await hashPassword(b.password), b.username ?? null],
       );
       await audit(db, { actorId: req.user!.id, action: 'user.create', target: rows[0].id, ip: req.ip, meta: { role: b.role } });
       return reply.code(201).send(rows[0]);
     } catch (e) {
-      if ((e as { code?: string }).code === '23505') return reply.code(409).send({ error: 'email_taken' });
+      if ((e as { code?: string; constraint?: string }).code === '23505') return reply.code(409).send({ error: (e as { constraint?: string }).constraint === 'users_username_idx' ? 'username_taken' : 'email_taken' });
       throw e;
     }
   });
@@ -65,7 +67,7 @@ export function userRoutes(app: FastifyInstance, db: Db) {
   app.patch('/users/:id', { preHandler: manage }, async (req, reply) => {
     const p = idParam.safeParse(req.params);
     const body = z
-      .object({ name: z.string().min(1).max(100), role: z.string().min(1).max(41), active: z.boolean() })
+      .object({ name: z.string().min(1).max(100), role: z.string().min(1).max(41), active: z.boolean(), username: usernameSchema })
       .partial()
       .refine((o) => Object.keys(o).length > 0)
       .safeParse(req.body);
@@ -87,11 +89,17 @@ export function userRoutes(app: FastifyInstance, db: Db) {
     const losesAdmin = cur.role === 'admin' && (b.active === false || (b.role !== undefined && b.role !== 'admin'));
     if (losesAdmin && (await activeAdmins(db, id)) === 0) return reply.code(409).send({ error: 'last_admin' });
 
-    const { rows } = await db.query(
-      `UPDATE users SET name = COALESCE($2, name), role = COALESCE($3, role), active = COALESCE($4, active), updated_at = now()
-        WHERE id = $1 RETURNING ${publicCols}`,
-      [id, b.name ?? null, b.role ?? null, b.active ?? null],
-    );
+    let rows;
+    try {
+      ({ rows } = await db.query(
+        `UPDATE users SET name = COALESCE($2, name), role = COALESCE($3, role), active = COALESCE($4, active), username = COALESCE($5, username), updated_at = now()
+          WHERE id = $1 RETURNING ${publicCols}`,
+        [id, b.name ?? null, b.role ?? null, b.active ?? null, b.username ?? null],
+      ));
+    } catch (e) {
+      if ((e as { code?: string }).code === '23505') return reply.code(409).send({ error: 'username_taken' });
+      throw e;
+    }
     if (b.active === false || b.role) await db.query('DELETE FROM sessions WHERE user_id = $1', [id]);
     await audit(db, { actorId: actor.id, action: 'user.update', target: id, ip: req.ip, meta: b });
     return rows[0];

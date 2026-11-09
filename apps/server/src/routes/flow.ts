@@ -27,7 +27,7 @@ export function flowRoutes(app: FastifyInstance, db: Db, kb: KnowledgeBase) {
 
   /** Everything the editor needs to pick from: people and tags. */
   app.get('/flow/refs', { preHandler: view }, async () => ({
-    users: (await db.query('SELECT id, name FROM users WHERE active ORDER BY lower(name)')).rows,
+    users: (await db.query('SELECT id, name, username FROM users WHERE active ORDER BY lower(name)')).rows,
     tags: (await db.query('SELECT id, name FROM tags ORDER BY lower(name)')).rows,
     /** officers by topic, for the "hand over to the officer of a topic" choice */
     officers: (await listOfficers(db)).map((o) => ({ id: o.id, name: o.name, active: o.active, hasAccount: !!o.userId && o.userActive, topics: o.topics })),

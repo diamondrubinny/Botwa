@@ -80,7 +80,7 @@ export function settingsRoutes(app: FastifyInstance, db: Db, mgrRef: Pick<Channe
   });
 
   // People a menu item may hand the conversation to.
-  app.get('/settings/bot/assignees', { preHandler: botView }, async () => (await db.query(`SELECT id, name FROM users WHERE active ORDER BY lower(name)`)).rows);
+  app.get('/settings/bot/assignees', { preHandler: botView }, async () => (await db.query(`SELECT id, name, username FROM users WHERE active ORDER BY lower(name)`)).rows);
 
   app.put('/settings/bot', { preHandler: botManage }, async (req, reply) => {
     const b = botSchema.safeParse(req.body);

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { api, ApiError, can, type Me } from '../api';
+import { api, ApiError, can, personLabel, type Me } from '../api';
 import { errText } from '../strings';
 
 type Id = string | undefined;
@@ -21,7 +21,7 @@ type Node = { id: string; label?: string } & (
 );
 interface Flow { start: string; nodes: Node[]; labels?: Record<string, string> }
 interface FState { node: string | null; vars: Record<string, string>; invalid: number; done: boolean; endedAt?: number; files?: number; list?: string[] }
-interface Refs { users: { id: string; name: string }[]; tags: { id: string; name: string }[]; officers?: { id: string; name: string; active: boolean; hasAccount: boolean; topics: string[] }[]; topics?: string[] }
+interface Refs { users: { id: string; name: string; username?: string }[]; tags: { id: string; name: string }[]; officers?: { id: string; name: string; active: boolean; hasAccount: boolean; topics: string[] }[]; topics?: string[] }
 
 const TYPE_LABEL: Record<Node['type'], string> = { message: 'הודעה', menu: 'תפריט', question: 'שאלה (איסוף פרט)', media: 'קובץ, תמונה או טקסט', list: 'רשימה (הוסף עוד)', remember: 'שמירה בכרטיס איש הקשר', condition: 'תנאי', kb: 'מאגר ידע', referral: 'הפניה לווצאפ אישי', tag: 'הוספת תגית', handoff: 'העברה לנציג', end: 'סיום' };
 const TYPE_CLASS: Record<Node['type'], string> = { message: 'muted', menu: 'accent', question: 'accent', media: 'accent', list: 'accent', remember: 'muted', condition: 'warn', kb: 'ok', referral: 'ok', tag: 'muted', handoff: 'danger', end: 'muted' };
@@ -433,7 +433,7 @@ function NodeForm({ n, flow, refs, canEdit, upd, del, makeStart }: { n: Node; fl
           </div>
         );
       })()}
-      {n.type === 'handoff' && <div className="field"><label htmlFor={f('us')}>נציג אחראי</label><select id={f('us')} value={n.userId ?? ''} onChange={(e) => set({ userId: e.target.value || undefined })}><option value="">לפי הקצאה רגילה</option>{refs.users.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}</select></div>}
+      {n.type === 'handoff' && <div className="field"><label htmlFor={f('us')}>נציג אחראי</label><select id={f('us')} value={n.userId ?? ''} onChange={(e) => set({ userId: e.target.value || undefined })}><option value="">לפי הקצאה רגילה</option>{refs.users.map((u) => <option key={u.id} value={u.id}>{personLabel(u)}</option>)}</select></div>}
       {'next' in n && n.type !== 'tag' ? <TargetSelect id={f('nx')} label="ממשיך אל" value={n.next} flow={flow} onChange={(v) => set({ next: v })} /> : null}
       {n.type === 'tag' && <TargetSelect id={f('nx')} label="ממשיך אל" value={n.next} flow={flow} onChange={(v) => set({ next: v })} />}
 

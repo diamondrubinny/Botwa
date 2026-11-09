@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
-import { api, ApiError, can, upload, type Attachment, type Canned, type Conversation, type Me, type Message, type Note, type RelatedConv, type Tag, type UserRow } from '../api';
+import { api, ApiError, can, personLabel, upload, type Attachment, type Canned, type Conversation, type Me, type Message, type Note, type RelatedConv, type Tag, type UserRow } from '../api';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { Icon } from '../components/Icon';
 import { usePoll } from '../hooks';
@@ -249,10 +249,10 @@ export function Inbox({ me }: { me: Me }) {
     });
   }
   const [ho, setHo] = useState<{ to: string; note: string } | null>(null);
-  const [mates, setMates] = useState<{ id: string; name: string }[]>([]);
+  const [mates, setMates] = useState<{ id: string; name: string; username?: string }[]>([]);
   useEffect(() => { setHo(null); }, [selId]);
   const openHandover = async (to = '') => {
-    if (mates.length === 0) setMates(await api<{ id: string; name: string }[]>('GET', '/handover-targets').catch(() => []));
+    if (mates.length === 0) setMates(await api<{ id: string; name: string; username?: string }[]>('GET', '/handover-targets').catch(() => []));
     setHo({ to, note: '' });
   };
   const FILTERS: [typeof filter, string][] = [['open', 'פתוחות'], ['mine', 'שלי'], ['starred', 'מסומנות'], ['snoozed', 'נדחו'], ['closed', 'סגורות'], ...(canBlock ? [['blocked', 'חסומים'] as [typeof filter, string]] : [])];
@@ -340,7 +340,7 @@ export function Inbox({ me }: { me: Me }) {
                     <label htmlFor="asg" className="sr-only">שיוך לנציג</label>
                     <select id="asg" value={sel.assignedTo ?? ''} onChange={(e) => { const v = e.target.value || null; if (v && sel.assignedTo && v !== sel.assignedTo) void openHandover(v); else void assignTo(v); }}>
                       <option value="">לא משויך</option>
-                      {team.filter((u) => u.active).map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
+                      {team.filter((u) => u.active).map((u) => <option key={u.id} value={u.id}>{personLabel(u)}</option>)}
                     </select>
                   </>
                 ) : sel.assignedTo === me.id ? (
@@ -545,7 +545,7 @@ export function Inbox({ me }: { me: Me }) {
                   <div className="field"><label htmlFor="ho-to">העברה אל</label>
                     <select id="ho-to" required value={ho.to} onChange={(e) => setHo({ ...ho, to: e.target.value })}>
                       <option value="">בחירת נציג…</option>
-                      {mates.filter((u) => u.id !== sel.assignedTo).map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
+                      {mates.filter((u) => u.id !== sel.assignedTo).map((u) => <option key={u.id} value={u.id}>{personLabel(u)}</option>)}
                     </select></div>
                   <div className="field"><label htmlFor="ho-note">הערת העברה (חובה, לא נשלחת ללקוח)</label>
                     <textarea id="ho-note" required rows={3} maxLength={1000} value={ho.note} onChange={(e) => setHo({ ...ho, note: e.target.value })} placeholder="מה כבר נעשה, מה הלקוח מחכה לו" /></div>

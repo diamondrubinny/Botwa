@@ -77,9 +77,10 @@ export function authRoutes(app: FastifyInstance, db: Db, cfg: Config) {
 
   app.get('/auth/me', { preHandler: auth }, async (req) => {
     const u = req.user!;
-    const av = await db.query('SELECT available FROM users WHERE id = $1', [u.id]);
+    const av = await db.query('SELECT available, username FROM users WHERE id = $1', [u.id]);
     return {
       available: av.rows[0]?.available ?? true,
+      username: av.rows[0]?.username as string | undefined,
       id: u.id,
       email: u.email,
       name: u.name,

@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent } from 'react';
-import { api, ApiError, can, type Me } from '../api';
+import { api, ApiError, can, personLabel, type Me } from '../api';
 import { errText } from '../strings';
 
 interface Cat { id: string; name: string; keywords: string[]; count: number; origin?: string }
@@ -226,7 +226,7 @@ interface Area { id: string; name: string; keywords: string[]; userId: string; u
 
 function Areas({ canEdit }: { canEdit: boolean }) {
   const [areas, setAreas] = useState<Area[]>([]);
-  const [users, setUsers] = useState<{ id: string; name: string }[]>([]);
+  const [users, setUsers] = useState<{ id: string; name: string; username?: string }[]>([]);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [editId, setEditId] = useState<string | null>(null); // '' = new
   const [name, setName] = useState('');
@@ -234,7 +234,7 @@ function Areas({ canEdit }: { canEdit: boolean }) {
   const [userId, setUserId] = useState('');
   const load = async () => {
     setAreas(await api<Area[]>('GET', '/safety/areas').catch(() => []));
-    setUsers((await api<{ users: { id: string; name: string }[] }>('GET', '/flow/refs').catch(() => ({ users: [] }))).users);
+    setUsers((await api<{ users: { id: string; name: string; username?: string }[] }>('GET', '/flow/refs').catch(() => ({ users: [] }))).users);
   };
   useEffect(() => { void load(); }, []);
   const start = (a?: Area) => { setEditId(a?.id ?? ''); setName(a?.name ?? ''); setKw(a?.keywords.join('\n') ?? ''); setUserId(a?.userId ?? users[0]?.id ?? ''); setMsg(null); };
@@ -289,7 +289,7 @@ function Areas({ canEdit }: { canEdit: boolean }) {
         <form onSubmit={submit}>
           <div className="field"><label htmlFor="ar-n">שם האזור</label><input id="ar-n" required maxLength={80} value={name} onChange={(e) => setName(e.target.value)} /></div>
           <div className="field"><label htmlFor="ar-k">מילות זיהוי (אחת בכל שורה, למשל "בניין 12")</label><textarea id="ar-k" required rows={4} value={kw} onChange={(e) => setKw(e.target.value)} /></div>
-          <div className="field"><label htmlFor="ar-u">ממונה אחראי</label><select id="ar-u" required value={userId} onChange={(e) => setUserId(e.target.value)}>{users.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}</select></div>
+          <div className="field"><label htmlFor="ar-u">ממונה אחראי</label><select id="ar-u" required value={userId} onChange={(e) => setUserId(e.target.value)}>{users.map((u) => <option key={u.id} value={u.id}>{personLabel(u)}</option>)}</select></div>
           <div className="row"><button className="primary" type="submit">שמירה</button><button type="button" onClick={() => setEditId(null)}>ביטול</button></div>
         </form>
       )}
@@ -302,14 +302,14 @@ interface OfficerRow { id: string; name: string; email: string | null; phone: st
 
 function Officers({ canEdit }: { canEdit: boolean }) {
   const [list, setList] = useState<OfficerRow[]>([]);
-  const [users, setUsers] = useState<{ id: string; name: string }[]>([]);
+  const [users, setUsers] = useState<{ id: string; name: string; username?: string }[]>([]);
   const [topics, setTopics] = useState<string[]>([]);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [editId, setEditId] = useState<string | null>(null);   // '' = new
   const [f, setF] = useState({ name: '', email: '', phone: '', userId: '', topics: '', notes: '', active: true });
   const load = async () => {
     setList(await api<OfficerRow[]>('GET', '/safety/officers').catch(() => []));
-    setUsers((await api<{ users: { id: string; name: string }[] }>('GET', '/flow/refs').catch(() => ({ users: [] }))).users);
+    setUsers((await api<{ users: { id: string; name: string; username?: string }[] }>('GET', '/flow/refs').catch(() => ({ users: [] }))).users);
     setTopics(await api<string[]>('GET', '/safety/officer-topics').catch(() => []));
   };
   useEffect(() => { void load(); }, []);
@@ -367,7 +367,7 @@ function Officers({ canEdit }: { canEdit: boolean }) {
             <div className="field"><label htmlFor="of-p">ווצאפ</label><input id="of-p" dir="ltr" inputMode="tel" maxLength={30} placeholder="050-123-4567" value={f.phone} onChange={(e) => setF({ ...f, phone: e.target.value })} /></div>
           </div>
           <div className="field"><label htmlFor="of-u">חשבון במערכת (אופציונלי: השיחות ישויכו אליו)</label>
-            <select id="of-u" value={f.userId} onChange={(e) => setF({ ...f, userId: e.target.value })}><option value="">אין חשבון</option>{users.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}</select></div>
+            <select id="of-u" value={f.userId} onChange={(e) => setF({ ...f, userId: e.target.value })}><option value="">אין חשבון</option>{users.map((u) => <option key={u.id} value={u.id}>{personLabel(u)}</option>)}</select></div>
           <div className="field"><label htmlFor="of-t">נושאים (אחד בכל שורה)</label>
             <textarea id="of-t" required rows={4} value={f.topics} onChange={(e) => setF({ ...f, topics: e.target.value })} aria-describedby="of-t-h" />
             <p id="of-t-h" className="hint">אפשר להקליד נושא חדש, או ללחוץ על אחד מהמוכרים כדי להוסיף אותו:</p>

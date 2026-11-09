@@ -86,7 +86,7 @@ describe('officers by topic', () => {
   it('imports officers from a workbook, matching by e-mail, and reports what it skipped', async () => {
     const wb = new ExcelJS.Workbook(); const ws = wb.addWorksheet('x');
     ws.addRow(['שם', 'אימייל', 'ווצאפ', 'נושאים', 'אימייל החשבון במערכת', 'הערות']);
-    ws.addRow(['רוברט כהן', 'robert@example.org', '052-000-1111', 'חומ״ס\nכימיקלים המחייבים ניטור', 'chem@t.io', '']);   // existing e-mail: updated, gets an account
+    ws.addRow(['רוברט כהן', 'robert@example.org', '052-000-1111', 'חומ״ס\nכימיקלים המחייבים ניטור', '@chem', '']);   // existing e-mail: updated, gets an account
     ws.addRow(['יעל לוי', 'yael@example.org', '0541112222', 'אסבסט, חלל מוקף', 'nobody@t.io', '']);                       // new, account e-mail unknown
     ws.addRow(['', 'x@y.org', '', 'חשמל', '', '']);
     ws.addRow(['דן', 'bad', '', 'חשמל', '', '']);

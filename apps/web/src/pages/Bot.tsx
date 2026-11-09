@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent } from 'react';
-import { api, ApiError, can, type Me } from '../api';
+import { api, ApiError, can, personLabel, type Me } from '../api';
 import { usePoll } from '../hooks';
 
 interface BotCfg {
@@ -19,8 +19,8 @@ export function Bot({ me }: { me: Me }) {
   const canEdit = can(me, 'bot.manage');
   const [b, setB] = useState<BotCfg | null>(null);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
-  const [people, setPeople] = useState<{ id: string; name: string }[]>([]);
-  useEffect(() => { void api<{ id: string; name: string }[]>('GET', '/settings/bot/assignees').then(setPeople).catch(() => undefined); }, []);
+  const [people, setPeople] = useState<{ id: string; name: string; username?: string }[]>([]);
+  useEffect(() => { void api<{ id: string; name: string; username?: string }[]>('GET', '/settings/bot/assignees').then(setPeople).catch(() => undefined); }, []);
   usePoll(async () => { if (!b) setB(await api<BotCfg>('GET', '/settings/bot').catch(() => null)); }, 60000);
   if (!b) return <><h1 tabIndex={-1}>בוט</h1><p role="status">טוען…</p></>;
 
@@ -76,7 +76,7 @@ export function Bot({ me }: { me: Me }) {
                   <div className="card" style={{ marginTop: '.5rem' }}>
                     <label htmlFor={`brt${i}`}>הנציג האחראי</label>
                     <select id={`brt${i}`} required value={it.route.userId} onChange={(e) => setItem(i, { route: { ...it.route!, userId: e.target.value } })}>
-                      {people.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
+                      {people.map((u) => <option key={u.id} value={u.id}>{personLabel(u)}</option>)}
                     </select>
                     <label><input type="checkbox" style={{ width: 'auto', minHeight: 'auto' }} checked={!!it.route.byArea} onChange={(e) => setItem(i, { route: { ...it.route!, byArea: e.target.checked || undefined } })} /> לשאול את הלקוח באיזה בניין או מקום מדובר, ולהעביר לנציג שאחראי על המקום</label>
                     <p className="hint">האחראי על כל מקום מוגדר ב<a href="#/safety">לוח בטיחות ← אזורי אחריות</a> (ידנית או בייבוא אקסל). אם המקום לא מזוהה, הנציג שנבחר כאן מקבל את השיחה.</p>

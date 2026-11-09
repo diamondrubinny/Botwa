@@ -10,7 +10,8 @@ export function Team({ me }: { me: Me }) {
   const [users, setUsers] = useState<UserRow[]>([]);
   const [msg, setMsg] = useState('');
   const [roles, setRoles] = useState<RoleRow[]>([]);
-  const [f, setF] = useState({ name: '', email: '', role: 'agent', password: '' });
+  const [f, setF] = useState({ name: '', email: '', role: 'agent', password: '', username: '' });
+  const [unFor, setUnFor] = useState<{ id: string; name: string; value: string } | null>(null);
   // you can only hand out roles whose permissions you hold yourself
   const assignable = roles.filter((r) => r.permissions.every((p) => me.permissions.includes(p)));
   usePoll(async () => { const r = await api<{ roles: RoleRow[] }>('GET', '/roles').catch(() => null); if (r) setRoles(r.roles); }, 60000);
@@ -47,8 +48,8 @@ export function Team({ me }: { me: Me }) {
 
   async function create(e: FormEvent) {
     e.preventDefault();
-    await run(() => api('POST', '/users', f));
-    setF({ name: '', email: '', role: 'agent', password: '' });
+    await run(() => api('POST', '/users', { ...f, username: f.username.trim() || undefined }));
+    setF({ name: '', email: '', role: 'agent', password: '', username: '' });
   }
 
   return (
@@ -59,12 +60,23 @@ export function Team({ me }: { me: Me }) {
         <table>
           <caption className="sr-only">רשימת משתמשי המערכת</caption>
           <thead>
-            <tr><th scope="col">שם</th><th scope="col">אימייל</th><th scope="col">תפקיד</th><th scope="col">MFA</th><th scope="col">סטטוס</th>{isAdmin && <th scope="col">פעולות</th>}</tr>
+            <tr><th scope="col">שם</th><th scope="col">שם משתמש</th><th scope="col">אימייל</th><th scope="col">תפקיד</th><th scope="col">MFA</th><th scope="col">סטטוס</th>{isAdmin && <th scope="col">פעולות</th>}</tr>
           </thead>
           <tbody>
             {users.map((u) => (
               <tr key={u.id}>
                 <th scope="row">{u.name}</th>
+                <td dir="ltr">
+                  {unFor?.id === u.id ? (
+                    <form className="row" onSubmit={async (e) => { e.preventDefault(); await run(() => api('PATCH', `/users/${u.id}`, { username: unFor.value })); setUnFor(null); }}>
+                      <label htmlFor={`un-${u.id}`} className="sr-only">שם משתמש עבור {u.name}</label>
+                      <input id={`un-${u.id}`} dir="ltr" required pattern="@?[A-Za-z0-9][A-Za-z0-9._\-]{1,28}[A-Za-z0-9]" style={{ maxWidth: 170 }} value={unFor.value} onChange={(e) => setUnFor({ ...unFor, value: e.target.value })} />
+                      <button type="submit">שמירה</button><button type="button" onClick={() => setUnFor(null)}>ביטול</button>
+                    </form>
+                  ) : (
+                    <>@{u.username}{isAdmin && assignable.some((r) => r.key === u.role) && <button type="button" style={{ minHeight: 32, marginInlineStart: '.4rem' }} onClick={() => setUnFor({ id: u.id, name: u.name, value: u.username ?? '' })}>שינוי<span className="sr-only"> שם המשתמש של {u.name}</span></button>}</>
+                  )}
+                </td>
                 <td dir="ltr">{u.email}</td>
                 <td>
                   {isAdmin ? (
@@ -136,6 +148,7 @@ export function Team({ me }: { me: Me }) {
         <form className="card" onSubmit={create}>
           <h2>משתמש חדש</h2>
           <div className="field"><label htmlFor="u-name">שם</label><input id="u-name" required maxLength={100} value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} /></div>
+          <div className="field"><label htmlFor="u-un">שם משתמש (אופציונלי; אם ריק נוצר מהאימייל)</label><input id="u-un" dir="ltr" pattern="@?[A-Za-z0-9][A-Za-z0-9._\-]{1,28}[A-Za-z0-9]" aria-describedby="u-un-h" value={f.username} onChange={(e) => setF({ ...f, username: e.target.value })} /><p id="u-un-h" className="hint">אותיות באנגלית, ספרות, נקודה, מקף או קו תחתון. משמש לבחירת ממונים ובתרשימים, למשל @dana.</p></div>
           <div className="field"><label htmlFor="u-email">אימייל</label><input id="u-email" type="email" required dir="ltr" value={f.email} onChange={(e) => setF({ ...f, email: e.target.value })} /></div>
           <div className="field">
             <label htmlFor="u-role">תפקיד</label>

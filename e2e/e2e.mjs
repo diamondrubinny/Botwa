@@ -94,6 +94,7 @@ await page.click('aside.sidebar nav >> text=צוות');
 await page.fill('#u-name', 'דנה נציגה'); await page.fill('#u-email', 'dana@e2e.io'); await page.fill('#u-pw', 'agent-password-123');
 await page.click('button:has-text("יצירת משתמש")');
 await page.waitForSelector('td:has-text("dana@e2e.io")');
+check('team: the new person got a username from the e-mail', await page.isVisible('td:has-text("@dana")'));
 await axe('team');
 
 // reports page

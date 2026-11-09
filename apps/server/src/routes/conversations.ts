@@ -164,7 +164,7 @@ export function conversationRoutes(app: FastifyInstance, db: Db, mgr: ChannelMan
 
   // Colleagues a conversation can be handed to (id + name only; the full user list needs users.view).
   app.get('/handover-targets', { preHandler: any }, async (req) => {
-    const { rows } = await db.query('SELECT id, name FROM users WHERE active AND id <> $1 ORDER BY lower(name)', [req.user!.id]);
+    const { rows } = await db.query('SELECT id, name, username FROM users WHERE active AND id <> $1 ORDER BY lower(name)', [req.user!.id]);
     return rows;
   });
 

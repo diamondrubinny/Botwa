@@ -78,7 +78,7 @@ export function Account({ me, onChanged }: { me: Me; onChanged: () => void }) {
   return (
     <>
       <h1 tabIndex={-1}>החשבון שלי</h1>
-      <p>{me.name} · {me.email} · {me.roleName}</p>
+      <p>{me.name} · {me.email} · {me.roleName}{me.username ? <> · שם משתמש: <bdi dir="ltr">@{me.username}</bdi></> : null}</p>
       <InstallApp />
       <NotificationsCard />
 
