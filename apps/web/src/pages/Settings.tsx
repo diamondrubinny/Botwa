@@ -169,13 +169,17 @@ export function Settings({ me }: { me: Me }) {
       {canBackup && (<>
       <section className="card" aria-labelledby="bk-h">
         <h2 id="bk-h">גיבויים</h2>
-        <p className="hint">גיבוי מוצפן של מסד הנתונים (הודעות, משתמשים, הגדרות). קבצים מצורפים נשמרים בנפרד ב-volume של המדיה. שחזור מתבצע ידנית בשרת בלבד (ראו docs/DEPLOY.md). הורדת גיבוי נרשמת ביומן הביקורת.</p>
-        <button className="primary" disabled={bkBusy} onClick={async () => {
-          setBkBusy(true); setBkMsg(null);
-          try { await api('POST', '/backups'); setBkMsg({ ok: true, text: 'הגיבוי נוצר.' }); await loadBackups(); }
-          catch { setBkMsg({ ok: false, text: 'יצירת הגיבוי נכשלה (ודאו ש-pg_dump זמין בשרת).' }); }
-          finally { setBkBusy(false); }
-        }}>{bkBusy ? 'מגבה…' : 'יצירת גיבוי עכשיו'}</button>
+        <p className="hint"><strong>גיבוי מלא</strong> כולל את מסד הנתונים (הודעות, משתמשים, הגדרות, מאגר ידע, חיבורי ערוצים) ואת כל הקבצים המצורפים, מוצפן במפתח של השרת. גיבוי אוטומטי יומי הוא גיבוי מלא. הורדת גיבוי נרשמת ביומן הביקורת. שחזור והעברה לשרת חדש מתבצעים בשרת (docs/MIGRATION.he.md).</p>
+        <div className="row">
+          {(['full', 'db'] as const).map((kind) => (
+            <button key={kind} className={kind === 'full' ? 'primary' : undefined} disabled={bkBusy} onClick={async () => {
+              setBkBusy(true); setBkMsg(null);
+              try { await api('POST', '/backups', { kind }); setBkMsg({ ok: true, text: kind === 'full' ? 'הגיבוי המלא נוצר.' : 'גיבוי מסד הנתונים נוצר.' }); await loadBackups(); }
+              catch { setBkMsg({ ok: false, text: 'יצירת הגיבוי נכשלה (ודאו ש-pg_dump זמין בשרת).' }); }
+              finally { setBkBusy(false); }
+            }}>{bkBusy ? 'מגבה…' : kind === 'full' ? 'גיבוי מלא עכשיו (מסד + קבצים)' : 'גיבוי מסד נתונים בלבד'}</button>
+          ))}
+        </div>
         <p role="status" className={bkMsg?.ok ? 'ok' : 'error'}>{bkMsg?.text}</p>
         <div style={{ overflowX: 'auto' }}>
           <table>
@@ -185,13 +189,13 @@ export function Settings({ me }: { me: Me }) {
               {backups.length === 0 && <tr><td colSpan={4}>אין גיבויים.</td></tr>}
               {backups.map((b) => (
                 <tr key={b.name}>
-                  <th scope="row" dir="ltr">{b.name}</th>
+                  <th scope="row"><span dir="ltr">{b.name}</span><br /><small className="hint">{b.name.startsWith('botwa-full-') ? 'מלא: מסד + קבצים' : 'מסד נתונים בלבד'}</small></th>
                   <td>{new Date(b.createdAt).toLocaleString('he-IL', { dateStyle: 'short', timeStyle: 'short' })}</td>
                   <td>{fmtMB(b.size)}</td>
                   <td><div className="row">
                     <button onClick={async () => {
                       setBkMsg({ ok: true, text: 'בודק…' });
-                      try { const r = await api<{ ok: boolean; tables: number; reason?: string }>('POST', `/backups/${b.name}/verify`); setBkMsg(r.ok ? { ok: true, text: `הגיבוי תקין (${r.tables} טבלאות).` } : { ok: false, text: `הגיבוי פגום או לא נפתח: ${r.reason ?? ''}` }); }
+                      try { const r = await api<{ ok: boolean; tables: number; files?: number; reason?: string }>('POST', `/backups/${b.name}/verify`); setBkMsg(r.ok ? { ok: true, text: `הגיבוי תקין (${r.tables} טבלאות${r.files !== undefined ? `, ${r.files} קבצים מצורפים` : ''}).` } : { ok: false, text: `הגיבוי פגום או לא נפתח: ${r.reason ?? ''}` }); }
                       catch { setBkMsg({ ok: false, text: 'הבדיקה נכשלה.' }); }
                     }}>בדיקת תקינות<span className="sr-only"> {b.name}</span></button>
                     <a className="btn" href={`/backups/${b.name}`} download>הורדה<span className="sr-only"> {b.name}</span></a>

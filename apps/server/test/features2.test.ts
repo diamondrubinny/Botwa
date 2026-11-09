@@ -211,7 +211,7 @@ describe('routing, csv, search, related, backups', () => {
     it('admin only; creates an encrypted 0600 file without plaintext; download audited', async () => {
       expect((await call('POST', '/backups', 'sup@t.io')).statusCode).toBe(403);
       expect((await call('GET', '/backups', 'a1@t.io')).statusCode).toBe(403);
-      const r = await call('POST', '/backups', 'admin@t.io');
+      const r = await call('POST', '/backups', 'admin@t.io', { kind: 'db' });
       expect(r.statusCode).toBe(201);
       const { name, size } = r.json();
       expect(name).toMatch(/^botwa-\d{8}-\d{6}\.sql\.gz\.enc$/);
@@ -262,9 +262,9 @@ describe('routing, csv, search, related, backups', () => {
     it('rejects path traversal / odd names; prunes to BACKUP_KEEP; delete works', async () => {
       for (const n of ['..%2F..%2Fetc%2Fpasswd', 'out.sql.gz', 'tampered.bin']) expect((await call('GET', `/backups/${n}`, 'admin@t.io')).statusCode).toBe(404);
       await new Promise((r) => setTimeout(r, 1100)); // names have 1s resolution
-      await call('POST', '/backups', 'admin@t.io');
+      await call('POST', '/backups', 'admin@t.io', { kind: 'db' });
       await new Promise((r) => setTimeout(r, 1100));
-      await call('POST', '/backups', 'admin@t.io');
+      await call('POST', '/backups', 'admin@t.io', { kind: 'db' });
       const list = (await call('GET', '/backups', 'admin@t.io')).json();
       expect(list).toHaveLength(2); // BACKUP_KEEP=2
       expect((await call('DELETE', `/backups/${list[1].name}`, 'admin@t.io')).statusCode).toBe(200);

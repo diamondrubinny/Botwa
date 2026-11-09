@@ -14,9 +14,10 @@ export function backupRoutes(app: FastifyInstance, db: Db, cfg: Config) {
   app.get('/backups', { preHandler: adminOnly }, async () => listBackups(cfg));
 
   app.post('/backups', { preHandler: adminOnly, config: { rateLimit: { max: 5, timeWindow: '10 minutes' } } }, async (req, reply) => {
+    const kind = (req.body as { kind?: string } | null)?.kind === 'db' ? 'db' : 'full';   // full = database + attachment files
     try {
-      const b = await createBackup(cfg);
-      await audit(db, { actorId: req.user!.id, action: 'backup.create', target: b.name, ip: req.ip });
+      const b = await createBackup(cfg, kind);
+      await audit(db, { actorId: req.user!.id, action: 'backup.create', target: b.name, ip: req.ip, meta: { kind } });
       return reply.code(201).send(b);
     } catch (e) {
       if ((e as Error).message === 'backup_in_progress') return reply.code(409).send({ error: 'backup_in_progress' });
