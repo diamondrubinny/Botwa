@@ -10,7 +10,7 @@ export function isSingleEmoji(v: string): boolean {
 }
 const emoji = z.string().refine(isSingleEmoji, 'emoji');
 /** Automatic reactions to the customer's message by what the bot is doing. Off until switched on. */
-export const DEFAULT_REACTIONS = { enabled: false, working: '👀', done: '✅', noAnswer: '🤔', handoff: '🙋' };
+export const DEFAULT_REACTIONS = { enabled: false, ackAll: false, working: '👀', done: '✅', noAnswer: '🤔', handoff: '🙋' };
 
 export const botSchema = z.object({
   enabled: z.boolean(),
@@ -56,7 +56,7 @@ export const botSchema = z.object({
     intro: z.string().trim().max(120),
   }).default({ enabled: false, minScore: 0.6, maxChars: 700, showSource: true, intro: 'מצאתי את זה במאגר המידע שלנו:' }),
   /** automatic emoji reactions on the customer's message: "working" while the bot searches, then "done" / "noAnswer", or "handoff" when a person takes over */
-  reactions: z.object({ enabled: z.boolean(), working: emoji, done: emoji, noAnswer: emoji, handoff: emoji }).default(() => ({ ...DEFAULT_REACTIONS })),
+  reactions: z.object({ enabled: z.boolean(), /** react to every message the bot handles (not only to searches) */ ackAll: z.boolean().default(false), working: emoji, done: emoji, noAnswer: emoji, handoff: emoji }).default(() => ({ ...DEFAULT_REACTIONS })),
   /** a customer message the bot could not answer (channel down, sending failed) is answered when the channel is back, up to this many hours later (0 = never) */
   catchupHours: z.number().int().min(0).max(72).default(12),
   /** on the official WhatsApp channel, send menus as tappable buttons or lists (falls back to the numbered text) */

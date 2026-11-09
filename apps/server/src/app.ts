@@ -100,7 +100,7 @@ export async function buildApp(cfg: Config, db: Db, mgr: ChannelManager, media: 
   eventRoutes(app, db, mgr);
   tagRoutes(app, db);
   contactRoutes(app, db);
-  settingsRoutes(app, db);
+  settingsRoutes(app, db, mgr);
   backupRoutes(app, db, cfg);
   const push = new PushService(db, cfg);
   await push.init();

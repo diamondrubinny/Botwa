@@ -6,12 +6,12 @@ interface BotCfg {
   enabled: boolean; welcome: string; items: { title: string; answer: string; contact?: { name: string; phone: string; message: string }; route?: { userId: string; byArea?: boolean } }[]; humanOption: boolean; humanLabel: string;
   humanKeywords: string[]; humanMessage: string; invalidMessage: string; invalidRetries: number; footer: string; preview?: string; mode?: 'menu' | 'flow';
   kb: { enabled: boolean; minScore: number; maxChars: number; showSource: boolean; intro: string };
-  reactions?: { enabled: boolean; working: string; done: string; noAnswer: string; handoff: string };
+  reactions?: { enabled: boolean; ackAll?: boolean; working: string; done: string; noAnswer: string; handoff: string };
   catchupHours?: number;
   interactiveMenus?: boolean;
 }
 
-const RX = { enabled: false, working: '👀', done: '✅', noAnswer: '🤔', handoff: '🙋' };
+const RX = { enabled: false, ackAll: false, working: '👀', done: '✅', noAnswer: '🤔', handoff: '🙋' };
 const menuText = (b: BotCfg) =>
   `${b.welcome}\n\n${[...b.items.map((it, i) => `${i + 1}. ${it.title}`), ...(b.humanOption ? [`0. ${b.humanLabel}`] : [])].join('\n')}`;
 
@@ -170,6 +170,10 @@ export function Bot({ me }: { me: Me }) {
           <p className="hint">הבוט מגיב באימוג׳י על ההודעה של הלקוח לפי מה שהוא עושה: כשהלקוח שואל והבוט מחפש במאגר הידע, מופיע "עיניים" על ההודעה, ואחרי שהתשובה נשלחה האימוג׳י מוחלף בסימון הצלחה (או "לא מצאתי"). כשהבוט מעביר לנציג יופיע אימוג׳י העברה. אימוג׳י ריק = בלי תגובה לאירוע הזה, ואם כבר הוצגה "עיניים" היא תוסר.</p>
           <div className="field"><label><input type="checkbox" style={{ width: 'auto', minHeight: 'auto' }} checked={!!b.reactions?.enabled} onChange={(e) => set({ reactions: { ...(b.reactions ?? RX), enabled: e.target.checked } })} /> להפעיל תגובות אוטומטיות</label></div>
           {b.reactions?.enabled && (
+            <div className="field"><label><input type="checkbox" style={{ width: 'auto', minHeight: 'auto' }} checked={!!b.reactions.ackAll} onChange={(e) => set({ reactions: { ...b.reactions!, ackAll: e.target.checked } })} /> להגיב על כל הודעה (עיניים מיד עם הקבלה, ואחרי המענה סימון סיום), גם כשלא מתבצע חיפוש</label>
+              <p className="hint">בלי הסימון, העיניים מופיעות רק כשהבוט מחפש במאגר הידע בעקבות שאלה חופשית. בתפריט ממוספר ובתרשים בלי צומת מאגר ידע אין חיפוש, ולכן בלי הסימון לא תהיה תגובה על רוב ההודעות.</p></div>
+          )}
+          {b.reactions?.enabled && (
             <div className="row">
               {([['working', 'בזמן חיפוש'], ['done', 'נמצאה תשובה'], ['noAnswer', 'לא נמצאה תשובה'], ['handoff', 'העברה לנציג']] as const).map(([k, label]) => (
                 <div className="field" key={k}><label htmlFor={`rx-${k}`}>{label}</label>
@@ -177,6 +181,7 @@ export function Bot({ me }: { me: Me }) {
               ))}
             </div>
           )}
+          <ReactionDiagnostics />
           <p id="rx-hint" className="hint">אימוג׳י אחד בכל שדה. עובד בווצאפ (QR ורשמי) ובטלגרם (טלגרם מאפשר רק קבוצה קבועה של אימוג׳י, למשל 👀 👍 🤔 🙏; אחרים לא יוצגו). בצ׳אט באתר אין תגובות. התגובות נשלחות רק בתגובה להודעה שהלקוח כתב, עד 30 בדקה לערוץ, ולכן הן לא מגדילות סיכון לחסימה כמו הודעות יזומות.</p>
         </fieldset>
 
@@ -214,5 +219,35 @@ export function Bot({ me }: { me: Me }) {
         <p role="status" className={msg?.ok ? 'ok' : 'error'}>{msg?.text}</p>
       </form>
     </>
+  );
+}
+
+
+interface RxDiag { enabled: boolean; reactionsEnabled: boolean; ackAll: boolean; mode: string; searches: boolean; hints: string[]; log: { at: string; channel: string; emoji: string; outcome: string }[] }
+const OUTCOME: Record<string, string> = { sent: 'נשלחה', no_support: 'הערוץ לא תומך בתגובות', not_connected: 'הערוץ לא מחובר', paused: 'הערוץ מושהה', rate_limited: 'חריגה ממכסת התגובות (30 בדקה)' };
+
+/** Why there may be no reaction on a customer's message: what is on, whether this bot ever searches, and the last attempts with their outcome. */
+function ReactionDiagnostics() {
+  const [d, setD] = useState<RxDiag | null>(null);
+  const load = async () => setD(await api<RxDiag>('GET', '/settings/bot/reactions').catch(() => null));
+  return (
+    <details onToggle={(e) => { if ((e.target as HTMLDetailsElement).open) void load(); }}>
+      <summary>למה אין תגובות? בדיקה</summary>
+      {!d ? <p className="hint">טוען…</p> : (
+        <>
+          <p>מה שמור בשרת: הבוט {d.enabled ? 'פעיל' : 'כבוי'}, תגובות {d.reactionsEnabled ? 'פעילות' : 'כבויות'}, "להגיב על כל הודעה" {d.ackAll ? 'פעיל' : 'כבוי'}, מצב {d.mode === 'flow' ? 'תרשים' : 'תפריט'}, חיפוש במאגר הידע {d.searches ? 'מתבצע' : 'לא מתבצע'}.</p>
+          {d.hints.length > 0 ? <ul>{d.hints.map((h) => <li key={h}>{h}</li>)}</ul> : <p className="ok">לא נמצאה סיבה בהגדרות.</p>}
+          <p><strong>ניסיונות אחרונים</strong> (מאז שהשרת עלה):</p>
+          {d.log.length === 0 ? <p className="hint">עוד לא נעשה אף ניסיון להגיב. אם שלחתם הודעה ולא נרשם כלום, ההגדרה לא נשמרה, השרת לא עודכן לגרסה הזו, או שהבוט לא טיפל בהודעה (שיחה שנציג לקח, או בוט כבוי).</p> : (
+            <table>
+              <caption className="sr-only">ניסיונות תגובה אחרונים</caption>
+              <thead><tr><th scope="col">מתי</th><th scope="col">ערוץ</th><th scope="col">אימוג׳י</th><th scope="col">תוצאה</th></tr></thead>
+              <tbody>{d.log.slice(0, 10).map((l, i) => <tr key={i}><td>{new Date(l.at).toLocaleTimeString('he-IL')}</td><td>{l.channel}</td><td>{l.emoji || '(הסרה)'}</td><td>{OUTCOME[l.outcome] ?? (l.outcome.startsWith('error:') ? `שגיאה: ${l.outcome.slice(6)}` : l.outcome)}</td></tr>)}</tbody>
+            </table>
+          )}
+          <button type="button" onClick={() => void load()}>רענון</button>
+        </>
+      )}
+    </details>
   );
 }

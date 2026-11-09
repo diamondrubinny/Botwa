@@ -116,4 +116,38 @@ describe('automatic reactions', () => {
     expect(total).toBeLessThanOrEqual(30);
     expect(total).toBeGreaterThan(10);
   });
+
+  it('"react to every message" gives 👀 at once and a closing emoji, searches or not', async () => {
+    (mgr as unknown as { reactLog: Map<string, unknown> }).reactLog.clear();   // the burst test above used up this minute's allowance
+    await setBot({ reactions: { ...DEFAULT_REACTIONS, enabled: true, ackAll: true }, kb: { ...DEFAULT_BOT.kb, enabled: false } });
+    const a = await say('9725000201', 'שלום');
+    expect(a.reactions.map((x) => x.emoji)).toEqual(['👀', '✅']);                 // a menu answer: no search, still marked
+    const b = await say('9725000202', '1');
+    expect(b.reactions.map((x) => x.emoji)).toEqual(['👀', '✅']);
+    const c = await say('9725000203', 'נציג');
+    expect(c.reactions.map((x) => x.emoji)).toEqual(['👀', '🙋']);                 // a hand-over replaces the eyes
+    await setBot({ reactions: { ...DEFAULT_REACTIONS, enabled: true, ackAll: true } });
+    const d = await say('9725000204', 'מהן שעות הפעילות שלכם');
+    expect(d.reactions.map((x) => x.emoji)).toEqual(['👀', '✅']);                 // searching: the eyes are not sent twice
+    await setBot({ reactions: { ...DEFAULT_REACTIONS, enabled: true } });
+  });
+
+  it('the diagnostics say what is switched on, why a bot that never searches shows no eyes, and what happened to the last attempts', async () => {
+    expect((await call('GET', '/settings/bot/reactions')).statusCode).toBe(200);
+    await setBot({ reactions: { ...DEFAULT_REACTIONS, enabled: false } });
+    const off = (await call('GET', '/settings/bot/reactions')).json();
+    expect(off.reactionsEnabled).toBe(false);
+    expect(off.hints.join(' ')).toContain('התגובות כבויות');
+    await setBot({ reactions: { ...DEFAULT_REACTIONS, enabled: true }, kb: { ...DEFAULT_BOT.kb, enabled: false } });
+    const nokb = (await call('GET', '/settings/bot/reactions')).json();
+    expect(nokb.searches).toBe(false);
+    expect(nokb.hints.join(' ')).toContain('מענה ממאגר הידע כבוי');
+    await setBot({ reactions: { ...DEFAULT_REACTIONS, enabled: true, ackAll: true }, kb: { ...DEFAULT_BOT.kb, enabled: false } });
+    expect((await call('GET', '/settings/bot/reactions')).json().hints).toEqual([]);   // "react to every message" needs no search
+    const log = (await call('GET', '/settings/bot/reactions')).json().log as { outcome: string; emoji: string; channel: string }[];
+    expect(log.length).toBeGreaterThan(0);
+    expect(log[0]!.channel).toContain('WA');
+    expect(log.some((l) => l.outcome === 'sent')).toBe(true);
+    await setBot({ reactions: { ...DEFAULT_REACTIONS, enabled: true } });
+  });
 });

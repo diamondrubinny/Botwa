@@ -380,6 +380,10 @@ export class ChannelManager {
   }
 
   private reactLog = new Map<string, { minute: number[]; day: number; dayStart: number }>();
+  private reactHistory: { at: number; channelId: string; emoji: string; outcome: string }[] = [];
+  /** The last reaction attempts and what became of each (for the "why is there no reaction" panel). */
+  reactionHistory() { return [...this.reactHistory]; }
+  private noteReact(channelId: string, emoji: string, outcome: string) { this.reactHistory.push({ at: Date.now(), channelId, emoji, outcome }); if (this.reactHistory.length > 30) this.reactHistory.shift(); }
 
   /**
    * An emoji reaction on the customer's message. Reactions answer a message the customer just sent, so they are the safest kind of
@@ -388,18 +392,20 @@ export class ChannelManager {
    */
   async react(channelId: string, externalContactId: string, externalMessageId: string, emoji: string): Promise<boolean> {
     const a = this.adapters.get(channelId);
-    if (!a?.react || this.statuses.get(channelId) !== 'connected') return false;
-    try { await this.assertNotPaused(channelId); } catch { return false; }
+    if (!a?.react) { this.noteReact(channelId, emoji, 'no_support'); return false; }
+    if (this.statuses.get(channelId) !== 'connected') { this.noteReact(channelId, emoji, 'not_connected'); return false; }
+    try { await this.assertNotPaused(channelId); } catch { this.noteReact(channelId, emoji, 'paused'); return false; }
     const now = Date.now();
     const l = this.reactLog.get(channelId) ?? { minute: [], day: 0, dayStart: now };
     if (now - l.dayStart > 86_400_000) { l.day = 0; l.dayStart = now; }
     l.minute = l.minute.filter((t) => now - t < 60_000);
-    if (l.minute.length >= 30 || l.day >= 600) { this.reactLog.set(channelId, l); return false; }
+    if (l.minute.length >= 30 || l.day >= 600) { this.reactLog.set(channelId, l); this.noteReact(channelId, emoji, 'rate_limited'); return false; }
     l.minute.push(now); l.day++; this.reactLog.set(channelId, l);
     try {
       await Promise.race([a.react(externalContactId, externalMessageId, emoji), new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 4000))]);
+      this.noteReact(channelId, emoji, 'sent');
       return true;
-    } catch { return false; }
+    } catch (e) { this.noteReact(channelId, emoji, `error:${(e as Error).message.slice(0, 80)}`); return false; }
   }
 
   /** What the bot does with the reactions of one incoming message: show it is working, then replace that by how it went. */
@@ -595,6 +601,7 @@ export class ChannelManager {
       return;
     }
 
+    if (bot.reactions.ackAll) await rx.set('working');   // "seen, working on it" for every message the bot handles
     if (bot.mode === 'flow') {
       const flow = await loadFlow(this.db);
       if (flow) { await this.runFlowStep(channelId, convId, ext, bot, flow, { text: rawText !== null && rawText.trim() === '[unsupported message type]' ? null : rawText, media: hasMedia }, rx); return; }
@@ -608,6 +615,7 @@ export class ChannelManager {
 
     if (d.handoff) await rx.set('handoff');
     else if (searched) await rx.set(kbText ? 'done' : 'noAnswer');
+    else if (bot.reactions.ackAll) await rx.set('done');
     if (d.handoff) {
       const why = { requested: 'הלקוח ביקש נציג', unrecognized: 'הלקוח שלח הודעה שהבוט לא זיהה', media: 'הלקוח שלח קובץ או תוכן שאינו טקסט', topic: `הלקוח בחר בנושא "${d.topic?.title ?? ''}"` }[d.handoff];
       let userId = d.topic?.userId;
@@ -657,7 +665,7 @@ export class ChannelManager {
     const r = await runFlow(flow, st, input, ctx, bot.humanLabel);
     await this.botSayAll(channelId, convId, ext, bot, r.replies, r.menu);
     const handoff = r.effects.find((e): e is Extract<Effect, { kind: 'handoff' }> => e.kind === 'handoff');
-    if (handoff) await rx.set('handoff'); else if (searched) await rx.set(found ? 'done' : 'noAnswer');
+    if (handoff) await rx.set('handoff'); else if (searched) await rx.set(found ? 'done' : 'noAnswer'); else if (bot.reactions.ackAll) await rx.set('done');
     await this.db.query('UPDATE conversations SET flow_state = $2, bot_state = $3 WHERE id = $1', [convId, JSON.stringify(r.state), handoff ? 'human' : 'menu']);
     for (const e of r.effects) {
       if (e.kind === 'note') await this.db.query('INSERT INTO conversation_notes (conversation_id, body) VALUES ($1, $2)', [convId, e.text]).catch(() => undefined);
