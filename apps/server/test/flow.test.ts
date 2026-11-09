@@ -7,7 +7,8 @@ import { ChannelManager } from '../src/channels/manager.js';
 import type { AdapterContext, AdapterFactory, ChannelAdapter } from '../src/channels/types.js';
 import { loadConfig } from '../src/config.js';
 import { createDb } from '../src/db.js';
-import { runFlow, type FlowContext, type FlowState } from '../src/flow/engine.js';
+import { ANSWER_HINT, runFlow, type FlowContext, type FlowState } from '../src/flow/engine.js';
+const ANSWER_TAIL = `\n\n${ANSWER_HINT}`;
 import { flowFromMenu } from '../src/flow/fromMenu.js';
 import { matchOptionLexical } from '../src/flow/match.js';
 import { flowSchema, unreachable, validateFlow, type Flow } from '../src/flow/schema.js';
@@ -91,11 +92,11 @@ describe('flow engine', () => {
     const kbCtx = ctx({ kbAnswer: async (t) => (t.includes('חניה') ? 'יש חניה חינם.' : null) });
     let r = await runFlow(flow, null, 'שלום', kbCtx);
     r = await runFlow(flow, r.state, 'יש חניה?', kbCtx);
-    expect(r.replies[0]).toBe('יש חניה חינם.');
-    expect(r.replies[1]).toContain('במה נוכל לעזור'); // stays at the menu
+    expect(r.replies).toEqual([`יש חניה חינם.${ANSWER_TAIL}`]);   // the answer only: the menu is not repeated
+    expect(r.state.node).toBe('menu');                             // ...but the customer is still at the menu (digits work)
     expect(r.state.node).toBe('menu');
     const first = await runFlow({ ...flow, start: 'menu' }, null, 'יש חניה?', kbCtx); // even the very first message when the flow starts at a menu
-    expect(first.replies[0]).toBe('יש חניה חינם.');
+    expect(first.replies).toEqual([`יש חניה חינם.${ANSWER_TAIL}`]);
     r = await runFlow(flow, r.state, 'בלה בלה', ctx());
     expect(r.replies[0]).toContain('לא הבנתי');
     r = await runFlow(flow, r.state, 'עוד בלה', ctx());
@@ -638,11 +639,15 @@ describe('smart questions (kbFirst + did-you-mean)', () => {
     kbSource: async (id) => (id === 's1' ? 'תשובה: נהלי לייזר' : null), ...over,
   });
 
-  it('answers a question in the first message, then still shows the menu', async () => {
-    const r = await runFlow(smart, null, 'איך מפנים פסולת כימית?', ctx({ kbAnswer: async () => 'תשובה על פסולת' }));
-    expect(r.replies[0]).toBe('תשובה על פסולת');
-    expect(r.replies.join('\n')).toContain('במה נוכל לעזור?');
-    expect(r.state.node).toBe('menu');
+  it('answers a question in the first message with the answer only; the flow starts with the next ordinary message', async () => {
+    const c = ctx({ kbAnswer: async (t) => (t.includes('פסולת') ? 'תשובה על פסולת' : null) });
+    const r = await runFlow(smart, null, 'איך מפנים פסולת כימית?', c);
+    expect(r.replies).toEqual([`תשובה על פסולת${ANSWER_TAIL}`]);
+    expect(r.state.node).toBeNull();
+    const again = await runFlow(smart, r.state, 'ועוד שאלה על פסולת?', c);   // a second question: answered too, still no menu
+    expect(again.replies).toEqual([`תשובה על פסולת${ANSWER_TAIL}`]);
+    const next = await runFlow(smart, again.state, 'תפריט', c);
+    expect(next.replies.join('\n')).toContain('במה נוכל לעזור?');
   });
   it('does not search for greetings, numbers or very short text, nor when the flow is not kbFirst', async () => {
     let calls = 0;
@@ -660,8 +665,7 @@ describe('smart questions (kbFirst + did-you-mean)', () => {
     expect(r1.replies[0]).toContain('ב. הגנת עיניים');
     expect(r1.state.suggest).toHaveLength(2);
     const r2 = await runFlow(smart, r1.state, 'א', sugCtx());
-    expect(r2.replies[0]).toBe('תשובה: נהלי לייזר');
-    expect(r2.replies[1]).toContain('במה נוכל לעזור?');
+    expect(r2.replies).toEqual([`תשובה: נהלי לייזר${ANSWER_TAIL}`]);
     expect(r2.state.suggest).toBeUndefined();
   });
   it('forgets the suggestions once the customer does something else', async () => {
@@ -692,7 +696,7 @@ describe('a question typed during identification', () => {
     const first = await runFlow(q, null, 'שלום', ans);
     expect(first.replies).toEqual(['שם מלא:']);
     const r = await runFlow(q, first.state, 'מה הגובה המותר לעבוד ללא היתר', ans);
-    expect(r.replies).toEqual(['עד 2 מטר ללא היתר', 'שם מלא:']);
+    expect(r.replies).toEqual([`עד 2 מטר ללא היתר${ANSWER_TAIL}`]);   // the answer only, the name is not asked again
     expect(r.state.node).toBe('n');
     expect(r.state.vars.fullName).toBeUndefined();            // the question was not taken as the name
     const ok = await runFlow(q, r.state, 'דנה לוי', ans);
@@ -705,7 +709,7 @@ describe('a question typed during identification', () => {
     expect(r.state.vars.fullName).toBeUndefined();
     expect(r.state.node).toBe('n');
     expect(r.replies[0]).toContain('לא מצאתי תשובה');
-    expect(r.replies[0]).toContain('שם מלא:');
+    expect(r.replies[0]).not.toContain('שם מלא:');
     const named = await runFlow(q, r.state, 'דנה', ans);
     const b = await runFlow(q, named.state, 'האם אפשר לעבוד מעל 7 שלבים בסולם ללא היתר?', ans);
     expect(b.state.node).toBe('b');
@@ -717,7 +721,7 @@ describe('a question typed during identification', () => {
     const r = await runFlow(q, first.state, 'האם אפשר לעבוד מעל 7 שלבים בסולם ללא היתר?', c);
     expect(r.replies[0]).toContain('א. עבודה על סולמות');
     const p = await runFlow(q, r.state, 'א', c);
-    expect(p.replies).toEqual(['סולם: עד 2 מטר', 'שם מלא:']);
+    expect(p.replies).toEqual([`סולם: עד 2 מטר${ANSWER_TAIL}`]);
     expect(p.state.vars.fullName).toBeUndefined();
     const n = await runFlow(q, p.state, 'דנה לוי', c);
     expect(n.state.vars.fullName).toBe('דנה לוי');

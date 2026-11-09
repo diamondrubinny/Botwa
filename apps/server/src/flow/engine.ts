@@ -60,6 +60,9 @@ const YES = new Set(['כן', 'yes', 'y', '1', 'עוד']);
 const NO = new Set(['לא', 'no', 'n', '2', 'די', 'זהו', 'סיימתי']);
 const GREETINGS = new Set(['שלום', 'היי', 'הי', 'הלו', 'אהלן', 'בוקר טוב', 'ערב טוב', 'צהריים טובים', 'תודה', 'תודה רבה', 'ok', 'אוקיי', 'אוקי', 'hello', 'hi']);
 const LETTERS = ['א', 'ב', 'ג'];
+/** added under a knowledge-base answer instead of repeating the menu or the pending question */
+export const ANSWER_HINT = 'לשאלה נוספת פשוט כתבו אותה. לתפריט כתבו "תפריט".';
+const withHint = (a: string) => `${a}\n\n${ANSWER_HINT}`;
 const DEFAULT_LABELS: Record<string, string> = { name: 'שם', phone: 'טלפון', email: 'אימייל', text: 'פירוט' };
 
 const menuText = (n: Extract<FlowNode, { type: 'menu' }>, humanOption: boolean, humanLabel = 'נציג אנושי') =>
@@ -133,7 +136,7 @@ export async function runFlow(flow: Flow, prev: FlowState | null, input: FlowInp
     const pick = k >= 0 ? state.suggest[k] : undefined;
     if (pick && ctx.kbSource) {
       const a = await ctx.kbSource(pick.id, pick.label).catch(() => null);
-      if (a) { replies.push(a, w.type === 'menu' ? menuText(w, ctx.humanOption, humanLabel) : w.text); return { replies, state: { ...state, suggest: undefined, invalid: 0 }, effects, menu: w.type === 'menu' }; }
+      if (a) { replies.push(withHint(a)); return { replies, state: { ...state, suggest: undefined, invalid: 0 }, effects }; }
     }
   }
   if (state.suggest) state = { ...state, suggest: undefined };
@@ -151,12 +154,12 @@ export async function runFlow(flow: Flow, prev: FlowState | null, input: FlowInp
         if (!cursor) return finished();
       } else {
         const a = w.kbOnFreeText && !/^\d{1,2}$/.test(t) ? await ctx.kbAnswer(inp.text!).catch(() => null) : null;
-        if (a) { replies.push(a); replies.push(menuText(w, ctx.humanOption, humanLabel)); return { replies, state: { ...state, invalid: 0 }, effects, menu: true }; }
+        if (a) { replies.push(withHint(a)); return { replies, state: { ...state, invalid: 0 }, effects }; }
         // no confident answer: offer the closest entries ("did you mean")
         const sug = w.kbOnFreeText && ctx.kbSuggest && !/^\d{1,2}$/.test(t) ? (await ctx.kbSuggest(inp.text!).catch(() => [])).slice(0, 3) : [];
         if (sug.length && state.invalid < ctx.invalidRetries) {
-          replies.push(`לא מצאתי תשובה מדויקת. האם התכוונתם לאחד מאלה?\n${sug.map((x, i) => `${LETTERS[i]}. ${x.label}`).join('\n')}\n\nכתבו את האות, או בחרו מהתפריט:\n\n${menuText(w, ctx.humanOption, humanLabel)}`);
-          return { replies, state: { ...state, suggest: sug, invalid: state.invalid + 1 }, effects, menu: true };
+          replies.push(`לא מצאתי תשובה מדויקת. האם התכוונתם לאחד מאלה?\n${sug.map((x, i) => `${LETTERS[i]}. ${x.label}`).join('\n')}\n\nכתבו את האות. לתפריט כתבו "תפריט".`);
+          return { replies, state: { ...state, suggest: sug, invalid: state.invalid + 1 }, effects };
         }
         if (state.invalid < ctx.invalidRetries) { replies.push(`${ctx.invalidMessage}\n\n${menuText(w, ctx.humanOption, humanLabel)}`); return { replies, state: { ...state, invalid: state.invalid + 1 }, effects, menu: true }; }
         return handoff('unrecognized');
@@ -164,12 +167,12 @@ export async function runFlow(flow: Flow, prev: FlowState | null, input: FlowInp
     } else if (w.type === 'question' && w.kbAside && hasText && looksLikeQuestion(t) && t.length >= 6) {
       // a question instead of the answer: answer it from the knowledge base and ask again. It is never stored as the answer.
       const a = await ctx.kbAnswer(inp.text!).catch(() => null);
-      if (a) return { replies: [a, w.text], state: { ...state, invalid: 0 }, effects };
+      if (a) return { replies: [withHint(a)], state: { ...state, invalid: 0 }, effects };
       const sug = ctx.kbSuggest ? (await ctx.kbSuggest(inp.text!).catch(() => [])).slice(0, 3) : [];
       if (sug.length) {
-        return { replies: [`לא מצאתי תשובה מדויקת. האם התכוונתם לאחד מאלה?\n${sug.map((x, i) => `${LETTERS[i]}. ${x.label}`).join('\n')}\n\nכתבו את האות, או המשיכו:\n${w.text}`], state: { ...state, suggest: sug }, effects };
+        return { replies: [`לא מצאתי תשובה מדויקת. האם התכוונתם לאחד מאלה?\n${sug.map((x, i) => `${LETTERS[i]}. ${x.label}`).join('\n')}\n\nכתבו את האות.`], state: { ...state, suggest: sug }, effects };
       }
-      return { replies: [`לא מצאתי תשובה לשאלה הזו במאגר. אפשר לכתוב "נציג" ונציג יחזור אליכם, או להמשיך:\n${w.text}`], state, effects };
+      return { replies: ['לא מצאתי תשובה לשאלה הזו במאגר. אפשר לנסח אחרת, או לכתוב "נציג" ונציג יחזור אליכם.'], state, effects };
     } else if (w.type === 'question') {
       if (w.optional && SKIP_WORDS.has(t)) {
         state = { ...state, invalid: 0 };
@@ -236,14 +239,15 @@ export async function runFlow(flow: Flow, prev: FlowState | null, input: FlowInp
     // flows with kbFirst answer a question in the very first message before anything else (then carry on, e.g. with identification)
     const askable = hasText && !/^\d{1,2}$/.test(t) && !MENU_WORDS.has(t) && !GREETINGS.has(t) && t.length >= 6 && !ctx.humanKeywords.some((k) => t.includes(normalize(k)));
     if (flow.kbFirst && fresh && askable) {
+      // answered: just the answer. The flow starts with the next message that is not another question.
       const a = await ctx.kbAnswer(inp.text!).catch(() => null);
-      if (a) replies.push(a);
+      if (a) return { replies: [withHint(a)], state, effects };
     }
     // the very first message may already be a question the knowledge base can answer
     const first = nodes.get(flow.start);
     if (first?.type === 'menu' && askable && first.kbOnFreeText && !flow.kbFirst) {
       const a = await ctx.kbAnswer(inp.text!).catch(() => null);
-      if (a) { replies.push(a, menuText(first, ctx.humanOption, humanLabel)); return { replies, state: { ...state, node: first.id }, effects, menu: true }; }
+      if (a) { replies.push(withHint(a)); return { replies, state: { ...state, node: first.id }, effects }; }
     }
   }
 
