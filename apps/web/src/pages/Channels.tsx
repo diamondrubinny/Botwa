@@ -334,7 +334,7 @@ function CloudPanel({ channel, onSaved }: { channel: Channel; onSaved: () => voi
 type Level = 'off' | 'optional' | 'required';
 interface WebCfg {
   design: { title: string; subtitle: string; welcome: string; color: string; position: 'left' | 'right'; launcherLabel: string; launcherIcon: 'chat' | 'help' | 'message'; language: 'he' | 'en' };
-  behavior: { askName: Level; askEmail: Level; askPhone: Level; popupText: string; popupDelaySec: number; autoOpenSec: number; showAgentName: boolean; consentText: string; consentLink: string; offlineMessage: string; maxLength: number };
+  behavior: { askName: Level; askEmail: Level; askPhone: Level; popupText: string; popupDelaySec: number; autoOpenSec: number; showAgentName: boolean; consentText: string; consentLink: string; offlineMessage: string; maxLength: number; suggestions?: boolean };
   allowedOrigins: string[]; allowAnyOrigin: boolean; publicKey: string; embedCode: string; previewUrl: string; status: string;
 }
 const LEVELS: [Level, string][] = [['off', 'לא לבקש'], ['optional', 'לא חובה'], ['required', 'חובה']];
@@ -414,6 +414,8 @@ function WebChatPanel({ channel, onSaved }: { channel: Channel; onSaved: () => v
           <div className="field"><label htmlFor={id('ao')}>פתיחה אוטומטית אחרי (שניות, 0 = לא)</label><input id={id('ao')} type="number" min={0} max={300} value={c.behavior.autoOpenSec} onChange={(e) => b({ autoOpenSec: Number(e.target.value) })} /></div>
         </div>
         <div className="field"><label><input type="checkbox" style={{ width: 'auto', minHeight: 'auto' }} checked={c.behavior.showAgentName} onChange={(e) => b({ showAgentName: e.target.checked })} /> להציג לגולש את השם הפרטי של הנציג שעונה</label></div>
+        <div className="field"><label><input type="checkbox" style={{ width: 'auto', minHeight: 'auto' }} checked={c.behavior.suggestions !== false} onChange={(e) => b({ suggestions: e.target.checked })} /> השלמה אוטומטית: בזמן שהגולש מקליד, להציע שאלות נפוצות ממאגר הידע עם תשובה מיידית</label>
+          <p className="hint">מוצגות רק שאלות ותשובות (FAQ) שסומנו לבוט. התשובה מוצגת לגולש בלבד ולא נשלחת לתיבת השיחות; אם לא עזרה, הוא כותב כרגיל.</p></div>
         <div className="field"><label htmlFor={id('off')}>הודעה מחוץ לשעות הפעילות</label><textarea id={id('off')} rows={2} maxLength={300} value={c.behavior.offlineMessage} onChange={(e) => b({ offlineMessage: e.target.value })} /></div>
         <div className="field"><label htmlFor={id('cons')}>הצהרת הסכמה לפני תחילת שיחה (אופציונלי)</label><input id={id('cons')} maxLength={300} value={c.behavior.consentText} onChange={(e) => b({ consentText: e.target.value })} placeholder="קראתי ואני מסכים/ה למדיניות הפרטיות" /><p className="hint">אם מוגדרת, הגולש חייב לסמן אותה, והאישור נרשם בשיחה. מומלץ לכלול קישור למדיניות. ניסוח ההצהרה דורש בדיקה משפטית.</p></div>
         <div className="field"><label htmlFor={id('cl')}>קישור למדיניות הפרטיות (https)</label><input id={id('cl')} dir="ltr" maxLength={300} value={c.behavior.consentLink} onChange={(e) => b({ consentLink: e.target.value })} placeholder="https://example.com/privacy" /></div>

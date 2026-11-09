@@ -27,6 +27,8 @@ export const behaviorSchema = z.object({
   consentLink: z.string().trim().max(300).refine((v) => v === '' || /^https:\/\/[^\s]+$/.test(v), 'https only').default(''),
   offlineMessage: z.string().trim().max(300).default('אנחנו לא זמינים כרגע. אפשר להשאיר הודעה ונחזור אליכם.'),
   maxLength: z.number().int().min(100).max(4000).default(2000),
+  /** while the visitor types, offer matching questions from the knowledge base with an instant answer */
+  suggestions: z.boolean().default(true),
 }).strict();
 
 export type Design = z.infer<typeof designSchema>;

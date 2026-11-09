@@ -4,8 +4,8 @@
   var key = decodeURIComponent((location.pathname.match(/^\/w\/([\w-]+)/) || [])[1] || '');
   var app = document.getElementById('app');
   var T = {
-    he: { loading: 'טוען…', send: 'שליחה', msg: 'כתבו הודעה…', msgLabel: 'ההודעה שלכם', start: 'התחלת שיחה', name: 'שם', email: 'אימייל', phone: 'טלפון', optional: ' (לא חובה)', close: 'סגירת הצ׳אט', you: 'אתם', team: 'הצוות', bot: 'הבוט', consent: 'יש לאשר כדי להמשיך.', required: 'שדה חובה', badEmail: 'כתובת אימייל לא תקינה', badPhone: 'מספר טלפון לא תקין', failed: 'השליחה נכשלה. נסו שוב.', offline: 'לא ניתן להתחבר כרגע. נסו שוב מאוחר יותר.', limit: 'שלחתם הרבה הודעות. נסו שוב בעוד רגע.', privacy: 'מדיניות הפרטיות', log: 'שיחה', newmsg: 'הודעה חדשה' },
-    en: { loading: 'Loading…', send: 'Send', msg: 'Type a message…', msgLabel: 'Your message', start: 'Start chat', name: 'Name', email: 'Email', phone: 'Phone', optional: ' (optional)', close: 'Close chat', you: 'You', team: 'Team', bot: 'Bot', consent: 'Please accept to continue.', required: 'Required', badEmail: 'Invalid email address', badPhone: 'Invalid phone number', failed: 'Sending failed. Please try again.', offline: 'Cannot connect right now. Please try again later.', limit: 'You are sending too fast. Try again in a moment.', privacy: 'Privacy policy', log: 'Conversation', newmsg: 'New message' }
+    he: { sugLabel: 'שאלות נפוצות מתאימות', sugCount: ' שאלות נפוצות מתאימות. חצים למעלה ולמטה לבחירה, Enter לתשובה.', faq: 'תשובה מהמאגר', faqHint: 'לא מה שחיפשתם? כתבו לנו ונחזור אליכם.', loading: 'טוען…', send: 'שליחה', msg: 'כתבו הודעה…', msgLabel: 'ההודעה שלכם', start: 'התחלת שיחה', name: 'שם', email: 'אימייל', phone: 'טלפון', optional: ' (לא חובה)', close: 'סגירת הצ׳אט', you: 'אתם', team: 'הצוות', bot: 'הבוט', consent: 'יש לאשר כדי להמשיך.', required: 'שדה חובה', badEmail: 'כתובת אימייל לא תקינה', badPhone: 'מספר טלפון לא תקין', failed: 'השליחה נכשלה. נסו שוב.', offline: 'לא ניתן להתחבר כרגע. נסו שוב מאוחר יותר.', limit: 'שלחתם הרבה הודעות. נסו שוב בעוד רגע.', privacy: 'מדיניות הפרטיות', log: 'שיחה', newmsg: 'הודעה חדשה' },
+    en: { sugLabel: 'Matching common questions', sugCount: ' matching common questions. Use up and down arrows, Enter for the answer.', faq: 'Answer from our help center', faqHint: 'Not what you were looking for? Write to us and we will get back to you.', loading: 'Loading…', send: 'Send', msg: 'Type a message…', msgLabel: 'Your message', start: 'Start chat', name: 'Name', email: 'Email', phone: 'Phone', optional: ' (optional)', close: 'Close chat', you: 'You', team: 'Team', bot: 'Bot', consent: 'Please accept to continue.', required: 'Required', badEmail: 'Invalid email address', badPhone: 'Invalid phone number', failed: 'Sending failed. Please try again.', offline: 'Cannot connect right now. Please try again later.', limit: 'You are sending too fast. Try again in a moment.', privacy: 'Privacy policy', log: 'Conversation', newmsg: 'New message' }
   };
   var L = T.he, cfg = null, token = null, identity = null, after = 0, polling = false, shown = {}, started = false, formShownAt = Date.now();
   var els = {};
@@ -63,7 +63,67 @@
     var btn = h('button', { type: 'submit', class: 'send', 'aria-label': L.send, text: '➤' });
     var err = h('div', { class: 'err', role: 'alert' });
     var form = h('form', { class: 'composer' }, [ta, btn]);
-    ta.addEventListener('keydown', function (e) { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); form.requestSubmit(); } });
+    // ---- question suggestions while typing (knowledge-base FAQ); the answer is shown here only, nothing is sent ----
+    var sug = h('ul', { class: 'sug', id: 'sug', role: 'listbox', 'aria-label': L.sugLabel });
+    var sugLive = h('div', { class: 'sr-only', role: 'status', 'aria-live': 'polite' });
+    sug.hidden = true;
+    var items = [], active = -1, timer = null, lastQ = '', sugOff = cfg.behavior.suggestions === false;
+    ta.setAttribute('aria-autocomplete', 'list');
+    ta.setAttribute('aria-controls', 'sug');
+    function closeSug() { sug.hidden = true; sug.textContent = ''; items = []; active = -1; ta.removeAttribute('aria-activedescendant'); }
+    function markSug(i) {
+      active = i;
+      Array.prototype.forEach.call(sug.children, function (li, k) { li.setAttribute('aria-selected', k === i ? 'true' : 'false'); });
+      if (i >= 0) { ta.setAttribute('aria-activedescendant', 'sug-' + i); var el = sug.children[i]; if (el && el.scrollIntoView) el.scrollIntoView({ block: 'nearest' }); } else ta.removeAttribute('aria-activedescendant');
+    }
+    function renderSug(list) {
+      sug.textContent = ''; items = list; active = -1;
+      if (!list.length) { closeSug(); return; }
+      list.forEach(function (it, i) {
+        var li = h('li', { id: 'sug-' + i, role: 'option', 'aria-selected': 'false', text: it.q });
+        li.addEventListener('mousedown', function (e) { e.preventDefault(); pickSug(i); });
+        sug.appendChild(li);
+      });
+      sug.hidden = false;
+      sugLive.textContent = list.length + L.sugCount;
+    }
+    function localMsg(cls, who, text, hint) {
+      var box = h('div', { class: 'msg ' + cls });
+      box.appendChild(h('span', { class: 'who', text: who }));
+      var body = h('span'); linkify(text, body); box.appendChild(body);
+      if (hint) box.appendChild(h('span', { class: 'faq-hint', text: hint }));
+      els.log.appendChild(box); els.log.scrollTop = els.log.scrollHeight;
+    }
+    function pickSug(i) {
+      var it = items[i]; if (!it) return;
+      closeSug(); ta.value = ''; lastQ = '';
+      api('GET', '/widget/answer/' + encodeURIComponent(it.id), null, true).then(function (r) {
+        localMsg('me', L.you, r.q);
+        localMsg('them', L.faq, r.a + (r.url ? '\n' + r.url : ''), L.faqHint);
+      }).catch(function () { /* the visitor can still write */ }).then(function () { ta.focus(); });
+    }
+    ta.addEventListener('input', function () {
+      if (sugOff) return;
+      clearTimeout(timer);
+      var q = ta.value.trim();
+      if (q.length < 3 || q.length > 120) { lastQ = ''; closeSug(); return; }
+      if (q === lastQ) return;
+      timer = setTimeout(function () {
+        lastQ = q;
+        api('GET', '/widget/suggest?q=' + encodeURIComponent(q), null, true)
+          .then(function (r) { if (ta.value.trim() === q) renderSug(r.items || []); })
+          .catch(closeSug);
+      }, 250);
+    });
+    ta.addEventListener('blur', function () { setTimeout(closeSug, 150); });
+    ta.addEventListener('keydown', function (e) {
+      if (sug.hidden || !items.length) return;
+      if (e.key === 'ArrowDown') { e.preventDefault(); markSug(active < items.length - 1 ? active + 1 : 0); }
+      else if (e.key === 'ArrowUp') { e.preventDefault(); markSug(active > 0 ? active - 1 : items.length - 1); }
+      else if (e.key === 'Escape') { e.preventDefault(); closeSug(); }
+      else if (e.key === 'Enter' && active >= 0) { e.preventDefault(); e.stopImmediatePropagation(); pickSug(active); }
+    });
+    ta.addEventListener('keydown', function (e) { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); closeSug(); form.requestSubmit(); } });
     form.addEventListener('submit', function (e) {
       e.preventDefault();
       var text = ta.value.trim(); if (!text) return;
@@ -74,7 +134,7 @@
         .catch(function (er) { pending = extra; err.textContent = er.status === 429 ? L.limit : L.failed; })
         .then(function () { btn.disabled = false; ta.focus(); });
     });
-    kids.push(els.log, err, form);
+    kids.push(els.log, err, sug, sugLive, form);
     kids.forEach(function (k) { app.appendChild(k); });
     api('GET', '/widget/messages?after=0', null, true).then(function (r) { (r.messages || []).forEach(addMessage); started = (r.messages || []).length > 0; poll(); }).catch(function () { /* retried by poll */ });
     ta.focus();

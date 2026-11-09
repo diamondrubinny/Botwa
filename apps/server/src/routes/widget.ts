@@ -153,6 +153,43 @@ export function widgetRoutes(app: FastifyInstance, db: Db, mgr: ChannelManager, 
     return { ok: true, seq: row ? Number(row.seq) : undefined };
   });
 
+  // ---- question suggestions (autocomplete) --------------------------------------------------------------------------
+  // Only questions from the knowledge base marked for the bot (FAQ entries), only for a visitor with a session, rate-limited.
+  const suggestOn = async (channelId: string) => {
+    const r = (await db.query('SELECT behavior FROM webchat_configs WHERE channel_id = $1', [channelId])).rows[0];
+    return behaviorSchema.safeParse(r?.behavior ?? {}).data?.suggestions !== false;
+  };
+  const FAQ = `s.kind = 'faq' AND s.enabled AND s.status = 'ready' AND s.audience IN ('bot', 'both')`;
+  app.get('/widget/suggest', { config: perVisitor(60) }, async (req, reply) => {
+    const v = await visitorFrom(req);
+    if (!v) return reply.code(401).send({ error: 'unauthorized' });
+    if (!(await suggestOn(v.channel_id))) return { items: [] };
+    const q = clean((req.query as { q?: unknown }).q, 120).toLowerCase();
+    if (q.length < 3) return { items: [] };
+    const like = `%${q.replace(/[\\%_]/g, '\\$&')}%`;
+    const direct = (await db.query(
+      `SELECT s.id, s.title FROM kb_sources s
+        WHERE ${FAQ} AND (lower(s.title) LIKE $1 OR EXISTS (SELECT 1 FROM unnest(s.variants) x WHERE lower(x) LIKE $1))
+        ORDER BY (lower(s.title) LIKE $2) DESC, s.uses DESC, length(s.title) LIMIT 5`, [like, `${q.replace(/[\\%_]/g, '\\$&')}%`])).rows as { id: string; title: string }[];
+    const items = direct.map((r) => ({ id: r.id, q: r.title }));
+    if (items.length < 5 && mgr.kb && q.includes(' ')) {
+      // whole words typed: also entries that share several of them (Hebrew prefixes included)
+      const hits = await mgr.kb.search(q, { audience: 'bot', limit: 8 }).catch(() => []);
+      for (const h of hits) if (h.kind === 'faq' && (h.matched >= 2 || h.exact) && !items.some((x) => x.id === h.sourceId) && items.length < 5) items.push({ id: h.sourceId, q: h.title });
+    }
+    return { items };
+  });
+  app.get('/widget/answer/:id', { config: perVisitor(30) }, async (req, reply) => {
+    const v = await visitorFrom(req);
+    if (!v) return reply.code(401).send({ error: 'unauthorized' });
+    const id = (req.params as { id?: string }).id ?? '';
+    if (!/^[0-9a-f-]{36}$/.test(id) || !(await suggestOn(v.channel_id))) return reply.code(404).send({ error: 'not_found' });
+    const r = (await db.query(`UPDATE kb_sources s SET uses = uses + 1 WHERE s.id = $1 AND ${FAQ} RETURNING s.title, s.body, s.url`, [id])).rows[0];
+    if (!r) return reply.code(404).send({ error: 'not_found' });
+    await mgr.kb?.logQuery(r.title as string, 'bot', true, 1, id).catch(() => undefined);
+    return { q: r.title, a: String(r.body ?? '').slice(0, 2000), url: typeof r.url === 'string' && /^https:\/\//.test(r.url) ? r.url : null };
+  });
+
   app.get('/widget/messages', { config: perVisitor(90) }, async (req, reply) => {
     const v = await visitorFrom(req);
     if (!v) return reply.code(401).send({ error: 'unauthorized' });

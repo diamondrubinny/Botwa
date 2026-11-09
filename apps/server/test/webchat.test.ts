@@ -224,4 +224,32 @@ describe('website chat widget', () => {
     expect((await pub('POST', '/widget/messages', t, { text: 'עוד', consent: true })).json()).toEqual({ error: 'chat_offline' });
     expect((await app.inject({ url: `/widget/config?key=${key}` })).json().available).toBe(false);
   });
+
+  it('suggests matching FAQ questions while the visitor types, with the answer on demand; only bot FAQs; can be switched off', async () => {
+    const faq = (title: string, body: string, audience = 'both', variants: string[] = []) => staff('POST', '/kb/sources/faq', 'admin@t.io', { title, body, variants, audience });
+    const ship = (await faq('כמה זמן לוקח משלוח', 'משלוח עד 3 ימי עסקים. פרטים: https://shop.example.com/ship', 'both', ['מתי תגיע ההזמנה'])).json().id as string;
+    await faq('איך מחזירים מוצר', 'החזרה תוך 14 יום.');
+    await faq('מה הסיסמה של מערכת הקופה', 'סוד פנימי', 'staff');                                  // staff only: never suggested
+    await mgr.kb!.idle();
+    const s = (await pub('POST', '/widget/session', undefined, { key })).json().token as string;
+    expect((await pub('GET', '/widget/suggest?q=משלוח')).statusCode).toBe(401);               // a session is needed
+    expect((await pub('GET', '/widget/suggest?q=מש', s)).json()).toEqual({ items: [] });       // too short
+    expect((await pub('GET', '/widget/suggest?q=משלוח', s)).json().items).toEqual([{ id: ship, q: 'כמה זמן לוקח משלוח' }]);
+    expect((await pub('GET', '/widget/suggest?q=מתי תגיע', s)).json().items.map((x: { id: string }) => x.id)).toEqual([ship]);   // by another wording
+    expect((await pub('GET', '/widget/suggest?q=סיסמה', s)).json().items).toEqual([]);
+    expect((await pub('GET', `/widget/suggest?q=${encodeURIComponent('%_%')}`, s)).json().items).toEqual([]);   // wildcards are plain text
+    const a = (await pub('GET', `/widget/answer/${ship}`, s)).json();
+    expect(a).toEqual({ q: 'כמה זמן לוקח משלוח', a: 'משלוח עד 3 ימי עסקים. פרטים: https://shop.example.com/ship', url: null });
+    const staffOnly = (await db.query(`SELECT id FROM kb_sources WHERE title = 'מה הסיסמה של מערכת הקופה'`)).rows[0].id;
+    expect((await pub('GET', `/widget/answer/${staffOnly}`, s)).statusCode).toBe(404);
+    expect((await pub('GET', '/widget/answer/not-an-id', s)).statusCode).toBe(404);
+    expect((await db.query(`SELECT uses FROM kb_sources WHERE id = $1`, [ship])).rows[0].uses).toBeGreaterThan(0);
+    // off in the settings: nothing is suggested or answered
+    const g = (await staff('GET', `/channels/${channelId}/webchat`, 'admin@t.io')).json();
+    expect(g.behavior.suggestions).toBe(true);
+    await staff('PUT', `/channels/${channelId}/webchat`, 'admin@t.io', { design: g.design, behavior: { ...g.behavior, suggestions: false }, allowedOrigins: g.allowedOrigins, allowAnyOrigin: g.allowAnyOrigin });
+    expect((await pub('GET', '/widget/suggest?q=משלוח', s)).json()).toEqual({ items: [] });
+    expect((await pub('GET', `/widget/answer/${ship}`, s)).statusCode).toBe(404);
+    await staff('PUT', `/channels/${channelId}/webchat`, 'admin@t.io', { design: g.design, behavior: { ...g.behavior, suggestions: true }, allowedOrigins: g.allowedOrigins, allowAnyOrigin: g.allowAnyOrigin });
+  });
 });
