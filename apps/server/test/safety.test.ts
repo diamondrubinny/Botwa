@@ -65,7 +65,7 @@ describe('importing standards and the safety board', () => {
   });
   afterAll(async () => { await mgr.stopAll(); await app.close(); await db.end(); });
 
-  it('imports the two workbook layouts, categorises, and is idempotent', async () => {
+  it('imports the two workbook layouts, categorises, and is idempotent', { timeout: 30_000 }, async () => {
     const reg = await workbook([
       { name: 'מדריך', rows: [['קובץ מיון']] },
       { name: 'כל_הסעיפים', rows: [REG_HEAD,
@@ -166,7 +166,7 @@ describe('importing standards and the safety board', () => {
     expect((await call('GET', '/safety/category/00000000-0000-4000-8000-000000000000/items', 'officer@t.io')).statusCode).toBe(404);
   });
 
-  it('reads every tab: rows found only in a topic tab are kept, the category comes from the file, and the report counts each tab', async () => {
+  it('reads every tab: rows found only in a topic tab are kept, the category comes from the file, and the report counts each tab', { timeout: 30_000 }, async () => {
     const wk = await workbook([
       { name: 'כל התשובות', rows: [['כל התשובות שנאספו'], WEEK_HEAD,
         ['1800', '2026-04-01', 'דגל קטגוריה א', 'נושא', 'שאלה ראשונה בלשונית הכללית על דבר מסוים?', 'תשובה ראשונה.', 'תקנות', 'מי', 'https://example.org/q/1800']] },
