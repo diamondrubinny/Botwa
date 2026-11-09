@@ -9,8 +9,17 @@ export function isSingleEmoji(v: string): boolean {
   return seg.length === 1 && /\p{Extended_Pictographic}/u.test(v);
 }
 const emoji = z.string().refine(isSingleEmoji, 'emoji');
+const GREET_HEAD = new Set(['שלום', 'היי', 'הי', 'הלו', 'אהלן', 'אהלא', 'בוקר', 'ערב', 'צהריים', 'hello', 'hi', 'hey']);
+const GREET_TAIL = new Set(['טוב', 'טובים', 'רב', 'וברכה', 'לכולם', 'לך', 'לכם', 'אליכם', 'חברים', 'בוט', 'שוב', 'אחי', 'אחות']);
+/** A message that is only a greeting ("שלום", "היי שוב", "בוקר טוב"): at most four words, all greeting vocabulary. */
+export function isGreeting(text: string | null): boolean {
+  if (!text) return false;
+  const w = text.toLowerCase().replace(/[!.,?׳'"״:;()\u{1F300}-\u{1FAFF}\u2600-\u27BF]/gu, ' ').split(/\s+/).filter(Boolean);
+  return w.length >= 1 && w.length <= 4 && w.some((x) => GREET_HEAD.has(x)) && w.every((x) => GREET_HEAD.has(x) || GREET_TAIL.has(x));
+}
+
 /** Automatic reactions to the customer's message by what the bot is doing. Off until switched on. */
-export const DEFAULT_REACTIONS = { enabled: false, ackAll: false, working: '👀', done: '✅', noAnswer: '🤔', handoff: '🙋' };
+export const DEFAULT_REACTIONS = { enabled: false, ackAll: false, working: '👀', done: '✅', noAnswer: '🤔', handoff: '🙋', greeting: '👋' };
 
 export const botSchema = z.object({
   enabled: z.boolean(),
@@ -56,7 +65,7 @@ export const botSchema = z.object({
     intro: z.string().trim().max(120),
   }).default({ enabled: false, minScore: 0.6, maxChars: 700, showSource: true, intro: 'מצאתי את זה במאגר המידע שלנו:' }),
   /** automatic emoji reactions on the customer's message: "working" while the bot searches, then "done" / "noAnswer", or "handoff" when a person takes over */
-  reactions: z.object({ enabled: z.boolean(), /** react to every message the bot handles (not only to searches) */ ackAll: z.boolean().default(false), working: emoji, done: emoji, noAnswer: emoji, handoff: emoji }).default(() => ({ ...DEFAULT_REACTIONS })),
+  reactions: z.object({ enabled: z.boolean(), /** react to every message the bot handles (not only to searches) */ ackAll: z.boolean().default(false), working: emoji, done: emoji, noAnswer: emoji, handoff: emoji, /** a greeting (שלום, היי…) gets this reaction and nothing else; empty = none */ greeting: emoji.default('👋') }).default(() => ({ ...DEFAULT_REACTIONS })),
   /** a customer message the bot could not answer (channel down, sending failed) is answered when the channel is back, up to this many hours later (0 = never) */
   catchupHours: z.number().int().min(0).max(72).default(12),
   /** on the official WhatsApp channel, send menus as tappable buttons or lists (falls back to the numbered text) */

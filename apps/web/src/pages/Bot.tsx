@@ -6,12 +6,12 @@ interface BotCfg {
   enabled: boolean; welcome: string; items: { title: string; answer: string; contact?: { name: string; phone: string; message: string }; route?: { userId: string; byArea?: boolean } }[]; humanOption: boolean; humanLabel: string;
   humanKeywords: string[]; humanMessage: string; invalidMessage: string; invalidRetries: number; footer: string; preview?: string; mode?: 'menu' | 'flow';
   kb: { enabled: boolean; minScore: number; maxChars: number; showSource: boolean; intro: string };
-  reactions?: { enabled: boolean; ackAll?: boolean; working: string; done: string; noAnswer: string; handoff: string };
+  reactions?: { enabled: boolean; ackAll?: boolean; working: string; done: string; noAnswer: string; handoff: string; greeting?: string };
   catchupHours?: number;
   interactiveMenus?: boolean;
 }
 
-const RX = { enabled: false, ackAll: false, working: '👀', done: '✅', noAnswer: '🤔', handoff: '🙋' };
+const RX = { enabled: false, ackAll: false, working: '👀', done: '✅', noAnswer: '🤔', handoff: '🙋', greeting: '👋' };
 const menuText = (b: BotCfg) =>
   `${b.welcome}\n\n${[...b.items.map((it, i) => `${i + 1}. ${it.title}`), ...(b.humanOption ? [`0. ${b.humanLabel}`] : [])].join('\n')}`;
 
@@ -175,9 +175,9 @@ export function Bot({ me }: { me: Me }) {
           )}
           {b.reactions?.enabled && (
             <div className="row">
-              {([['working', 'בזמן חיפוש'], ['done', 'נמצאה תשובה'], ['noAnswer', 'לא נמצאה תשובה'], ['handoff', 'העברה לנציג']] as const).map(([k, label]) => (
+              {([['working', 'בזמן חיפוש'], ['done', 'נמצאה תשובה'], ['noAnswer', 'לא נמצאה תשובה'], ['handoff', 'העברה לנציג'], ['greeting', 'ברכה (שלום, היי)']] as const).map(([k, label]) => (
                 <div className="field" key={k}><label htmlFor={`rx-${k}`}>{label}</label>
-                  <input id={`rx-${k}`} style={{ width: 90, fontSize: '1.4rem', textAlign: 'center' }} maxLength={12} value={b.reactions![k]} onChange={(e) => set({ reactions: { ...b.reactions!, [k]: e.target.value.trim() } })} aria-describedby="rx-hint" /></div>
+                  <input id={`rx-${k}`} style={{ width: 90, fontSize: '1.4rem', textAlign: 'center' }} maxLength={12} value={b.reactions![k] ?? ''} onChange={(e) => set({ reactions: { ...b.reactions!, [k]: e.target.value.trim() } })} aria-describedby="rx-hint" /></div>
               ))}
             </div>
           )}

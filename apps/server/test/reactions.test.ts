@@ -117,11 +117,25 @@ describe('automatic reactions', () => {
     expect(total).toBeGreaterThan(10);
   });
 
+  it('a greeting gets 👋 (configurable, or none), other messages are unaffected', async () => {
+    (mgr as unknown as { reactLog: Map<string, unknown> }).reactLog.clear();
+    await setBot({ reactions: { ...DEFAULT_REACTIONS, enabled: true } });
+    for (const t of ['שלום', 'היי!', 'בוקר טוב', 'שלום וברכה', 'Hello 👋']) expect((await say(`97250003${String(++mid).padStart(2, '0')}`, t)).reactions.map((x) => x.emoji), t).toEqual(['👋']);
+    for (const t of ['שלום, איך מפנים פסולת?', 'מתי פתוחים']) expect((await say(`97250004${String(++mid).padStart(2, '0')}`, t)).reactions.map((x) => x.emoji).includes('👋'), t).toBe(false);
+    await setBot({ reactions: { ...DEFAULT_REACTIONS, enabled: true, greeting: '🤝' } });
+    expect((await say('9725000501', 'היי')).reactions.map((x) => x.emoji)).toEqual(['🤝']);
+    await setBot({ reactions: { ...DEFAULT_REACTIONS, enabled: true, greeting: '' } });
+    expect((await say('9725000502', 'היי')).reactions.map((x) => x.emoji).includes('👋')).toBe(false);   // switched off: the normal working/done marks apply
+    expect((await call('PUT', '/settings/bot', { ...DEFAULT_BOT, reactions: { ...DEFAULT_REACTIONS, greeting: 'שלום' } })).statusCode).toBe(400);
+  });
+
   it('"react to every message" gives 👀 at once and a closing emoji, searches or not', async () => {
     (mgr as unknown as { reactLog: Map<string, unknown> }).reactLog.clear();   // the burst test above used up this minute's allowance
     await setBot({ reactions: { ...DEFAULT_REACTIONS, enabled: true, ackAll: true }, kb: { ...DEFAULT_BOT.kb, enabled: false } });
     const a = await say('9725000201', 'שלום');
-    expect(a.reactions.map((x) => x.emoji)).toEqual(['👀', '✅']);                 // a menu answer: no search, still marked
+    expect(a.reactions.map((x) => x.emoji)).toEqual(['👋']);                      // a greeting keeps its own reaction, no eyes or tick on top
+    const a2 = await say('9725000211', 'מה נשמע בענייני נהלים');
+    expect(a2.reactions.map((x) => x.emoji)).toEqual(['👀', '✅']);                 // a menu answer: no search, still marked
     const b = await say('9725000202', '1');
     expect(b.reactions.map((x) => x.emoji)).toEqual(['👀', '✅']);
     const c = await say('9725000203', 'נציג');

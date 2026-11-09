@@ -4,7 +4,7 @@ import QRCode from 'qrcode';
 import type { Config } from '../config.js';
 import type { Db } from '../db.js';
 import { ingestInbound } from '../inbox.js';
-import { decide, loadBot, normalize, type BotConfig } from '../bot.js';
+import { decide, isGreeting, loadBot, normalize, type BotConfig } from '../bot.js';
 import { isStopMessage } from '../optout.js';
 import { isOpen } from '../business-hours.js';
 import { autoAssign } from '../routing.js';
@@ -420,9 +420,16 @@ export class ChannelManager {
   /** What the bot does with the reactions of one incoming message: show it is working, then replace that by how it went. */
   private reactor(channelId: string, ext: string, inboundId: string | undefined, bot: BotConfig) {
     let cur = '';
+    let greeted = false;
     return {
+      /** a greeting gets its own reaction (👋) and keeps it: later working/done marks are skipped, a hand-over still shows */
+      greet: async (text: string | null): Promise<void> => {
+        if (!bot.reactions.enabled || !inboundId || !bot.reactions.greeting || !isGreeting(text)) return;
+        if (await this.react(channelId, ext, inboundId, bot.reactions.greeting)) { cur = bot.reactions.greeting; greeted = true; }
+      },
       set: async (ev: 'working' | 'done' | 'noAnswer' | 'handoff'): Promise<void> => {
         if (!bot.reactions.enabled || !inboundId) return;
+        if (greeted && ev !== 'handoff') return;
         const e = bot.reactions[ev];
         if (e === cur) return;                       // same reaction already there (or none to remove)
         if (await this.react(channelId, ext, inboundId, e)) cur = e;
@@ -610,6 +617,7 @@ export class ChannelManager {
       return;
     }
 
+    await rx.greet(text);
     if (bot.reactions.ackAll) await rx.set('working');   // "seen, working on it" for every message the bot handles
     if (bot.mode === 'flow') {
       const flow = await loadFlow(this.db);
