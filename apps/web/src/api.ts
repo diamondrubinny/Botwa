@@ -45,7 +45,8 @@ export async function upload(url: string, file: File, caption: string): Promise<
   if (!res.ok) throw new ApiError(res.status, ((await res.json().catch(() => ({}))) as { error?: string }).error ?? 'error');
 }
 export interface Note { id: string; body: string; authorName: string | null; createdAt: string }
-export interface Canned { id: string; title: string; body: string }
+export interface Canned { id: string; title: string; body: string; folder: string }
+export interface CannedVar { name: string; meaning: string }
 export interface RelatedConv { id: string; status: string; lastMessageAt: string; channelLabel: string; channelType: string; contactName: string | null; assignedName: string | null; lastMessage: string | null }
 export interface BackupFile { name: string; size: number; createdAt: string }
 export interface ChannelHealth {

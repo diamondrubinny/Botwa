@@ -174,8 +174,9 @@ export function Inbox({ me }: { me: Me }) {
 
   const resize = () => { const t = taRef.current; if (t) { t.style.height = 'auto'; t.style.height = `${Math.min(160, t.scrollHeight)}px`; } };
   useEffect(resize, [text]);
-  const insertCanned = (c: Canned) => {
-    const body = c.body.replace(/\{(שם|name)\}/g, sel?.contactName ?? '');
+  const insertCanned = async (c: Canned) => {
+    let body = c.body.replace(/\{(שם|name)\}/g, sel?.contactName ?? '');
+    if (selId) body = (await api<{ text: string }>('POST', `/canned-replies/${c.id}/render`, { conversationId: selId }).catch(() => null))?.text ?? body;
     edit(text.startsWith('/') ? body : text ? `${text}\n${body}` : body);
     taRef.current?.focus();
   };
@@ -519,8 +520,8 @@ export function Inbox({ me }: { me: Me }) {
               <form className="composer" onSubmit={send}>
                 {text.startsWith('/') && !text.includes('\n') && (
                   <div className="slash" role="listbox" aria-label="תשובות מוכנות מתאימות">
-                    {canned.filter((c) => c.title.toLowerCase().includes(text.slice(1).trim().toLowerCase())).slice(0, 5).map((c) => (
-                      <button type="button" role="option" aria-selected="false" key={c.id} onClick={() => insertCanned(c)}>/ {c.title}</button>
+                    {canned.filter((c) => `${c.title} ${c.folder} ${c.body}`.toLowerCase().includes(text.slice(1).trim().toLowerCase())).slice(0, 6).map((c) => (
+                      <button type="button" role="option" aria-selected="false" key={c.id} onClick={() => void insertCanned(c)}>/ {c.title}{c.folder ? <small className="muted"> · {c.folder}</small> : null}</button>
                     ))}
                   </div>
                 )}
@@ -528,12 +529,16 @@ export function Inbox({ me }: { me: Me }) {
                 {canned.length > 0 && (
                   <div className="composer-tools">
                     <div className="quick" aria-label="תשובות מהירות" role="group">
-                      {canned.slice(0, 4).map((c) => <button type="button" key={c.id} onClick={() => insertCanned(c)}>{c.title}</button>)}
+                      {canned.slice(0, 4).map((c) => <button type="button" key={c.id} onClick={() => void insertCanned(c)}>{c.title}</button>)}
                     </div>
                     <label htmlFor="canned" className="sr-only">תשובה מוכנה</label>
-                    <select id="canned" value="" onChange={(e) => { const c = canned.find((x) => x.id === e.target.value); if (c) insertCanned(c); }} style={{ marginTop: '.4rem' }}>
+                    <select id="canned" value="" onChange={(e) => { const c = canned.find((x) => x.id === e.target.value); if (c) void insertCanned(c); }} style={{ marginTop: '.4rem' }}>
                       <option value="">כל התשובות המוכנות…</option>
-                      {canned.map((c) => <option key={c.id} value={c.id}>{c.title}</option>)}
+                      {[...new Set(canned.map((c) => c.folder))].map((f) => (
+                        <optgroup key={f || '_'} label={f || 'כללי'}>
+                          {canned.filter((c) => c.folder === f).map((c) => <option key={c.id} value={c.id}>{c.title}</option>)}
+                        </optgroup>
+                      ))}
                     </select>
                   </div>
                 )}

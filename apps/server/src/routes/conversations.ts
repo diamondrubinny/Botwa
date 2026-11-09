@@ -3,6 +3,8 @@ import { z } from 'zod';
 import { audit } from '../audit.js';
 import { isManager, loadAccessible, sendBlock } from '../access.js';
 import { requireAuth } from '../auth.js';
+import { CANNED_VARIABLES, renderCanned, unknownVariables } from '../canned.js';
+import { loadBusinessHours } from './settings.js';
 import type { ChannelManager } from '../channels/manager.js';
 import { loadSending, PolicyRejected, SendError } from '../channels/sender.js';
 import type { Db } from '../db.js';
@@ -258,25 +260,46 @@ export function conversationRoutes(app: FastifyInstance, db: Db, mgr: ChannelMan
     return reply.code(201).send(rows[0]);
   });
 
-  // Canned replies: everyone reads, supervisors/admins curate.
+  // Canned replies: everyone reads, supervisors/admins curate. Variables ({שם} {נציג} {שעות} {תאריך} {ערוץ}) are filled when one is used.
   const curators = requireAuth(db, 'canned.manage');
+  const cannedBody = z.object({ title: z.string().trim().min(1).max(80), body: z.string().trim().min(1).max(4000), folder: z.string().trim().max(40).default('') });
   app.get('/canned-replies', { preHandler: any }, async () => {
-    const { rows } = await db.query('SELECT id, title, body FROM canned_replies ORDER BY title');
+    const { rows } = await db.query('SELECT id, title, body, folder FROM canned_replies ORDER BY folder = \'\', lower(folder), lower(title)');
     return rows;
   });
+  app.get('/canned-replies/variables', { preHandler: any }, async () => CANNED_VARIABLES.map(([name, meaning]) => ({ name, meaning })));
   app.post('/canned-replies', { preHandler: curators }, async (req, reply) => {
-    const b = z.object({ title: z.string().trim().min(1).max(80), body: z.string().trim().min(1).max(4000) }).safeParse(req.body);
+    const b = cannedBody.safeParse(req.body);
     if (!b.success) return reply.code(400).send({ error: 'bad_request' });
-    const { rows } = await db.query('INSERT INTO canned_replies (title, body, created_by) VALUES ($1,$2,$3) RETURNING id, title, body', [
-      b.data.title, b.data.body, req.user!.id,
-    ]);
-    return reply.code(201).send(rows[0]);
+    const { rows } = await db.query('INSERT INTO canned_replies (title, body, folder, created_by) VALUES ($1,$2,$3,$4) RETURNING id, title, body, folder', [b.data.title, b.data.body, b.data.folder, req.user!.id]);
+    return reply.code(201).send({ ...rows[0], unknownVariables: unknownVariables(b.data.body) });
+  });
+  app.put('/canned-replies/:id', { preHandler: curators }, async (req, reply) => {
+    const p = idParam.safeParse(req.params);
+    const b = cannedBody.safeParse(req.body);
+    if (!p.success || !b.success) return reply.code(400).send({ error: 'bad_request' });
+    const r = await db.query('UPDATE canned_replies SET title=$2, body=$3, folder=$4, updated_at=now() WHERE id=$1 RETURNING id, title, body, folder', [p.data.id, b.data.title, b.data.body, b.data.folder]);
+    if (!r.rows[0]) return reply.code(404).send({ error: 'not_found' });
+    await audit(db, { actorId: req.user!.id, action: 'canned.update', target: p.data.id, ip: req.ip });
+    return { ...r.rows[0], unknownVariables: unknownVariables(b.data.body) };
   });
   app.delete('/canned-replies/:id', { preHandler: curators }, async (req, reply) => {
     const p = idParam.safeParse(req.params);
     if (!p.success) return reply.code(400).send({ error: 'bad_request' });
     const r = await db.query('DELETE FROM canned_replies WHERE id=$1', [p.data.id]);
     return r.rowCount ? { ok: true } : reply.code(404).send({ error: 'not_found' });
+  });
+  /** A canned reply with its variables filled for this conversation and the person sending it. */
+  app.post('/canned-replies/:id/render', { preHandler: any, config: { rateLimit: { max: 120, timeWindow: '1 minute' } } }, async (req, reply) => {
+    const p = idParam.safeParse(req.params);
+    const b = z.object({ conversationId: z.string().uuid() }).safeParse(req.body);
+    if (!p.success || !b.success) return reply.code(400).send({ error: 'bad_request' });
+    const conv = await loadAccessible(db, req.user!, b.data.conversationId);
+    if (!conv) return reply.code(404).send({ error: 'not_found' });
+    const c = (await db.query('SELECT body FROM canned_replies WHERE id = $1', [p.data.id])).rows[0];
+    if (!c) return reply.code(404).send({ error: 'not_found' });
+    const info = (await db.query(`SELECT ct.display_name AS name, ch.label FROM conversations v JOIN contacts ct ON ct.id = v.contact_id JOIN channels ch ON ch.id = v.channel_id WHERE v.id = $1`, [conv.id])).rows[0];
+    return { text: renderCanned(c.body, { customerName: info?.name, agentName: req.user!.name, hours: await loadBusinessHours(db), channelLabel: info?.label }) };
   });
 
   // Privacy: data-subject export / erasure for one contact (admin only, audited).

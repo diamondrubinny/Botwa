@@ -72,4 +72,16 @@ describe('reports', () => {
     expect(r.daily.reduce((s: number, d: { inbound: number; outbound: number }) => s + d.inbound + d.outbound, 0)).toBe(8);
     expect(JSON.stringify(r)).not.toContain('"body"');
   });
+
+  it('groups the trend by week or month and compares with the previous period', async () => {
+    const w = (await get('/reports/summary?days=30&bucket=week', 'sup@t.io')).json();
+    const m = (await get('/reports/summary?days=30&bucket=month', 'sup@t.io')).json();
+    expect(w.bucket).toBe('week');
+    expect(w.daily.reduce((n: number, d: { inbound: number; outbound: number }) => n + d.inbound + d.outbound, 0)).toBe(8);   // same total, fewer rows
+    expect(m.daily.length).toBeLessThanOrEqual(2);
+    expect(w.previous).toEqual({ newConversations: 0, inbound: 0, outbound: 0 });
+    expect((await get('/reports/summary?bucket=year', 'sup@t.io')).statusCode).toBe(400);
+    const csv = await get('/reports/export.csv?kind=daily&bucket=week', 'sup@t.io');
+    expect(csv.body).toContain('week_start,inbound,outbound');
+  });
 });

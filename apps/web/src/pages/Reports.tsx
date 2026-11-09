@@ -2,8 +2,10 @@ import { useState } from 'react';
 import { api } from '../api';
 import { usePoll } from '../hooks';
 
+type Bucket = 'day' | 'week' | 'month';
 interface Summary {
-  days: number; timezone: string;
+  days: number; timezone: string; bucket: Bucket;
+  previous: { newConversations: number; inbound: number; outbound: number };
   totals: { newConversations: number; inbound: number; outbound: number; openNow: number; unassignedNow: number };
   responseTime: { answered: number; unanswered: number; avgSeconds: number | null; medianSeconds: number | null };
   agents: { userId: string; name: string; messagesSent: number; conversations: number; avgFirstResponseSeconds: number | null; medianFirstResponseSeconds: number | null }[];
@@ -19,14 +21,57 @@ export function fmtDuration(s: number | null): string {
   return `${Math.floor(s / 3600)} שע' ${Math.floor((s % 3600) / 60)} דק'`;
 }
 
+/** "+12% לעומת התקופה הקודמת" in words (never colour alone). */
+export function deltaText(now: number, before: number): string {
+  if (before === 0) return now === 0 ? 'ללא שינוי' : 'חדש לעומת התקופה הקודמת';
+  const p = Math.round(((now - before) / before) * 100);
+  return p === 0 ? 'ללא שינוי' : `${p > 0 ? 'עלייה' : 'ירידה'} של ${Math.abs(p)}% לעומת התקופה הקודמת`;
+}
+
+/** Grouped bars (inbound/outbound) as inline SVG. Decorative for screen readers: the table below carries the data. */
+function TrendChart({ rows }: { rows: { day: string; inbound: number; outbound: number }[] }) {
+  const W = 640, H = 200, pad = 28;
+  const max = Math.max(1, ...rows.flatMap((r) => [r.inbound, r.outbound]));
+  const slot = (W - pad) / Math.max(1, rows.length);
+  const bw = Math.max(2, Math.min(18, slot / 2 - 1));
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} role="img" aria-label="גרף עמודות של הודעות נכנסות ויוצאות לפי תקופה. הנתונים זמינים בטבלה שמתחת." className="trend-chart" style={{ width: '100%', height: 'auto', maxHeight: 260 }}>
+      <line x1={pad} y1={H - 24} x2={W} y2={H - 24} stroke="currentColor" opacity=".35" />
+      <text x={pad - 4} y={14} fontSize="11" textAnchor="end" fill="currentColor">{max}</text>
+      <text x={pad - 4} y={H - 26} fontSize="11" textAnchor="end" fill="currentColor">0</text>
+      {rows.map((r, i) => {
+        const x = pad + i * slot + slot / 2;
+        const hi = ((H - 44) * r.inbound) / max, ho = ((H - 44) * r.outbound) / max;
+        return (
+          <g key={r.day}>
+            <rect x={x - bw - 0.5} y={H - 24 - hi} width={bw} height={hi} fill="var(--accent)" rx="2"><title>{`${r.day}: נכנסות ${r.inbound}`}</title></rect>
+            <rect x={x + 0.5} y={H - 24 - ho} width={bw} height={ho} fill="currentColor" opacity=".55" rx="2"><title>{`${r.day}: יוצאות ${r.outbound}`}</title></rect>
+          </g>
+        );
+      })}
+      {rows.length > 0 && <>
+        <text x={pad} y={H - 8} fontSize="11" fill="currentColor" direction="ltr">{rows[0]!.day}</text>
+        <text x={W} y={H - 8} fontSize="11" textAnchor="end" fill="currentColor" direction="ltr">{rows[rows.length - 1]!.day}</text>
+      </>}
+    </svg>
+  );
+}
+
 export function Reports() {
+  const [bucket, setBucket] = useState<Bucket>('day');
   const [days, setDays] = useState(30);
   const [data, setData] = useState<Summary | null>(null);
   const [failed, setFailed] = useState(false);
   usePoll(async () => {
-    try { setData(await api<Summary>('GET', `/reports/summary?days=${days}`)); setFailed(false); } catch { setFailed(true); }
-  }, 60000, [days]);
+    try { setData(await api<Summary>('GET', `/reports/summary?days=${days}&bucket=${bucket}`)); setFailed(false); } catch { setFailed(true); }
+  }, 60000, [days, bucket]);
 
+  const trend: Record<string, string> = data ? {
+    'שיחות חדשות': deltaText(data.totals.newConversations, data.previous.newConversations),
+    'הודעות נכנסות': deltaText(data.totals.inbound, data.previous.inbound),
+    'הודעות יוצאות': deltaText(data.totals.outbound, data.previous.outbound),
+  } : {};
+  const unit = bucket === 'day' ? 'יום' : bucket === 'week' ? 'שבוע (תחילת שבוע)' : 'חודש (תחילת חודש)';
   return (
     <>
       <h1 tabIndex={-1}>דוחות</h1>
@@ -36,11 +81,19 @@ export function Reports() {
           <option value={7}>7 ימים אחרונים</option>
           <option value={30}>30 ימים אחרונים</option>
           <option value={90}>90 ימים אחרונים</option>
+          <option value={180}>180 ימים אחרונים</option>
+          <option value={365}>שנה אחרונה</option>
+        </select>
+      </div>
+      <div className="field" style={{ maxWidth: 260 }}>
+        <label htmlFor="bucket">קיבוץ המגמה לפי</label>
+        <select id="bucket" value={bucket} onChange={(e) => setBucket(e.target.value as Bucket)}>
+          <option value="day">ימים</option><option value="week">שבועות</option><option value="month">חודשים</option>
         </select>
       </div>
       <p className="row">
         <a className="btn" href={`/reports/export.csv?kind=agents&days=${days}`} download>ייצוא נציגים ל-CSV</a>
-        <a className="btn" href={`/reports/export.csv?kind=daily&days=${days}`} download>ייצוא נפח יומי ל-CSV</a>
+        <a className="btn" href={`/reports/export.csv?kind=daily&days=${days}&bucket=${bucket}`} download>ייצוא נפח לפי תקופה ל-CSV</a>
       </p>
       {failed && <p role="alert" className="error">טעינת הדוח נכשלה.</p>}
       {!data ? <p role="status">טוען…</p> : (
@@ -54,7 +107,8 @@ export function Reports() {
                 ['זמן תגובה ממוצע', fmtDuration(data.responseTime.avgSeconds)], ['זמן תגובה חציוני', fmtDuration(data.responseTime.medianSeconds)],
                 ['פניות שלא נענו', data.responseTime.unanswered],
               ] as [string, string | number][]).map(([k, v]) => (
-                <div key={k}><dt className="hint">{k}</dt><dd style={{ margin: 0, fontSize: '1.4rem', fontWeight: 700 }}>{v}</dd></div>
+                <div key={k}><dt className="hint">{k}</dt><dd style={{ margin: 0, fontSize: '1.4rem', fontWeight: 700 }}>{v}</dd>
+                  {trend[k] && <dd className="hint" style={{ margin: 0 }}>{trend[k]}</dd>}</div>
               ))}
             </dl>
             <p className="hint">זמן תגובה = מהודעת לקוח (שלא קדמה לה הודעה שלא נענתה) ועד התשובה הראשונה של הצוות. אזור זמן: {data.timezone}.</p>
@@ -112,10 +166,12 @@ export function Reports() {
           </section>
 
           <section className="card" aria-labelledby="dy-h" style={{ overflowX: 'auto' }}>
-            <h2 id="dy-h">נפח יומי</h2>
+            <h2 id="dy-h">מגמת נפח הודעות</h2>
+            <p className="hint">עמודה מלאה = נכנסות, עמודה חצי-שקופה = יוצאות.</p>
+            <TrendChart rows={data.daily} />
             <table>
-              <caption className="sr-only">הודעות נכנסות ויוצאות לפי יום</caption>
-              <thead><tr><th scope="col">יום</th><th scope="col">נכנסות</th><th scope="col">יוצאות</th></tr></thead>
+              <caption className="sr-only">הודעות נכנסות ויוצאות לפי {unit}</caption>
+              <thead><tr><th scope="col">{unit}</th><th scope="col">נכנסות</th><th scope="col">יוצאות</th></tr></thead>
               <tbody>
                 {data.daily.length === 0 && <tr><td colSpan={3}>אין נתונים.</td></tr>}
                 {[...data.daily].reverse().map((d) => <tr key={d.day}><th scope="row" dir="ltr">{d.day}</th><td>{d.inbound}</td><td>{d.outbound}</td></tr>)}

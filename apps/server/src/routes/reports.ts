@@ -18,13 +18,13 @@ export function reportRoutes(app: FastifyInstance, db: Db, cfg: Config) {
   const managers = requireAuth(db, 'reports.view');
 
   app.get('/reports/export.csv', { preHandler: managers }, async (req, reply) => {
-    const q = z.object({ days: z.coerce.number().int().min(1).max(365).default(30), kind: z.enum(['agents', 'daily']).default('agents') }).safeParse(req.query);
+    const q = z.object({ days: z.coerce.number().int().min(1).max(365).default(30), kind: z.enum(['agents', 'daily']).default('agents'), bucket: z.enum(['day', 'week', 'month']).default('day') }).safeParse(req.query);
     if (!q.success) return reply.code(400).send({ error: 'bad_request' });
-    const r = await computeSummary(db, cfg, q.data.days);
+    const r = await computeSummary(db, cfg, q.data.days, q.data.bucket);
     const rows: unknown[][] = q.data.kind === 'agents'
       ? [['agent', 'messages_sent', 'conversations', 'avg_first_response_seconds', 'median_first_response_seconds'],
          ...r.agents.map((a: Agent) => [a.name, a.messagesSent, a.conversations, a.avgFirstResponseSeconds, a.medianFirstResponseSeconds])]
-      : [['day', 'inbound', 'outbound'], ...r.daily.map((d: { day: string; inbound: number; outbound: number }) => [d.day, d.inbound, d.outbound])];
+      : [[q.data.bucket === 'day' ? 'day' : `${q.data.bucket}_start`, 'inbound', 'outbound'], ...r.daily.map((d: { day: string; inbound: number; outbound: number }) => [d.day, d.inbound, d.outbound])];
     await audit(db, { actorId: req.user!.id, action: 'report.export', ip: req.ip, meta: { kind: q.data.kind, days: q.data.days } });
     return reply
       .header('content-type', 'text/csv; charset=utf-8')
@@ -34,15 +34,15 @@ export function reportRoutes(app: FastifyInstance, db: Db, cfg: Config) {
   });
 
   app.get('/reports/summary', { preHandler: managers }, async (req, reply) => {
-    const q = z.object({ days: z.coerce.number().int().min(1).max(365).default(30) }).safeParse(req.query);
+    const q = z.object({ days: z.coerce.number().int().min(1).max(365).default(30), bucket: z.enum(['day', 'week', 'month']).default('day') }).safeParse(req.query);
     if (!q.success) return reply.code(400).send({ error: 'bad_request' });
-    return computeSummary(db, cfg, q.data.days);
+    return computeSummary(db, cfg, q.data.days, q.data.bucket);
   });
 }
 
 interface Agent { name: string; messagesSent: number; conversations: number; avgFirstResponseSeconds: number | null; medianFirstResponseSeconds: number | null }
 
-async function computeSummary(db: Db, cfg: Config, days: number) {
+async function computeSummary(db: Db, cfg: Config, days: number, bucket: 'day' | 'week' | 'month' = 'day') {
   {
 
     const [totals, waits, perAgent, daily, byHour, topTags] = await Promise.all([
@@ -86,7 +86,7 @@ async function computeSummary(db: Db, cfg: Config, days: number) {
         [days],
       ),
       db.query(
-        `SELECT to_char(date_trunc('day', created_at AT TIME ZONE $2), 'YYYY-MM-DD') AS day,
+        `SELECT to_char(date_trunc('${bucket}', created_at AT TIME ZONE $2), 'YYYY-MM-DD') AS day,
                 count(*) FILTER (WHERE direction = 'in')::int AS inbound,
                 count(*) FILTER (WHERE direction = 'out')::int AS outbound
            FROM messages WHERE created_at >= now() - make_interval(days => $1)
@@ -109,12 +109,20 @@ async function computeSummary(db: Db, cfg: Config, days: number) {
         [days],
       ),
     ]);
+    // the same-length period just before this one, for the "vs previous period" comparison
+    const prev = (await db.query(
+      `SELECT (SELECT count(*) FROM conversations WHERE created_at >= now() - make_interval(days => $1 * 2) AND created_at < now() - make_interval(days => $1))::int AS "newConversations",
+              (SELECT count(*) FROM messages WHERE direction='in' AND created_at >= now() - make_interval(days => $1 * 2) AND created_at < now() - make_interval(days => $1))::int AS inbound,
+              (SELECT count(*) FROM messages WHERE direction='out' AND created_at >= now() - make_interval(days => $1 * 2) AND created_at < now() - make_interval(days => $1))::int AS outbound`,
+      [days])).rows[0];
     const hours = Array.from({ length: 24 }, (_, h) => ({ hour: h, inbound: byHour.rows.find((r) => r.hour === h)?.inbound ?? 0 }));
 
     const overall = waits.rows.find((r) => r.isTotal === 1);
     const respByUser = new Map(waits.rows.filter((r) => r.isTotal === 0 && r.userId).map((r) => [r.userId, r]));
     return {
       days,
+      bucket,
+      previous: prev,
       timezone: cfg.REPORT_TZ,
       totals: totals.rows[0],
       responseTime: overall
