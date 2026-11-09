@@ -72,6 +72,9 @@ function validate(kind: string, raw: string): string | null {
   if (kind === 'name') return t.length >= 2 && t.length <= 60 && !/[<>{}\n]/.test(t) ? t : null;
   return t.length >= 1 ? t.slice(0, 500) : null;
 }
+const QUESTION_WORDS = new Set(['מה', 'מי', 'מתי', 'איך', 'איפה', 'האם', 'כמה', 'למה', 'מדוע', 'מהו', 'מהי', 'אילו', 'איזה', 'איזו', 'היכן', 'אפשר', 'צריך', 'חייב', 'מותר', 'אסור', 'יש']);
+/** Looks like a question rather than an answer to "your name / building / ...". */
+export const looksLikeQuestion = (t: string): boolean => /[?؟]/.test(t) || QUESTION_WORDS.has(normalize(t).split(' ')[0] ?? '');
 const kindOf = (n: Extract<FlowNode, { type: 'question' }>) => n.kind ?? (['name', 'phone', 'email'].includes(n.save) ? n.save : 'text');
 
 /** Run the flow for one customer message. Pure apart from the injected context functions. */
@@ -158,6 +161,20 @@ export async function runFlow(flow: Flow, prev: FlowState | null, input: FlowInp
         if (state.invalid < ctx.invalidRetries) { replies.push(`${ctx.invalidMessage}\n\n${menuText(w, ctx.humanOption, humanLabel)}`); return { replies, state: { ...state, invalid: state.invalid + 1 }, effects, menu: true }; }
         return handoff('unrecognized');
       }
+    } else if (w.type === 'question' && w.kbAside && hasText && looksLikeQuestion(t) && t.length >= 6) {
+      // a question instead of the answer: answer it from the knowledge base and ask again (no progress is lost)
+      const a = await ctx.kbAnswer(inp.text!).catch(() => null);
+      if (a) return { replies: [a, w.text], state: { ...state, invalid: 0 }, effects };
+      if (kindOf(w) === 'name') {
+        if (state.invalid < 2) return { replies: [`${w.retryText}\nאם יש לכם שאלה, אפשר לשאול אותה מיד אחרי ההזדהות.`], state: { ...state, invalid: state.invalid + 1 }, effects };
+      }
+      cursor = undefined;
+      // not answerable: treat it like any other answer below
+      const v = validate(kindOf(w), inp.text!);
+      if (v === null) { if (state.invalid < 2) return { replies: [w.retryText], state: { ...state, invalid: state.invalid + 1 }, effects }; state = { ...state, invalid: 0 }; }
+      else state = { ...state, invalid: 0, vars: { ...state.vars, [w.save]: v } };
+      cursor = w.next;
+      if (!cursor) return finished();
     } else if (w.type === 'question') {
       if (w.optional && SKIP_WORDS.has(t)) {
         state = { ...state, invalid: 0 };

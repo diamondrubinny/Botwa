@@ -28,6 +28,8 @@ export const flowNode = z.discriminatedUnion('type', [
     kind: z.enum(['text', 'name', 'phone', 'email']).optional(),
     /** the customer may skip it by writing "דלג" */
     optional: z.boolean().default(false),
+    /** a question typed here (instead of the answer) is answered from the knowledge base, then this question is asked again */
+    kbAside: z.boolean().optional(),
     retryText: z.string().trim().max(300).default('לא הצלחתי להבין, אפשר לנסות שוב?'), next,
   }),
   /** wait for a photo or document, or a written description (a photo with a caption counts as both) */

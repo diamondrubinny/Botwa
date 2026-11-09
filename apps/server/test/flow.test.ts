@@ -678,3 +678,61 @@ describe('smart questions (kbFirst + did-you-mean)', () => {
     expect((f.nodes.find((n) => n.id === 'topics') as { kbOnFreeText: boolean }).kbOnFreeText).toBe(true);
   });
 });
+
+describe('a question typed during identification', () => {
+  const q: Flow = flowSchema.parse({
+    start: 'n', kbFirst: true, nodes: [
+      { id: 'n', type: 'question', text: 'שם מלא:', save: 'fullName', kind: 'name', kbAside: true, next: 'b' },
+      { id: 'b', type: 'question', text: 'שם הבניין:', save: 'building', kbAside: true, next: 'e' },
+      { id: 'e', type: 'end', text: '' },
+    ],
+  });
+  const ans = ctx({ kbAnswer: async (t) => (t.includes('גובה') ? 'עד 2 מטר ללא היתר' : null) });
+  it('is answered from the knowledge base and the same question is asked again', async () => {
+    const first = await runFlow(q, null, 'שלום', ans);
+    expect(first.replies).toEqual(['שם מלא:']);
+    const r = await runFlow(q, first.state, 'מה הגובה המותר לעבוד ללא היתר', ans);
+    expect(r.replies).toEqual(['עד 2 מטר ללא היתר', 'שם מלא:']);
+    expect(r.state.node).toBe('n');
+    expect(r.state.vars.fullName).toBeUndefined();            // the question was not taken as the name
+    const ok = await runFlow(q, r.state, 'דנה לוי', ans);
+    expect(ok.state.vars.fullName).toBe('דנה לוי');
+    expect(ok.replies).toEqual(['שם הבניין:']);
+  });
+  it('an unanswerable question is not stored as a name either', async () => {
+    const first = await runFlow(q, null, 'שלום', ans);
+    const r = await runFlow(q, first.state, 'מתי הקורס הבא בנושא אחר?', ans);
+    expect(r.state.vars.fullName).toBeUndefined();
+    expect(r.replies[0]).toContain('שאלה');
+  });
+  it('plain answers (even short or odd ones) still go through', async () => {
+    const first = await runFlow(q, null, 'שלום', ans);
+    const r = await runFlow(q, first.state, 'יוסי כהן', ans);
+    expect(r.state.vars.fullName).toBe('יוסי כהן');
+  });
+});
+
+describe('migration 034: existing safety flows become smart once', () => {
+  it('upgrades a stored template flow without the new settings, leaves others alone', async () => {
+    const { migrate: mig } = await import('../src/migrate.js');
+    const { createDb: mk } = await import('../src/db.js');
+    const url = process.env.TEST_DATABASE_URL ?? 'postgres://postgres@localhost:5432/botwa_test';
+    const d = mk(url);
+    try {
+      const old = JSON.parse(JSON.stringify(buildSafetyFlow(() => '11111111-1111-4111-8111-111111111111')));
+      delete old.kbFirst;
+      for (const n of old.nodes) { delete n.kbAside; if (n.id === 'topics') n.kbOnFreeText = false; }
+      await d.query(`INSERT INTO settings (key, value) VALUES ('flow', $1) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`, [JSON.stringify(old)]);
+      await d.query(`DELETE FROM schema_migrations WHERE name LIKE '034%'`).catch(() => undefined);
+      await mig(d);
+      const v = (await d.query(`SELECT value FROM settings WHERE key = 'flow'`)).rows[0].value;
+      expect(v.kbFirst).toBe(true);
+      const by = new Map<string, { kbAside?: boolean; kbOnFreeText?: boolean }>(v.nodes.map((n: { id: string }) => [n.id, n]));
+      expect(by.get('q_name')!.kbAside).toBe(true);
+      expect(by.get('q_pi')!.kbAside).toBe(true);
+      expect(by.get('topics')!.kbOnFreeText).toBe(true);
+      expect(by.get('waste' as never)).toBeDefined();
+      expect(flowSchema.safeParse(v).success).toBe(true);
+    } finally { await d.end(); }
+  });
+});

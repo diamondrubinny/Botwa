@@ -27,11 +27,11 @@ export function buildSafetyFlow(tag: (name: string) => string, links: TemplateLi
   // ---- identification (skipped when we already know the customer) ----
   add({ id: 'start', type: 'condition', label: 'מוכר מפעם קודמת?', check: { kind: 'has', name: 'fullName' }, yes: 'topics', no: 'id_intro' });
   add({ id: 'id_intro', type: 'message', label: 'הזדהות', text: 'שלום, כאן הבוט של יחידת הבטיחות. כדי שנוכל לטפל בפנייה נשאל כמה פרטים (פעם אחת בלבד).\nהפרטים (שם, בניין, חדר, פקולטה, שם ה-PI וסטטוס) ותוכן הפנייה, כולל תמונות וקבצים, נשמרים בשרתי היחידה ונגישים לאנשי הצוות המטפלים בלבד, לצורך טיפול בפנייה.' + (links.privacy ? ` מדיניות הפרטיות: ${links.privacy}` : ''), next: 'q_name' });
-  add({ id: 'q_name', type: 'question', label: 'שם מלא', text: 'שם מלא:', save: 'fullName', kind: 'name', optional: false, retryText: 'נא לכתוב שם מלא.', next: 'q_building' });
-  add({ id: 'q_building', type: 'question', label: 'שם בניין', text: 'שם הבניין (אפשר לכתוב "דלג"):', save: 'building', optional: true, retryText: 'נא לכתוב שם בניין, או "דלג".', next: 'q_room' });
-  add({ id: 'q_room', type: 'question', label: 'מספר חדר', text: 'מספר חדר (אפשר לכתוב "דלג"):', save: 'room', optional: true, retryText: 'נא לכתוב מספר חדר, או "דלג".', next: 'q_faculty' });
-  add({ id: 'q_faculty', type: 'question', label: 'פקולטה', text: 'פקולטה / יחידה (למשל: הנדסת חשמל, פיסיקה, רפואה):', save: 'faculty', optional: false, retryText: 'נא לכתוב את שם הפקולטה.', next: 'q_pi' });
-  add({ id: 'q_pi', type: 'question', label: 'שם ה-PI', text: 'שם ה-PI (מחזיק המעבדה):', save: 'pi', optional: false, retryText: 'נא לכתוב את שם ה-PI.', next: 'm_status' });
+  add({ id: 'q_name', type: 'question', kbAside: true, label: 'שם מלא', text: 'שם מלא:', save: 'fullName', kind: 'name', optional: false, retryText: 'נא לכתוב שם מלא.', next: 'q_building' });
+  add({ id: 'q_building', type: 'question', kbAside: true, label: 'שם בניין', text: 'שם הבניין (אפשר לכתוב "דלג"):', save: 'building', optional: true, retryText: 'נא לכתוב שם בניין, או "דלג".', next: 'q_room' });
+  add({ id: 'q_room', type: 'question', kbAside: true, label: 'מספר חדר', text: 'מספר חדר (אפשר לכתוב "דלג"):', save: 'room', optional: true, retryText: 'נא לכתוב מספר חדר, או "דלג".', next: 'q_faculty' });
+  add({ id: 'q_faculty', type: 'question', kbAside: true, label: 'פקולטה', text: 'פקולטה / יחידה (למשל: הנדסת חשמל, פיסיקה, רפואה):', save: 'faculty', optional: false, retryText: 'נא לכתוב את שם הפקולטה.', next: 'q_pi' });
+  add({ id: 'q_pi', type: 'question', kbAside: true, label: 'שם ה-PI', text: 'שם ה-PI (מחזיק המעבדה):', save: 'pi', optional: false, retryText: 'נא לכתוב את שם ה-PI.', next: 'm_status' });
   add({ id: 'm_status', type: 'menu', label: 'סטטוס', text: 'מה הסטטוס שלך?', save: 'status', kbOnFreeText: false, options: STATUSES.map((label) => ({ label, next: 'remember', examples: [] as string[] })) });
   add({ id: 'remember', type: 'remember', label: 'שמירת פרטי הזדהות', vars: ['fullName', 'building', 'room', 'faculty', 'pi', 'status'], next: 'topics' });
 

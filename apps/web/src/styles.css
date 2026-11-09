@@ -345,12 +345,12 @@ main > h1, main > .card:not(.chat-pane), main > ul, main > section { animation: 
 a.card:hover, button.card:hover { transform: translateY(-2px); }
 
 /* controls */
-button, .btn { transition: background-color .15s var(--ease), border-color .15s var(--ease), transform .12s var(--ease), box-shadow .15s var(--ease); }
+button, .btn { transition: transform .12s var(--ease), box-shadow .15s var(--ease); }
 button.primary { box-shadow: 0 6px 16px -8px var(--accent); }
 button.primary:hover { box-shadow: 0 8px 20px -8px var(--accent); }
 input, select, textarea { transition: border-color .15s var(--ease), box-shadow .15s var(--ease); }
 input:focus-visible, select:focus-visible, textarea:focus-visible { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft), 0 0 0 2px var(--accent); }
-.chip { transition: background-color .15s var(--ease), color .15s var(--ease); }
+
 
 /* tables */
 tbody tr { transition: background-color .12s var(--ease); }
@@ -359,14 +359,14 @@ tbody tr:last-child > * { border-bottom: 0; }
 
 /* sidebar */
 .sidebar { box-shadow: 0 0 40px -24px rgba(20, 24, 36, .35); }
-.nav-link { transition: background-color .15s var(--ease), transform .15s var(--ease); }
+.nav-link { transition: transform .15s var(--ease); }
 .nav-link:hover:not([aria-current='page']) { transform: translateX(-2px); }
 .nav-link[aria-current='page'] { box-shadow: 0 8px 18px -10px var(--accent); }
 .sb-btn { min-height: 36px; min-width: 36px; border-color: transparent; background: transparent; }
 .sb-btn:hover { background: var(--surface-2); }
 
 /* inbox + chat */
-.conv-item { transition: background-color .15s var(--ease); }
+
 .chat-pane, .inbox > .card { overflow: hidden; }
 .chat-tools { gap: .4rem; padding: .5rem .8rem; }
 .chat-tools button, .chat-tools select { min-height: 36px; font-size: .9rem; padding-block: .2rem; }
