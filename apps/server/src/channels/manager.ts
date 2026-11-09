@@ -606,6 +606,7 @@ export class ChannelManager {
     const { rows } = await this.db.query('SELECT bot_state, bot_invalid, bot_item, assigned_to FROM conversations WHERE id = $1', [convId]);
     const c = rows[0];
     if (!c || c.assigned_to) return; // a person already owns this conversation
+    if (c.bot_state === 'human') return; // handed over (or stopped by the loop guard): silent, no reactions either, until a person closes it
     if (text !== null && text.trim() === '[unsupported message type]') text = null;
 
     // loop guard: two bots talking to each other. A person going through a flow quickly (identification: 6-8 short answers)
@@ -626,7 +627,6 @@ export class ChannelManager {
     await rx.greet(text);
     if (bot.reactions.ackAll) await rx.set('working');   // "seen, working on it" for every message the bot handles
     if (bot.mode === 'flow') {
-      if (c.bot_state === 'human') return;   // handed over (or stopped by the loop guard): a person answers until the conversation is closed
       const flow = await loadFlow(this.db);
       if (flow) { await this.runFlowStep(channelId, convId, ext, bot, flow, { text: rawText !== null && rawText.trim() === '[unsupported message type]' ? null : rawText, media: hasMedia }, rx); return; }
     }

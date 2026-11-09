@@ -757,3 +757,29 @@ describe('migration 034: existing safety flows become smart once', () => {
     } finally { await d.end(); }
   });
 });
+
+describe('migration 036: conversations stopped by the old loop guard go back to the bot', () => {
+  it('resumes untouched ones, leaves those a person answered', async () => {
+    const { migrate: mig } = await import('../src/migrate.js');
+    const { createDb: mk } = await import('../src/db.js');
+    const d = mk(process.env.TEST_DATABASE_URL ?? 'postgres://postgres@localhost:5432/botwa_test');
+    try {
+      const ch = (await d.query(`INSERT INTO channels (type,label) VALUES ('whatsapp','m36') RETURNING id`)).rows[0].id;
+      const mkc = async (ext: string) => {
+        const ct = (await d.query(`INSERT INTO contacts (channel_id, external_id) VALUES ($1,$2) RETURNING id`, [ch, ext])).rows[0].id;
+        const c = (await d.query(`INSERT INTO conversations (channel_id, contact_id, bot_state, flow_state) VALUES ($1,$2,'human',$3) RETURNING id`, [ch, ct, JSON.stringify({ node: 'q_faculty', vars: { fullName: 'x' }, invalid: 0, done: false })])).rows[0].id as string;
+        await d.query(`INSERT INTO conversation_notes (conversation_id, body, created_at) VALUES ($1, 'הבוט נעצר: יותר מדי הודעות אוטומטיות בזמן קצר (ייתכן בוט בצד הלקוח).', now() - interval '1 hour')`, [c]);
+        return c;
+      };
+      const stuck = await mkc('m36a');
+      const answered = await mkc('m36b');
+      await d.query(`INSERT INTO messages (conversation_id, direction, body, auto) VALUES ($1,'out','נציג כאן',false)`, [answered]);
+      await d.query(`DELETE FROM schema_migrations WHERE name LIKE '036%'`);
+      await mig(d);
+      const st = async (id: string) => (await d.query('SELECT bot_state, flow_state FROM conversations WHERE id = $1', [id])).rows[0];
+      expect(await st(stuck)).toMatchObject({ bot_state: 'menu', flow_state: { node: 'q_faculty' } });
+      expect((await st(answered)).bot_state).toBe('human');
+      expect((await d.query(`SELECT count(*)::int AS n FROM conversation_notes WHERE conversation_id = $1 AND body LIKE 'הבוט חזר לפעול%'`, [stuck])).rows[0].n).toBe(1);
+    } finally { await d.end(); }
+  });
+});

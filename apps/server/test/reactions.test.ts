@@ -117,6 +117,18 @@ describe('automatic reactions', () => {
     expect(total).toBeGreaterThan(10);
   });
 
+  it('a conversation handed to a person gets no reactions at all (the bot is silent there)', async () => {
+    (mgr as unknown as { reactLog: Map<string, unknown> }).reactLog.clear();
+    await setBot({ reactions: { ...DEFAULT_REACTIONS, enabled: true, ackAll: true } });
+    await say('9725000601', 'שלום');
+    await db.query(`UPDATE conversations SET bot_state = 'human' WHERE contact_id = (SELECT id FROM contacts WHERE external_id = '9725000601')`);
+    for (const t of ['היי', 'מה עושים כשיש תאונה']) {
+      const r = await say('9725000601', t);
+      expect(r.reactions, t).toEqual([]);
+      expect(r.sent, t).toEqual([]);
+    }
+  });
+
   it('a greeting gets 👋 (configurable, or none), other messages are unaffected', async () => {
     (mgr as unknown as { reactLog: Map<string, unknown> }).reactLog.clear();
     await setBot({ reactions: { ...DEFAULT_REACTIONS, enabled: true } });
