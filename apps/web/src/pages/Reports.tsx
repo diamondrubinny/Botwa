@@ -76,7 +76,8 @@ export function Reports() {
   return (
     <>
       <h1 tabIndex={-1}>דוחות</h1>
-      <div className="field" style={{ maxWidth: 260 }}>
+      <div className="toolbar">
+      <div className="field">
         <label htmlFor="days">תקופה</label>
         <select id="days" value={days} onChange={(e) => setDays(Number(e.target.value))}>
           <option value={7}>7 ימים אחרונים</option>
@@ -86,22 +87,23 @@ export function Reports() {
           <option value={365}>שנה אחרונה</option>
         </select>
       </div>
-      <div className="field" style={{ maxWidth: 260 }}>
+      <div className="field">
         <label htmlFor="bucket">קיבוץ המגמה לפי</label>
         <select id="bucket" value={bucket} onChange={(e) => setBucket(e.target.value as Bucket)}>
           <option value="day">ימים</option><option value="week">שבועות</option><option value="month">חודשים</option>
         </select>
       </div>
-      <p className="row">
+      <p className="row" style={{ margin: 0 }}>
         <a className="btn" href={`/reports/export.csv?kind=agents&days=${days}`} download>ייצוא נציגים ל-CSV</a>
         <a className="btn" href={`/reports/export.csv?kind=daily&days=${days}&bucket=${bucket}`} download>ייצוא נפח לפי תקופה ל-CSV</a>
       </p>
+      </div>
       {failed && <p role="alert" className="error">טעינת הדוח נכשלה.</p>}
       {!data ? <p role="status">טוען…</p> : (
         <>
           <section className="card" aria-labelledby="sum-h">
             <h2 id="sum-h">סיכום</h2>
-            <dl style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '.75rem', margin: 0 }}>
+            <dl className="kpis">
               {([
                 ['שיחות חדשות', data.totals.newConversations], ['הודעות נכנסות', data.totals.inbound], ['הודעות יוצאות', data.totals.outbound],
                 ['שיחות פתוחות כרגע', data.totals.openNow], ['פתוחות ולא משויכות', data.totals.unassignedNow],
@@ -109,7 +111,7 @@ export function Reports() {
                 ['פניות שלא נענו', data.responseTime.unanswered],
                 ...(data.sla.enabled ? [[`עמידה ביעד (${data.sla.targetMinutes} דק')`, data.sla.compliancePercent == null ? '—' : `${data.sla.compliancePercent}%`], ['חריגות מהיעד', data.sla.breached]] as [string, string | number][] : []),
               ] as [string, string | number][]).map(([k, v]) => (
-                <div key={k}><dt className="hint">{k}</dt><dd style={{ margin: 0, fontSize: '1.4rem', fontWeight: 700 }}>{v}</dd>
+                <div key={k} className="kpi"><dt className="hint">{k}</dt><dd className="kpi-v">{v}</dd>
                   {trend[k] && <dd className="hint" style={{ margin: 0 }}>{trend[k]}</dd>}</div>
               ))}
             </dl>

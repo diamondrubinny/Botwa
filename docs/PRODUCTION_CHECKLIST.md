@@ -161,3 +161,12 @@ Lawyer (privacy, ToS risk, employee monitoring/notice) · Privacy officer (if re
 - [ ] Only if needed for JavaScript-built sites. The browser service has no database access or keys; confirm `docker compose ps` shows `browser` healthy and that `docker compose exec browser env` contains no secrets other than BROWSER_TOKEN.
 - [ ] Not built or run by CI in this environment: the Docker image with Chromium (apt `chromium`) and the compose service were NOT tested here; the rendering code was tested against a real Chromium, and the SSRF proxy and the service endpoints with automated tests. Build once, then render one JavaScript-built page from the knowledge base preview.
 - [ ] Chromium runs with --no-sandbox inside the locked-down container (read-only filesystem, no capabilities, own network, memory and process limits). Review that trade-off for your threat model.
+
+## תוספות אחרונות (תשובות מוכנות, SLA, העברות, אנשי קשר, תזמון)
+- [ ] מיגרציות 031–033 רצו (תיקיות לתשובות מוכנות, `sla_alerted_at`, `scheduled_messages`).
+- [ ] הרשאת `contacts.manage` (ייבוא/ייצוא אנשי קשר) ניתנת רק למי שצריך. הייצוא מכיל מידע אישי: נרשם ביומן, `no-store`, מנוטרל נוסחאות.
+- [ ] בסיס חוקי לשמירת רשימת אנשי הקשר שמיובאת ומטרת השימוש בה: **דורש בדיקה משפטית**. הייבוא אינו יוצר שיחות ואינו מתיר שליחה.
+- [ ] הודעות מתוזמנות: לבדוק בשרת שהן נחסמות ללקוח חסום/שביקש להפסיק/מחוץ לחלון המענה (בדיקה אוטומטית קיימת; מומלץ גם ידנית על ערוץ אמיתי).
+- [ ] SLA: לקבוע יעד, לוודא שהתראות דחיפה מגיעות לנציג המשויך ושהאירוע `conversation.sla_breached` מגיע ל-Webhook (לא נבדק מול שירות דחיפה אמיתי).
+- [ ] העברת שיחה בין נציגים: ההערה נשמרת כהערה פנימית ובתיעוד הפעולות. לוודא שלא נכללים בה פרטים מיותרים על הלקוח.
+- [ ] בדיקת נגישות ידנית (מקלדת וקורא מסך) לטפסי העברה/תזמון/ייבוא ולגרף המגמות (יש טבלה מקבילה).
