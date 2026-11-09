@@ -26,10 +26,23 @@ export function safetyRoutes(app: FastifyInstance, db: Db, kb: KnowledgeBase) {
   const view = requireAuth(db, 'safety.view');
   const manage = requireAuth(db, 'kb.manage');
 
+  // Whether the bot may answer from the SafetyBoard: how many imported rows it can see, and a switch for all of them at once.
+  app.get('/safety/bot-access', { preHandler: view }, async () => {
+    const r = (await db.query(`SELECT count(*) FILTER (WHERE audience IN ('bot', 'both'))::int AS "botVisible", count(*) FILTER (WHERE audience = 'staff')::int AS "staffOnly" FROM kb_sources WHERE origin LIKE 'xlsx:%'`)).rows[0];
+    return r;
+  });
+  app.post('/safety/bot-access', { preHandler: manage }, async (req, reply) => {
+    const b = z.object({ audience: z.enum(['both', 'staff']) }).safeParse(req.body);
+    if (!b.success) return reply.code(400).send({ error: 'bad_request' });
+    const r = await db.query(`UPDATE kb_sources SET audience = $1 WHERE origin LIKE 'xlsx:%' AND audience <> $1`, [b.data.audience]);
+    await audit(db, { actorId: req.user!.id, action: 'safety.bot_access', ip: req.ip, meta: { audience: b.data.audience, rows: r.rowCount } });
+    return { changed: r.rowCount };
+  });
+
   app.post('/kb/import/xlsx', { preHandler: manage, config: { rateLimit: { max: 5, timeWindow: '10 minutes' } } }, async (req, reply) => {
     const file = await req.file();
     if (!file) return reply.code(400).send({ error: 'bad_request' });
-    const f = z.object({ audience: z.enum(['bot', 'staff', 'both']).default('staff') }).safeParse(Object.fromEntries(Object.entries(file.fields).map(([k, v]) => [k, (v as { value?: unknown } | undefined)?.value]).filter(([, v]) => v !== '' && v !== undefined)));
+    const f = z.object({ audience: z.enum(['bot', 'staff', 'both']).default('both') }).safeParse(Object.fromEntries(Object.entries(file.fields).map(([k, v]) => [k, (v as { value?: unknown } | undefined)?.value]).filter(([, v]) => v !== '' && v !== undefined)));
     if (!f.success) return reply.code(400).send({ error: 'bad_request' });
     if (!/\.xlsx$/i.test(sanitizeFileName(file.filename, 'x'))) return reply.code(415).send({ error: 'unsupported_file_type' });
     let buf: Buffer;

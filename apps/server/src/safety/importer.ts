@@ -150,6 +150,8 @@ export async function importWorkbook(db: Db, kb: KnowledgeBase, buf: Buffer, opt
       await db.query(`UPDATE kb_sources SET title = $2, body = $3, url = $4, reference = $5, meta = $6, content_hash = $7, updated_at = now() WHERE id = $1`, [id, it.title, it.body, it.url, it.reference, JSON.stringify(it.meta), hash]);
       out.updated++;
     } else { id = cur.id; out.unchanged++; }
+    // the audience chosen now applies to every row of the file, changed or not (re-importing is how the unit opens the board to the bot)
+    if (cur) await db.query('UPDATE kb_sources SET audience = $2 WHERE id = $1 AND audience <> $2', [id, opts.audience]);
     if (!cur || cur.content_hash !== hash) await kb.indexWritten(id).catch(() => undefined);
     // the category the file itself states, then the topics its text matches
     let n = 0;

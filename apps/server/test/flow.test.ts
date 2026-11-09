@@ -699,11 +699,28 @@ describe('a question typed during identification', () => {
     expect(ok.state.vars.fullName).toBe('דנה לוי');
     expect(ok.replies).toEqual(['שם הבניין:']);
   });
-  it('an unanswerable question is not stored as a name either', async () => {
+  it('an unanswerable question is never stored as the answer (name or free text), and the question is asked again', async () => {
     const first = await runFlow(q, null, 'שלום', ans);
     const r = await runFlow(q, first.state, 'מתי הקורס הבא בנושא אחר?', ans);
     expect(r.state.vars.fullName).toBeUndefined();
-    expect(r.replies[0]).toContain('שאלה');
+    expect(r.state.node).toBe('n');
+    expect(r.replies[0]).toContain('לא מצאתי תשובה');
+    expect(r.replies[0]).toContain('שם מלא:');
+    const named = await runFlow(q, r.state, 'דנה', ans);
+    const b = await runFlow(q, named.state, 'האם אפשר לעבוד מעל 7 שלבים בסולם ללא היתר?', ans);
+    expect(b.state.node).toBe('b');
+    expect(b.state.vars.building).toBeUndefined();
+  });
+  it('offers "did you mean" while asking for details, and a letter picks one, then the same question again', async () => {
+    const c = ctx({ kbAnswer: async () => null, kbSuggest: async () => [{ id: 's1', label: 'עבודה על סולמות' }], kbSource: async () => 'סולם: עד 2 מטר' });
+    const first = await runFlow(q, null, 'שלום', c);
+    const r = await runFlow(q, first.state, 'האם אפשר לעבוד מעל 7 שלבים בסולם ללא היתר?', c);
+    expect(r.replies[0]).toContain('א. עבודה על סולמות');
+    const p = await runFlow(q, r.state, 'א', c);
+    expect(p.replies).toEqual(['סולם: עד 2 מטר', 'שם מלא:']);
+    expect(p.state.vars.fullName).toBeUndefined();
+    const n = await runFlow(q, p.state, 'דנה לוי', c);
+    expect(n.state.vars.fullName).toBe('דנה לוי');
   });
   it('plain answers (even short or odd ones) still go through', async () => {
     const first = await runFlow(q, null, 'שלום', ans);

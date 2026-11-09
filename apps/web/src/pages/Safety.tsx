@@ -136,7 +136,15 @@ function Manage({ cats, onChanged, stats }: { cats: Cat[]; onChanged: () => Prom
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [editId, setEditId] = useState('');
   const [kw, setKw] = useState('');
-  const [audience, setAudience] = useState<'staff' | 'both' | 'bot'>('staff');
+  const [audience, setAudience] = useState<'staff' | 'both' | 'bot'>('both');
+  const [access, setAccess] = useState<{ botVisible: number; staffOnly: number } | null>(null);
+  const loadAccess = async () => setAccess(await api<{ botVisible: number; staffOnly: number }>('GET', '/safety/bot-access').catch(() => null));
+  useEffect(() => { void loadAccess(); }, []);
+  async function setBotAccess(a: 'both' | 'staff') {
+    setMsg(null);
+    try { const r = await api<{ changed: number }>('POST', '/safety/bot-access', { audience: a }); setMsg({ ok: true, text: a === 'both' ? `הבוט יכול עכשיו לענות מהלוח (${r.changed} שורות עודכנו).` : `הלוח זמין עכשיו לצוות בלבד (${r.changed} שורות עודכנו).` }); await loadAccess(); }
+    catch { setMsg({ ok: false, text: 'השינוי נכשל.' }); }
+  }
   const [busy, setBusy] = useState(false);
   const [tabs, setTabs] = useState<TabReport[]>([]);
   const cur = cats.find((c) => c.id === editId);
@@ -154,6 +162,7 @@ function Manage({ cats, onChanged, stats }: { cats: Cat[]; onChanged: () => Prom
       setMsg({ ok: true, text: `יובא (${j.kind === 'weekly' ? 'תשובת השבוע' : 'חוק ופקודה'}): ${j.created} חדשים, ${j.updated} עודכנו, ${j.unchanged} ללא שינוי. ${j.categorized} שויכו לנושאים, ${j.uncategorized} לא שויכו לאף נושא.` });
       setTabs(j.sheets ?? []);
       await onChanged();
+      await loadAccess();
     } catch (er) { setMsg({ ok: false, text: er instanceof ApiError && er.code === 'unknown_workbook' ? 'מבנה הקובץ לא מוכר. נתמכים: קובץ מיון חוק ופקודה (גיליון "כל_הסעיפים") וקובץ "תשובת השבוע" (גיליון "כל התשובות").' : errText(er instanceof ApiError ? er.code : 'generic') }); }
     setBusy(false);
   }
@@ -161,12 +170,23 @@ function Manage({ cats, onChanged, stats }: { cats: Cat[]; onChanged: () => Prom
   return (
     <details className="card" style={{ marginTop: '1.5rem' }}>
       <summary><strong>ניהול הלוח</strong> (ייבוא מקורות ועריכת מילות מפתח)</summary>
+      {access && (
+        <section aria-labelledby="sf-bot">
+          <h3 id="sf-bot">תשובות הבוט מהלוח</h3>
+          <p>{access.staffOnly === 0 && access.botVisible > 0 ? `הבוט רואה את כל ${access.botVisible} השורות בלוח ויכול לענות מהן.` : access.botVisible === 0 && access.staffOnly === 0 ? 'עוד לא יובאו קבצים.' : `הבוט רואה ${access.botVisible} שורות. ${access.staffOnly} שורות זמינות לצוות בלבד, והבוט לא יענה מהן.`}</p>
+          <div className="row">
+            {access.staffOnly > 0 && <button type="button" className="primary" onClick={() => void setBotAccess('both')}>לאפשר לבוט לענות מכל הלוח</button>}
+            {access.botVisible > 0 && <button type="button" onClick={() => void setBotAccess('staff')}>להחזיר לצוות בלבד</button>}
+          </div>
+          <p className="hint">התשובות הן ציטוט מהמקור (עם קישור), לא ייעוץ. שאלה שאין לה התאמה ברורה מקבלת הצעות "האם התכוונתם", ותמיד אפשר לבקש נציג.</p>
+        </section>
+      )}
       <section aria-labelledby="sf-imp">
         <h3 id="sf-imp">ייבוא אקסל</h3>
         <p className="hint">מעלים קובץ מיון של חוק/פקודה, או קובץ "תשובת השבוע". ייבוא חוזר של קובץ מעודכן מעדכן שורות קיימות בלי כפילויות. ברירת המחדל: המידע מיועד לצוות בלבד ולא לבוט שעונה ללקוחות.</p>
         <form onSubmit={importXlsx}>
           <div className="field"><label htmlFor="sf-file">קובץ (xlsx)</label><input id="sf-file" name="xlsx" type="file" accept=".xlsx" required /></div>
-          <div className="field"><label htmlFor="sf-aud">מי משתמש</label><select id="sf-aud" value={audience} onChange={(e) => setAudience(e.target.value as 'staff')}><option value="staff">צוות בלבד</option><option value="both">צוות ובוט</option></select></div>
+          <div className="field"><label htmlFor="sf-aud">מי משתמש</label><select id="sf-aud" value={audience} onChange={(e) => setAudience(e.target.value as 'staff')}><option value="both">צוות ובוט</option><option value="staff">צוות בלבד</option></select></div>
           <button className="primary" type="submit" disabled={busy}>{busy ? 'מייבא…' : 'ייבוא'}</button>
         </form>
         <p role="status" className={msg?.ok ? 'ok' : 'error'}>{msg?.text}</p>

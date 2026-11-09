@@ -128,12 +128,12 @@ export async function runFlow(flow: Flow, prev: FlowState | null, input: FlowInp
   let cursor: string | undefined;
   const w = state.node ? nodes.get(state.node) : undefined;
   // a letter picks one of the "did you mean" suggestions offered with the last reply
-  if (w?.type === 'menu' && state.suggest?.length && hasText) {
+  if ((w?.type === 'menu' || (w?.type === 'question' && w.kbAside)) && state.suggest?.length && hasText) {
     const k = LETTERS.indexOf(t.replace(/[.'׳)]/g, ''));
     const pick = k >= 0 ? state.suggest[k] : undefined;
     if (pick && ctx.kbSource) {
       const a = await ctx.kbSource(pick.id, pick.label).catch(() => null);
-      if (a) { replies.push(a, menuText(w, ctx.humanOption, humanLabel)); return { replies, state: { ...state, suggest: undefined, invalid: 0 }, effects, menu: true }; }
+      if (a) { replies.push(a, w.type === 'menu' ? menuText(w, ctx.humanOption, humanLabel) : w.text); return { replies, state: { ...state, suggest: undefined, invalid: 0 }, effects, menu: w.type === 'menu' }; }
     }
   }
   if (state.suggest) state = { ...state, suggest: undefined };
@@ -162,19 +162,14 @@ export async function runFlow(flow: Flow, prev: FlowState | null, input: FlowInp
         return handoff('unrecognized');
       }
     } else if (w.type === 'question' && w.kbAside && hasText && looksLikeQuestion(t) && t.length >= 6) {
-      // a question instead of the answer: answer it from the knowledge base and ask again (no progress is lost)
+      // a question instead of the answer: answer it from the knowledge base and ask again. It is never stored as the answer.
       const a = await ctx.kbAnswer(inp.text!).catch(() => null);
       if (a) return { replies: [a, w.text], state: { ...state, invalid: 0 }, effects };
-      if (kindOf(w) === 'name') {
-        if (state.invalid < 2) return { replies: [`${w.retryText}\nאם יש לכם שאלה, אפשר לשאול אותה מיד אחרי ההזדהות.`], state: { ...state, invalid: state.invalid + 1 }, effects };
+      const sug = ctx.kbSuggest ? (await ctx.kbSuggest(inp.text!).catch(() => [])).slice(0, 3) : [];
+      if (sug.length) {
+        return { replies: [`לא מצאתי תשובה מדויקת. האם התכוונתם לאחד מאלה?\n${sug.map((x, i) => `${LETTERS[i]}. ${x.label}`).join('\n')}\n\nכתבו את האות, או המשיכו:\n${w.text}`], state: { ...state, suggest: sug }, effects };
       }
-      cursor = undefined;
-      // not answerable: treat it like any other answer below
-      const v = validate(kindOf(w), inp.text!);
-      if (v === null) { if (state.invalid < 2) return { replies: [w.retryText], state: { ...state, invalid: state.invalid + 1 }, effects }; state = { ...state, invalid: 0 }; }
-      else state = { ...state, invalid: 0, vars: { ...state.vars, [w.save]: v } };
-      cursor = w.next;
-      if (!cursor) return finished();
+      return { replies: [`לא מצאתי תשובה לשאלה הזו במאגר. אפשר לכתוב "נציג" ונציג יחזור אליכם, או להמשיך:\n${w.text}`], state, effects };
     } else if (w.type === 'question') {
       if (w.optional && SKIP_WORDS.has(t)) {
         state = { ...state, invalid: 0 };

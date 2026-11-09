@@ -99,6 +99,17 @@ describe('importing standards and the safety board', () => {
     expect((await call('POST', '/kb/import/xlsx', 'admin@t.io', Buffer.from('x'), { 'content-type': 'application/json' })).statusCode).toBeGreaterThanOrEqual(400);
   });
 
+  it('the bot can be given (or denied) access to the whole board at once; a question finds the board rows', async () => {
+    expect((await call('GET', '/safety/bot-access', 'officer@t.io')).json()).toEqual({ botVisible: 6, staffOnly: 0 });   // imports now default to staff + bot
+    expect((await call('POST', '/safety/bot-access', 'officer@t.io', { audience: 'staff' })).statusCode).toBe(403);
+    expect((await call('POST', '/safety/bot-access', 'admin@t.io', { audience: 'staff' })).json()).toEqual({ changed: 6 });
+    expect((await mgr.kb!.search('האם אפשר לעבוד מעל 7 שלבים בסולם ללא היתר?', { audience: 'bot' })).length).toBe(0);    // staff only: the bot sees nothing
+    expect((await call('POST', '/safety/bot-access', 'admin@t.io', { audience: 'both' })).json()).toEqual({ changed: 6 });
+    const hits = await mgr.kb!.search('האם אפשר לעבוד מעל 7 שלבים בסולם ללא היתר?', { audience: 'bot' });
+    expect(hits[0]?.title).toBe('באיזה גובה מותר לעבוד על סולם נייד?');
+    expect(hits[0]!.score).toBeGreaterThanOrEqual(0.3);                     // close enough to be offered as "did you mean" (0.5 x the default 0.6 threshold)
+  });
+
   it('safety.view sees the board; categories carry counts and editable keywords', async () => {
     expect((await call('GET', '/safety/categories', 'sup@t.io')).statusCode).toBe(200);
     const g = (await call('GET', '/safety/categories', 'officer@t.io')).json();
