@@ -80,6 +80,13 @@ export async function buildApp(cfg: Config, db: Db, mgr: ChannelManager, media: 
     reply.code(status).send({ error: status === 500 ? 'internal_error' : (err.message ?? 'error') });
   });
 
+  // Digital Asset Links: proves this site and the Android app belong together, so the app shows the panel without a browser bar
+  app.get('/.well-known/assetlinks.json', async (_req, reply) => {
+    const prints = cfg.ANDROID_APP_SHA256.split(',').map((x) => x.trim().toUpperCase()).filter(Boolean);
+    if (!prints.length) return reply.code(404).send({ error: 'not_found' });
+    return reply.header('cache-control', 'public, max-age=3600').send([{ relation: ['delegate_permission/common.handle_all_urls'], target: { namespace: 'android_app', package_name: cfg.ANDROID_APP_PACKAGE, sha256_cert_fingerprints: prints } }]);
+  });
+
   app.get('/healthz', async () => {
     await db.query('SELECT 1');
     return { ok: true };

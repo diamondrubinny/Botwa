@@ -42,6 +42,9 @@ const schema = z.object({
   CLAMAV_PORT: z.coerce.number().int().default(3310),
   MEDIA_ALLOW_UNSCANNED: bool('false'), // development only: accept files without antivirus
   REPORT_TZ: z.string().default('Asia/Jerusalem'),
+  /** Android app (android/ folder): its package and signing-certificate SHA-256 fingerprint(s), so the app opens the panel full-screen */
+  ANDROID_APP_PACKAGE: z.string().regex(/^[a-zA-Z][\w]*(\.[a-zA-Z][\w]*)+$/).default('net.rubinny.botwa'),
+  ANDROID_APP_SHA256: z.string().default('').refine((v) => v.split(',').map((x) => x.trim()).filter(Boolean).every((x) => /^([0-9A-F]{2}:){31}[0-9A-F]{2}$/i.test(x)), 'ANDROID_APP_SHA256 must be colon-separated SHA-256 fingerprints'),
   /** "Meaning" search with a local model (needs the optional runtime: build with WITH_SEMANTIC=1). off = keyword search only. */
   SEMANTIC_SEARCH: z.enum(['off', 'local']).default('off'),
   SEMANTIC_MODEL: z.string().regex(/^[\w.-]+\/[\w.-]+$/).default('Xenova/multilingual-e5-small'),
