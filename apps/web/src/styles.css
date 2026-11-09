@@ -256,23 +256,6 @@ details.more[open] > summary::after { content: '▴'; }
 .kb-sugg li:first-child { border-top: 0; }
 
 /* ===== bot flow chart editor ===== */
-.flow-scroll { overflow: auto; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface-2); padding: .5rem; max-height: 70vh; }
-.flow-svg { display: block; }
-.flow-svg .flow-node { cursor: pointer; }
-.flow-svg .flow-node rect { fill: var(--surface); stroke: var(--input-border); stroke-width: 2; }
-.flow-svg .flow-node.accent rect { stroke: var(--accent); }
-.flow-svg .flow-node.warn rect { stroke: var(--warn); }
-.flow-svg .flow-node.ok rect { stroke: var(--ok); }
-.flow-svg .flow-node.danger rect { stroke: var(--danger); }
-.flow-svg .flow-node.sel rect { stroke-width: 4; fill: var(--accent-soft); }
-.flow-svg .flow-node:focus-visible { outline: none; }
-.flow-svg .flow-node:focus-visible rect { stroke: var(--text); stroke-width: 4; stroke-dasharray: 6 3; }
-.flow-svg text { fill: var(--text); font-family: var(--font); }
-.flow-svg .flow-type { font-size: 12px; font-weight: 700; fill: var(--muted); }
-.flow-svg .flow-text { font-size: 13px; }
-.flow-svg .flow-edge { fill: none; stroke: var(--muted); stroke-width: 1.6; }
-.flow-svg .flow-arrow { fill: var(--muted); }
-.flow-svg .flow-edge-label { font-size: 11px; fill: var(--muted); paint-order: stroke; stroke: var(--surface-2); stroke-width: 4px; }
 .flow-form > summary { cursor: pointer; min-height: 32px; }
 .sim-log { border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface-2); padding: .6rem; margin: .6rem 0; min-height: 160px; max-height: 50vh; overflow-y: auto; display: flex; flex-direction: column; gap: .4rem; }
 .sim-msg { max-width: 85%; padding: .45rem .75rem; border-radius: 14px; background: var(--surface); border: 1px solid var(--border); }
@@ -392,3 +375,44 @@ details > summary { border-radius: 8px; }
 .avatar-editor label.btn { display: inline-flex; align-items: center; cursor: pointer; margin: 0; font-weight: 600; }
 .avatar-editor label.btn.disabled { opacity: .5; cursor: progress; }
 .avatar-editor input[type=file]:focus-visible + label.btn { outline: 3px solid var(--accent); outline-offset: 2px; }
+
+/* ===== flow chart editor ===== */
+.flow-work { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 1rem; align-items: start; }
+@media (max-width: 1100px) { .flow-work { grid-template-columns: minmax(0, 1fr); } }
+.flow-side { position: sticky; top: 1rem; max-height: calc(100dvh - 2rem); overflow: auto; border: 1px solid var(--border); border-radius: var(--radius-sm); padding: .8rem; background: var(--surface); }
+.flow-side h3 { margin-top: 0; }
+.flow-add { border-top: 1px solid var(--border); margin-top: 1rem; padding-top: .8rem; display: grid; gap: .4rem; }
+.flow-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: .35rem; margin-bottom: .5rem; }
+.flow-toolbar button { min-height: 36px; padding: .2rem .7rem; }
+.flow-zoom { min-width: 3.2em; text-align: center; font-variant-numeric: tabular-nums; }
+.flow-help { flex-basis: 100%; }
+.flow-scroll { overflow: auto; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface-2); max-height: 72vh; touch-action: pan-x pan-y; }
+.flow-svg { display: block; user-select: none; -webkit-user-select: none; }
+.flow-svg .flow-dot { fill: var(--border); }
+.flow-svg .flow-node { cursor: grab; }
+.flow-svg.dragging, .flow-svg.dragging .flow-node { cursor: grabbing; }
+.flow-svg .flow-box { fill: var(--surface); stroke: var(--input-border); stroke-width: 1.5; filter: drop-shadow(0 2px 3px rgba(20, 24, 36, .12)); }
+.flow-svg .flow-stripe { fill: var(--input-border); }
+.flow-svg .flow-node.accent .flow-stripe, .flow-svg .flow-node.accent .flow-box { stroke: var(--accent); } .flow-svg .flow-node.accent .flow-stripe { fill: var(--accent); }
+.flow-svg .flow-node.warn .flow-stripe { fill: var(--warn); } .flow-svg .flow-node.warn .flow-box { stroke: var(--warn); }
+.flow-svg .flow-node.ok .flow-stripe { fill: var(--ok); } .flow-svg .flow-node.ok .flow-box { stroke: var(--ok); }
+.flow-svg .flow-node.danger .flow-stripe { fill: var(--danger); } .flow-svg .flow-node.danger .flow-box { stroke: var(--danger); }
+.flow-svg .flow-node.sel .flow-box { stroke-width: 3.5; fill: var(--accent-soft); stroke: var(--accent); }
+.flow-svg .flow-node.drop .flow-box { stroke-width: 3.5; stroke: var(--ok); stroke-dasharray: 6 3; }
+.flow-svg .flow-node.lifting .flow-box { filter: drop-shadow(0 8px 14px rgba(20, 24, 36, .25)); }
+.flow-svg .flow-node:focus-visible { outline: none; }
+.flow-svg .flow-node:focus-visible .flow-box { stroke: var(--text); stroke-width: 3.5; stroke-dasharray: 6 3; }
+.flow-svg text { fill: var(--text); font-family: var(--font); pointer-events: none; }
+.flow-svg .flow-type { font-size: 12px; font-weight: 700; fill: var(--muted); }
+.flow-svg .flow-text { font-size: 13px; }
+.flow-svg .flow-port-label { font-size: 11.5px; fill: var(--muted); }
+.flow-svg .flow-start { fill: var(--accent); }
+.flow-svg .flow-start-t { fill: var(--on-accent); font-size: 11px; font-weight: 700; }
+.flow-svg .flow-port { fill: var(--surface); stroke: var(--input-border); stroke-width: 2; cursor: crosshair; }
+.flow-svg .flow-port.on { fill: var(--accent); stroke: var(--accent); }
+.flow-svg .flow-port:hover { stroke: var(--accent); stroke-width: 3; }
+.flow-svg .flow-edge { fill: none; stroke: var(--input-border); stroke-width: 1.8; }
+.flow-svg .flow-edge-g.hl .flow-edge { stroke: var(--accent); stroke-width: 2.6; }
+.flow-svg .flow-edge.temp { stroke: var(--accent); stroke-dasharray: 6 4; stroke-width: 2.2; }
+.flow-svg .flow-arrow { fill: var(--input-border); } .flow-svg .flow-arrow.hl { fill: var(--accent); }
+.flow-svg .flow-edge-label { font-size: 11.5px; font-weight: 700; paint-order: stroke; stroke: var(--surface-2); stroke-width: 4px; }

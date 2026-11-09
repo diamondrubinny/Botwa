@@ -66,6 +66,8 @@ export type FlowNode = z.infer<typeof flowNode>;
 
 export const flowSchema = z.object({
   start: id, nodes: z.array(flowNode).min(1).max(MAX_NODES),
+  /** where each node sits in the editor (drawing only; the bot ignores it) */
+  layout: z.record(id, z.object({ x: z.number().min(-1000).max(20000), y: z.number().min(-1000).max(20000) })).optional(),
   /** answer a question typed as the very first message from the knowledge base, before the flow starts */
   kbFirst: z.boolean().default(false),
   /** names for the variables in the summary note given to the person who takes over */

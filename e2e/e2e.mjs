@@ -208,12 +208,43 @@ check('flow editor: flow created from the numbered menu', (await page.locator('s
 await axe('flow editor: diagram');
 await page.focus('svg.flow-svg g.flow-node');
 await page.keyboard.press('Enter');
-await page.waitForSelector('details.flow-form[open] fieldset');
-check('flow editor: a node opens from the keyboard', true);
+await page.waitForSelector('.flow-side fieldset');
+check('flow editor: a node opens from the keyboard in the side panel', true);
 await axe('flow editor: node form');
-await page.selectOption('#fl-add', 'question'); await page.click('button:has-text("הוספה")');
-await page.waitForSelector('details.flow-form[open] input[id^="sv-"]');
-await page.click('#fn-a2 summary'); await page.fill('#tx-a2', 'אפשר ליצור איתנו קשר בטלפון 03-0000000.');
+// drag a node with the mouse: it moves (snapped to the grid) and keeps its place
+const nodeA2 = page.locator('svg.flow-svg g[data-node-id="a2"] rect.flow-box');
+await nodeA2.scrollIntoViewIfNeeded();
+const xBefore = Number(await nodeA2.getAttribute('x'));
+const bb = await nodeA2.boundingBox();
+await page.mouse.move(bb.x + bb.width / 2, bb.y + bb.height / 2);
+await page.mouse.down();
+await page.mouse.move(bb.x + bb.width / 2 + 120, bb.y + bb.height / 2 + 80, { steps: 8 });
+await page.mouse.up();
+const xAfter = Number(await nodeA2.getAttribute('x'));
+check('flow editor: a node is dragged to a new place', xAfter !== xBefore && xAfter % 10 === 0, `${xBefore} -> ${xAfter}`);
+// the keyboard alternative: arrow keys move the focused node
+await page.focus('svg.flow-svg g[data-node-id="a2"]');
+const yBefore = Number(await nodeA2.getAttribute('y'));
+await page.keyboard.press('ArrowDown');
+check('flow editor: arrow keys move the focused node', Number(await nodeA2.getAttribute('y')) === yBefore + 10);
+await page.keyboard.press('Control+z');
+check('flow editor: undo (Ctrl+Z) restores the previous position', Number(await nodeA2.getAttribute('y')) === yBefore);
+await page.selectOption('#fl-add', 'question'); await page.click('.flow-add button:has-text("הוספה")');
+await page.waitForSelector('.flow-side input[id^="sv-"]');
+// connect by dragging from the new node's handle to the first node
+const edgesBefore = await page.locator('svg.flow-svg .flow-edge-g').count();
+const newId = await page.locator('svg.flow-svg g.flow-node.sel').getAttribute('data-node-id');
+const port = page.locator(`svg.flow-svg g[data-node-id="${newId}"] circle.flow-port`).first();
+await port.scrollIntoViewIfNeeded();
+const pb = await port.boundingBox();
+const tb = await page.locator('svg.flow-svg g[data-node-id="a2"] rect.flow-box').boundingBox();
+await page.mouse.move(pb.x + pb.width / 2, pb.y + pb.height / 2);
+await page.mouse.down();
+await page.mouse.move(tb.x + tb.width / 2, tb.y + tb.height / 2, { steps: 10 });
+await page.mouse.up();
+check('flow editor: dragging from a handle to a node connects them', (await page.locator('svg.flow-svg .flow-edge-g').count()) === edgesBefore + 1);
+await axe('flow editor: canvas after editing');
+await page.click('svg.flow-svg g[data-node-id="a2"] rect.flow-box'); await page.fill('#tx-a2', 'אפשר ליצור איתנו קשר בטלפון 03-0000000.');
 await page.click('button:has-text("שמירה")');
 await page.waitForSelector('text=התרשים נשמר.');
 check('flow editor: saved', true);

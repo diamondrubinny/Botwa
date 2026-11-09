@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { api, ApiError, can, personLabel, type Me } from '../api';
+import { autoLayout, FlowCanvas, type CanvasNode, type Pos } from '../components/FlowCanvas';
 import { errText } from '../strings';
 
 type Id = string | undefined;
@@ -19,7 +20,7 @@ type Node = { id: string; label?: string } & (
   | { type: 'handoff'; text: string; userId?: string; areaVars?: string[]; officerTopic?: string; showContact?: boolean }
   | { type: 'end'; text: string }
 );
-interface Flow { start: string; nodes: Node[]; labels?: Record<string, string> }
+interface Flow { start: string; nodes: Node[]; labels?: Record<string, string>; kbFirst?: boolean; layout?: Record<string, Pos> }
 interface FState { node: string | null; vars: Record<string, string>; invalid: number; done: boolean; endedAt?: number; files?: number; list?: string[] }
 interface Refs { users: { id: string; name: string; username?: string }[]; tags: { id: string; name: string }[]; officers?: { id: string; name: string; active: boolean; hasAccount: boolean; topics: string[] }[]; topics?: string[] }
 
@@ -43,6 +44,22 @@ function edges(n: Node): { to: string; label: string }[] {
 }
 const summary = (n: Node) => ('text' in n && n.text ? n.text : n.type === 'condition' ? (n.check.kind === 'hours' ? 'בשעות הפעילות?' : n.check.kind === 'channel' ? `ערוץ ${n.check.is}` : n.check.kind === 'has' ? `${n.check.name} נאסף?` : `${n.check.name} מכיל "${n.check.contains}"`) : n.type === 'kb' ? 'מענה ממאגר הידע' : n.type === 'tag' ? 'הוספת תגית' : n.type === 'remember' ? `שמירת ${n.vars.join(', ')}` : '');
 const nodeName = (n: Node) => n.label || `${TYPE_LABEL[n.type]}: ${summary(n).slice(0, 24)}`;
+function portsOf(n: Node): CanvasNode['ports'] {
+  switch (n.type) {
+    case 'menu': return n.options.map((o, i) => ({ key: `opt:${i}`, label: `${i + 1}. ${o.label}`, to: o.next }));
+    case 'condition': return [{ key: 'yes', label: 'כן', to: n.yes }, { key: 'no', label: 'לא', to: n.no }];
+    case 'kb': return [{ key: 'found', label: 'נמצא', to: n.found }, { key: 'notFound', label: 'לא נמצא', to: n.notFound }];
+    case 'handoff': case 'end': return [];
+    default: return [{ key: 'next', label: '', to: n.next }];
+  }
+}
+const toCanvas = (flow: Flow): CanvasNode[] => flow.nodes.map((n) => ({ id: n.id, kind: n.type, typeLabel: TYPE_LABEL[n.type], title: nodeName(n), subtitle: n.label || summary(n), cls: TYPE_CLASS[n.type], ports: portsOf(n) }));
+/** Connect one way out of a node (next / yes / no / found / notFound / a menu option) to another node. */
+function connect(n: Node, port: string, to: string): Node {
+  if (port.startsWith('opt:') && n.type === 'menu') { const i = Number(port.slice(4)); return { ...n, options: n.options.map((o, k) => (k === i ? { ...o, next: to } : o)) }; }
+  if (port in n || ['next', 'yes', 'no', 'found', 'notFound'].includes(port)) return { ...n, [port]: to } as Node;
+  return n;
+}
 
 function blank(type: Node['type'], id: string): Node {
   switch (type) {
@@ -61,30 +78,6 @@ function blank(type: Node['type'], id: string): Node {
   }
 }
 
-/** Layered auto layout, first node on the right (reading direction of the UI). */
-function layout(flow: Flow) {
-  const byId = new Map(flow.nodes.map((n) => [n.id, n]));
-  const layer = new Map<string, number>();
-  const queue = [flow.start];
-  layer.set(flow.start, 0);
-  for (let i = 0; i < queue.length; i++) {
-    const n = byId.get(queue[i]!);
-    if (!n) continue;
-    for (const e of edges(n)) if (byId.has(e.to) && !layer.has(e.to)) { layer.set(e.to, layer.get(queue[i]!)! + 1); queue.push(e.to); }
-  }
-  let extra = Math.max(0, ...layer.values()) + 1;
-  for (const n of flow.nodes) if (!layer.has(n.id)) layer.set(n.id, extra); // unreachable nodes go in a last column
-  const cols = new Map<number, string[]>();
-  for (const n of flow.nodes) { const l = layer.get(n.id)!; cols.set(l, [...(cols.get(l) ?? []), n.id]); }
-  const W = 190, H = 62, GX = 70, GY = 26;
-  const maxL = Math.max(...cols.keys());
-  const pos = new Map<string, { x: number; y: number }>();
-  for (const [l, ids] of cols) ids.forEach((id, i) => pos.set(id, { x: (maxL - l) * (W + GX) + 10, y: i * (H + GY) + 10 }));
-  const rows = Math.max(...[...cols.values()].map((c) => c.length));
-  extra = 0;
-  return { pos, W, H, width: (maxL + 1) * (W + GX) + 10, height: rows * (H + GY) + 30 };
-}
-
 export function FlowEditor({ me }: { me: Me }) {
   const canEdit = can(me, 'bot.manage');
   const [flow, setFlow] = useState<Flow | null>(null);
@@ -98,6 +91,39 @@ export function FlowEditor({ me }: { me: Me }) {
   const [tab, setTab] = useState<'edit' | 'test'>('edit');
   const [addType, setAddType] = useState<Node['type']>('message');
   const loaded = useRef(false);
+  // undo / redo: snapshots of the flow; typing in one field within a second is one step
+  const past = useRef<string[]>([]);
+  const future = useRef<string[]>([]);
+  const lastRec = useRef<{ at: number; key: string }>({ at: 0, key: '' });
+  const [, bump] = useState(0);
+  const change = (fn: (f: Flow | null) => Flow | null, record: boolean | string = true) => setFlow((prev) => {
+    const next = fn(prev);
+    if (record && prev && next !== prev) {
+      const key = typeof record === 'string' ? record : '';
+      const now = Date.now();
+      if (!(key && lastRec.current.key === key && now - lastRec.current.at < 1000)) {
+        past.current.push(JSON.stringify(prev));
+        if (past.current.length > 100) past.current.shift();
+        future.current = [];
+        setTimeout(() => bump((x) => x + 1), 0);
+      }
+      lastRec.current = { at: now, key };
+    }
+    return next;
+  });
+  const undo = () => { const p = past.current.pop(); if (p === undefined) return; setFlow((cur) => { if (cur) future.current.push(JSON.stringify(cur)); return JSON.parse(p) as Flow; }); bump((x) => x + 1); };
+  const redo = () => { const n = future.current.pop(); if (n === undefined) return; setFlow((cur) => { if (cur) past.current.push(JSON.stringify(cur)); return JSON.parse(n) as Flow; }); bump((x) => x + 1); };
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const t = e.target as HTMLElement | null;
+      if (t && (t.closest('input, textarea, select, [contenteditable=true]'))) return;
+      if (!(e.ctrlKey || e.metaKey)) return;
+      const k = e.key.toLowerCase();
+      if (k === 'z' && !e.shiftKey) { e.preventDefault(); undo(); } else if ((k === 'z' && e.shiftKey) || k === 'y') { e.preventDefault(); redo(); }
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  });  // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     void (async () => {
@@ -120,7 +146,7 @@ export function FlowEditor({ me }: { me: Me }) {
   async function fromMenu() {
     if (flow && !confirm('להחליף את התרשים הנוכחי בתרשים שנוצר מהתפריט הקיים?')) return;
     const d = await api<{ flow: Flow }>('POST', '/flow/from-menu').catch(() => null);
-    if (d) { setFlow(d.flow); setOpen(null); setMsg({ ok: true, text: 'נוצר תרשים מהתפריט. בדקו ושמרו.' }); }
+    if (d) { change(() => d.flow); setOpen(null); setMsg({ ok: true, text: 'נוצר תרשים מהתפריט. בדקו ושמרו.' }); }
   }
   const [tplLinks, setTplLinks] = useState<Record<string, string>>({});
   async function safetyTemplate() {
@@ -128,7 +154,7 @@ export function FlowEditor({ me }: { me: Me }) {
     setMsg(null);
     try {
       const d = await api<{ flow: Flow }>('POST', '/flow/templates/safety', { links: tplLinks });
-      setFlow(d.flow); setOpen(null);
+      change(() => d.flow); setOpen(null);
       setMsg({ ok: true, text: 'נוצרה תבנית יחידת הבטיחות. בדקו את הטקסטים, בחרו ממונים בצמתי ההעברה ושמרו.' });
       refreshRefs();
     } catch (e) { fail(e); }
@@ -145,8 +171,8 @@ export function FlowEditor({ me }: { me: Me }) {
     try { await api('PUT', '/flow/mode', { mode: m }); setMode(m); setMsg({ ok: true, text: m === 'flow' ? 'הבוט עובד כעת לפי התרשים.' : 'הבוט עובד כעת לפי התפריט הממוספר.' }); } catch (e) { fail(e); }
   }
 
-  const upd = (id: string, patch: Partial<Node>) => setFlow((f) => f && { ...f, nodes: f.nodes.map((n) => (n.id === id ? ({ ...n, ...patch } as Node) : n)) });
-  const del = (id: string) => setFlow((f) => {
+  const upd = (id: string, patch: Partial<Node>) => change((f) => f && { ...f, nodes: f.nodes.map((n) => (n.id === id ? ({ ...n, ...patch } as Node) : n)) }, `edit:${id}:${Object.keys(patch).join(',')}`);
+  const del = (id: string) => change((f) => {
     if (!f || f.nodes.length <= 1) return f;
     const clear = (v: Id) => (v === id ? undefined : v);
     const nodes = f.nodes.filter((n) => n.id !== id).map((n) => {
@@ -155,20 +181,40 @@ export function FlowEditor({ me }: { me: Me }) {
       if (n.type === 'menu') c.options = n.options.map((o) => ({ ...o, next: clear(o.next) }));
       return c as unknown as Node;
     });
-    return { start: f.start === id ? nodes[0]!.id : f.start, nodes };
+    const layout = f.layout ? Object.fromEntries(Object.entries(f.layout).filter(([k]) => k !== id)) : undefined;
+    return { ...f, start: f.start === id ? nodes[0]!.id : f.start, nodes, layout };
   });
   const add = () => {
-    setFlow((f) => {
+    change((f) => {
       const base: Flow = f ?? { start: '', nodes: [] };
       let i = base.nodes.length + 1;
       while (base.nodes.some((n) => n.id === `${addType}${i}`)) i++;
       const id = `${addType}${i}`;
       setOpen(id);
-      return { start: base.start || id, nodes: [...base.nodes, blank(addType, id)] };
+      let nodes = [...base.nodes, blank(addType, id)];
+      // a new node continues from the selected one when that one has a free single exit
+      const sel = open ? base.nodes.find((n) => n.id === open) : undefined;
+      if (connectNew && sel && portsOf(sel).length === 1 && portsOf(sel)[0]!.key === 'next' && !portsOf(sel)[0]!.to) nodes = nodes.map((n) => (n.id === sel.id ? connect(n, 'next', id) : n));
+      let layout = base.layout;
+      if (layout) {
+        const sp = sel ? layout[sel.id] : undefined;
+        layout = { ...layout, [id]: sp ? { x: Math.max(0, sp.x - 300), y: sp.y } : { x: 30, y: Math.max(20, ...Object.values(layout).map((p) => p.y + 100)) } };
+      }
+      return { ...base, start: base.start || id, nodes, layout };
     });
   };
+  const [connectNew, setConnectNew] = useState(true);
+  const canvasNodes = useMemo(() => (flow ? toCanvas(flow) : []), [flow]);
+  const moveNode = (id: string, p: Pos, record: boolean) => change((f) => {
+    if (!f) return f;
+    const base = f.layout ?? autoLayout(toCanvas(f), f.start);   // the first move fixes everyone else where they are
+    return { ...f, layout: { ...base, [id]: p } };
+  }, record ? `move:${id}` : false);
+  const link = (from: string, port: string, to: string) => change((f) => f && { ...f, nodes: f.nodes.map((n) => (n.id === from ? connect(n, port, to) : n)) });
+  const arrange = () => { if (confirm('לסדר את כל הצמתים מחדש אוטומטית? (אפשר לבטל ב-Ctrl+Z)')) change((f) => f && { ...f, layout: undefined }); };
+  const selectNode = (id: string) => { setOpen(id); };
+  const selNode = flow && open ? flow.nodes.find((n) => n.id === open) : undefined;
 
-  const layoutInfo = useMemo(() => (flow && flow.nodes.length ? layout(flow) : null), [flow]);
 
   return (
     <>
@@ -208,7 +254,7 @@ export function FlowEditor({ me }: { me: Me }) {
           {canEdit && (
             <div className="row" style={{ marginBottom: '.75rem' }}>
               <button className="primary" onClick={save} disabled={!flow || !dirty}>שמירה</button>
-              <button onClick={() => { setFlow(saved ? (JSON.parse(saved) as Flow) : null); setMsg(null); }} disabled={!dirty}>ביטול שינויים</button>
+              <button onClick={() => { change(() => (saved ? (JSON.parse(saved) as Flow) : null)); setMsg(null); }} disabled={!dirty}>ביטול כל השינויים שלא נשמרו</button>
               <button onClick={fromMenu}>יצירה מהתפריט הממוספר הקיים</button>
               <button onClick={safetyTemplate}>יצירת תרשים בטיחות לפי האפיון</button>
               {dirty && <span className="hint">יש שינויים שלא נשמרו.</span>}
@@ -225,63 +271,67 @@ export function FlowEditor({ me }: { me: Me }) {
           )}
           {!flow && <p className="empty">עוד אין תרשים. אפשר ליצור מהתפריט הקיים, או להוסיף צומת ראשון.</p>}
 
-          {flow && layoutInfo && (
+          {flow && flow.nodes.length > 0 && (
             <section className="card" aria-labelledby="fd-h">
-              <h2 id="fd-h">התרשים</h2>
-              <p className="hint">הזרימה מתחילה בצומת המסומן "התחלה" (מימין). לחיצה או Enter על צומת פותחת אותו לעריכה למטה.</p>
-              <div className="flow-scroll" role="group" aria-label="תרשים הזרימה">
-                <svg width={layoutInfo.width} height={layoutInfo.height} viewBox={`0 0 ${layoutInfo.width} ${layoutInfo.height}`} className="flow-svg">
-                  <defs><marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" className="flow-arrow" /></marker></defs>
-                  {flow.nodes.flatMap((n) => edges(n).map((e, i) => {
-                    const a = layoutInfo.pos.get(n.id), b = layoutInfo.pos.get(e.to);
-                    if (!a || !b) return null;
-                    const back = b.x >= a.x;                       // target is in the same or an earlier column: loop around below
-                    const x1 = back ? a.x + layoutInfo.W / 2 : a.x, y1 = back ? a.y + layoutInfo.H : a.y + layoutInfo.H / 2;
-                    const x2 = back ? b.x + layoutInfo.W / 2 : b.x + layoutInfo.W, y2 = back ? b.y + layoutInfo.H : b.y + layoutInfo.H / 2;
-                    const d = back ? `M${x1} ${y1} C${x1} ${y1 + 36} ${x2} ${y2 + 36} ${x2} ${y2}` : `M${x1} ${y1} C${x1 - 40} ${y1} ${x2 + 40} ${y2} ${x2} ${y2}`;
-                    const lx = (x1 + x2) / 2, ly = back ? Math.max(y1, y2) + 30 : (y1 + y2) / 2 - 4;
-                    return (
-                      <g key={`${n.id}-${i}`} aria-hidden="true">
-                        <path d={d} className="flow-edge" markerEnd="url(#arr)" />
-                        {e.label && <text x={lx} y={ly} textAnchor="middle" className="flow-edge-label">{e.label}</text>}
-                      </g>
-                    );
-                  }))}
-                  {flow.nodes.map((n) => {
-                    const p = layoutInfo.pos.get(n.id)!;
-                                    return (
-                      <g key={n.id} className={`flow-node ${TYPE_CLASS[n.type]}${open === n.id ? ' sel' : ''}`} role="button" tabIndex={0}
-                        aria-describedby={`fd-${n.id}`}
-                        onClick={() => { setOpen(n.id); document.getElementById(`fn-${n.id}`)?.scrollIntoView({ block: 'nearest' }); }}
-                        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setOpen(n.id); document.getElementById(`fn-${n.id}`)?.scrollIntoView({ block: 'nearest' }); } }}>
-                        <desc id={`fd-${n.id}`}>{edges(n).length ? `ממשיך אל ${edges(n).map((e) => nodeName(flow.nodes.find((x) => x.id === e.to) ?? n)).join(', ')}` : 'סוף הענף'}</desc>
-                        <rect x={p.x} y={p.y} width={layoutInfo.W} height={layoutInfo.H} rx="10" />
-                        <text x={p.x + layoutInfo.W - 10} y={p.y + 22} textAnchor="start" className="flow-type" direction="rtl" transform={`translate(0 0)`}>{TYPE_LABEL[n.type]}{flow.start === n.id ? ' · התחלה' : ''}</text>
-                        <text x={p.x + layoutInfo.W - 10} y={p.y + 44} className="flow-text" direction="rtl">{(n.label || summary(n)).slice(0, 26)}</text>
-                      </g>
-                    );
-                  })}
-                </svg>
+              <div className="row" style={{ justifyContent: 'space-between' }}>
+                <h2 id="fd-h" style={{ margin: 0 }}>התרשים</h2>
+                {canEdit && <div className="row">
+                  <button type="button" onClick={undo} disabled={past.current.length === 0} aria-keyshortcuts="Control+Z">ביטול פעולה</button>
+                  <button type="button" onClick={redo} disabled={future.current.length === 0} aria-keyshortcuts="Control+Shift+Z">חזרה על פעולה</button>
+                </div>}
+              </div>
+              <div className="flow-work">
+                <FlowCanvas nodes={canvasNodes} start={flow.start} layout={flow.layout} selected={open} canEdit={canEdit}
+                  onSelect={selectNode} onMove={moveNode} onConnect={link} onArrange={arrange} />
+                <aside className="flow-side" aria-labelledby="fs-h">
+                  {selNode ? (
+                    <>
+                      <h3 id="fs-h">{TYPE_LABEL[selNode.type]}{flow.start === selNode.id ? ' (התחלה)' : ''}</h3>
+                      <NodeForm key={selNode.id} n={selNode} flow={flow} refs={refs} canEdit={canEdit} upd={(p) => upd(selNode.id, p)} del={() => { del(selNode.id); setOpen(null); }} makeStart={() => change((f) => f && { ...f, start: selNode.id })} />
+                    </>
+                  ) : (
+                    <>
+                      <h3 id="fs-h">עריכת צומת</h3>
+                      <p className="hint">בחרו צומת בתרשים (לחיצה, או Tab ואז Enter) כדי לערוך אותו כאן.</p>
+                    </>
+                  )}
+                  {canEdit && (
+                    <div className="flow-add">
+                      <label htmlFor="fl-add">הוספת צומת</label>
+                      <div className="row">
+                        <select id="fl-add" value={addType} onChange={(e) => setAddType(e.target.value as Node['type'])} style={{ flex: 1, minWidth: 0 }}>
+                          {(Object.keys(TYPE_LABEL) as Node['type'][]).map((t) => <option key={t} value={t}>{TYPE_LABEL[t]}</option>)}
+                        </select>
+                        <button type="button" onClick={add}>הוספה</button>
+                      </div>
+                      <label style={{ fontWeight: 400 }}><input type="checkbox" style={{ width: 'auto', minHeight: 0, marginInlineEnd: '.4rem' }} checked={connectNew} onChange={(e) => setConnectNew(e.target.checked)} />לחבר אחרי הצומת הנבחר</label>
+                    </div>
+                  )}
+                </aside>
               </div>
             </section>
           )}
 
           {flow && (
-            <section aria-labelledby="fn-h">
-              <h2 id="fn-h">צמתים ({flow.nodes.length})</h2>
-              {flow.nodes.map((n) => (
-                <details key={n.id} id={`fn-${n.id}`} className="card flow-form" open={open === n.id} onToggle={(e) => { if ((e.target as HTMLDetailsElement).open) setOpen(n.id); else if (open === n.id) setOpen(null); }}>
-                  <summary><strong>{TYPE_LABEL[n.type]}</strong>: {nodeName(n)}{flow.start === n.id ? ' (התחלה)' : ''}</summary>
-                  {open === n.id && <NodeForm n={n} flow={flow} refs={refs} canEdit={canEdit} upd={(p) => upd(n.id, p)} del={() => del(n.id)} makeStart={() => setFlow({ ...flow, start: n.id })} />}
-                </details>
-              ))}
-            </section>
+            <details className="card">
+              <summary><strong>כל הצמתים ({flow.nodes.length})</strong>, רשימה לקריאה ולניווט במקלדת</summary>
+              <ul className="plain">
+                {flow.nodes.map((n) => (
+                  <li key={n.id} id={`fn-${n.id}`}>
+                    <button type="button" className="linklike" aria-current={open === n.id} onClick={() => { setOpen(n.id); document.getElementById('fd-h')?.scrollIntoView({ block: 'start' }); }}>
+                      <strong>{TYPE_LABEL[n.type]}</strong>: {nodeName(n)}{flow.start === n.id ? ' (התחלה)' : ''}
+                    </button>
+                    <span className="hint"> {edges(n).length ? `← ${edges(n).map((e) => `${e.label ? `${e.label}: ` : ''}${nodeName(flow.nodes.find((x) => x.id === e.to) ?? n)}`).join(' | ')}` : '· סוף הענף'}</span>
+                  </li>
+                ))}
+              </ul>
+            </details>
           )}
 
-          {canEdit && (
+          {!flow?.nodes.length && canEdit && (
             <div className="card row">
-              <label htmlFor="fl-add">הוספת צומת</label>
-              <select id="fl-add" value={addType} onChange={(e) => setAddType(e.target.value as Node['type'])} style={{ maxWidth: 260 }}>
+              <label htmlFor="fl-add0">הוספת צומת ראשון</label>
+              <select id="fl-add0" value={addType} onChange={(e) => setAddType(e.target.value as Node['type'])} style={{ maxWidth: 260 }}>
                 {(Object.keys(TYPE_LABEL) as Node['type'][]).map((t) => <option key={t} value={t}>{TYPE_LABEL[t]}</option>)}
               </select>
               <button onClick={add}>הוספה</button>
@@ -292,7 +342,6 @@ export function FlowEditor({ me }: { me: Me }) {
     </>
   );
 }
-
 function problemText(p: string): string {
   const [code, rest] = p.split(':');
   return ({ missing_start: 'צומת ההתחלה לא קיים.', unfinished_flow: 'יש טקסטים שטרם הושלמו.', duplicate_id: `מזהה כפול: ${rest}`, missing_target: `צומת מצביע על צומת שנמחק (${rest}).`, loop: 'יש מעגל של צמתים שלא ממתינים ללקוח (הוסיפו תפריט או שאלה בתוכו).' } as Record<string, string>)[code!] ?? p;

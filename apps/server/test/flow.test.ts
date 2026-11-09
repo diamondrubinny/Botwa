@@ -850,3 +850,13 @@ describe('a question that names a menu topic', () => {
     expect(r.replies.join('\n')).not.toContain('ברצוני לקבל מידע');
   });
 });
+
+describe('editor positions', () => {
+  it('a flow keeps where each node was placed; bad positions or ids are refused', () => {
+    const f = flowSchema.parse({ start: 'm', nodes: [{ id: 'm', type: 'end', text: '' }], layout: { m: { x: 120, y: 40 } } });
+    expect(f.layout).toEqual({ m: { x: 120, y: 40 } });
+    expect(flowSchema.safeParse({ start: 'm', nodes: [{ id: 'm', type: 'end', text: '' }], layout: { m: { x: 'a', y: 1 } } }).success).toBe(false);
+    expect(flowSchema.safeParse({ start: 'm', nodes: [{ id: 'm', type: 'end', text: '' }], layout: { 'Bad Id': { x: 1, y: 1 } } }).success).toBe(false);
+    expect(flowSchema.safeParse({ start: 'm', nodes: [{ id: 'm', type: 'end', text: '' }], layout: { m: { x: 1e9, y: 1 } } }).success).toBe(false);
+  });
+});
