@@ -608,11 +608,17 @@ export class ChannelManager {
     if (!c || c.assigned_to) return; // a person already owns this conversation
     if (text !== null && text.trim() === '[unsupported message type]') text = null;
 
-    // loop guard: two bots talking to each other. Many automatic replies in a short time => stop and hand over silently.
-    const recent = await this.db.query(`SELECT count(*)::int AS n FROM messages WHERE conversation_id = $1 AND auto AND created_at > now() - interval '10 minutes'`, [convId]);
-    if (recent.rows[0].n >= 8) {
+    // loop guard: two bots talking to each other. A person going through a flow quickly (identification: 6-8 short answers)
+    // must not trip it, so it looks for what only a machine does: the same text again and again, or many messages a minute,
+    // or a very long run of automatic replies.
+    const g = (await this.db.query(
+      `SELECT (SELECT count(*) FROM messages WHERE conversation_id = $1 AND auto AND created_at > now() - interval '10 minutes')::int AS auto10,
+              (SELECT count(*) FROM messages WHERE conversation_id = $1 AND direction = 'in' AND created_at > now() - interval '60 seconds')::int AS in60,
+              (SELECT coalesce(max(n), 0) FROM (SELECT count(*)::int AS n FROM messages WHERE conversation_id = $1 AND direction = 'in' AND body <> '' AND created_at > now() - interval '10 minutes' GROUP BY lower(trim(body))) x)::int AS same10`,
+      [convId])).rows[0] as { auto10: number; in60: number; same10: number };
+    if (g.same10 >= 5 || g.in60 >= 20 || g.auto10 >= 40) {
       await this.db.query(`UPDATE conversations SET bot_state = 'human' WHERE id = $1`, [convId]);
-      await this.db.query(`INSERT INTO conversation_notes (conversation_id, body) VALUES ($1, 'הבוט נעצר: יותר מדי הודעות אוטומטיות בזמן קצר (ייתכן בוט בצד הלקוח).')`, [convId]);
+      await this.db.query(`INSERT INTO conversation_notes (conversation_id, body) VALUES ($1, 'הבוט נעצר: נראה שבצד הלקוח עונה בוט (אותה הודעה שוב ושוב, או הודעות רבות מאוד בזמן קצר).')`, [convId]);
       await autoAssign(this.db, convId).catch(() => null);
       return;
     }
@@ -620,6 +626,7 @@ export class ChannelManager {
     await rx.greet(text);
     if (bot.reactions.ackAll) await rx.set('working');   // "seen, working on it" for every message the bot handles
     if (bot.mode === 'flow') {
+      if (c.bot_state === 'human') return;   // handed over (or stopped by the loop guard): a person answers until the conversation is closed
       const flow = await loadFlow(this.db);
       if (flow) { await this.runFlowStep(channelId, convId, ext, bot, flow, { text: rawText !== null && rawText.trim() === '[unsupported message type]' ? null : rawText, media: hasMedia }, rx); return; }
     }

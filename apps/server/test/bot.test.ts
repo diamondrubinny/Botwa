@@ -218,8 +218,14 @@ describe('menu bot end to end', () => {
     const c = await conv('loop');
     expect(c.bot_state).toBe('human');
     const total = (await db.query(`SELECT count(*)::int AS n FROM messages m JOIN conversations v ON v.id=m.conversation_id JOIN contacts ct ON ct.id=v.contact_id WHERE ct.external_id='loop' AND m.auto`)).rows[0].n;
-    expect(total).toBeLessThanOrEqual(10);
+    expect(total).toBeLessThanOrEqual(12);
     expect(before).toBeGreaterThan(0);
+  });
+
+  it('loop guard: a person answering a run of questions quickly is not mistaken for a bot', async () => {
+    for (const t of ['שלום', 'דנה לוי', 'דלג', 'דלג', 'הנדסה', 'פרופ׳ כהן', '2', '3', 'בניין 5']) await say('fast-human', t);
+    const n = (await db.query(`SELECT count(*)::int AS n FROM conversation_notes cn JOIN conversations v ON v.id = cn.conversation_id JOIN contacts ct ON ct.id = v.contact_id WHERE ct.external_id = 'fast-human' AND cn.body LIKE 'הבוט נעצר%'`)).rows[0].n;
+    expect(n).toBe(0);
   });
 
   it('bot disabled: previous behaviour (routing + away reply path) is untouched', async () => {
