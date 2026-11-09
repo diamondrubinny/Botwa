@@ -1,6 +1,8 @@
 package net.rubinny.botwa;
 
 import android.app.Activity;
+import android.app.AlertDialog;
+import android.net.Uri;
 import android.content.Intent;
 import android.content.pm.ShortcutInfo;
 import android.content.pm.ShortcutManager;
@@ -31,8 +33,28 @@ public class SetupActivity extends Activity {
         super.onCreate(state);
         addEditShortcut();
         boolean edit = getIntent() != null && getIntent().getBooleanExtra(EXTRA_EDIT, false);
-        if (!edit && Prefs.url(this) != null) { openPanel(); return; }
+        if (!edit && Prefs.url(this) != null) { checkThenOpen(); return; }
         setContentView(form());
+    }
+
+    /** Every 12 hours: is there a newer app? Ask once, then open the panel either way. */
+    private void checkThenOpen() {
+        if (!Updates.due(this)) { openPanel(); return; }
+        new Thread(() -> {
+            Updates.Info info = Updates.fetch(getString(R.string.update_url), BuildConfig.VERSION_CODE);
+            Updates.checked(this);
+            runOnUiThread(() -> {
+                if (isFinishing()) return;
+                if (info == null) { openPanel(); return; }
+                new AlertDialog.Builder(this)
+                    .setTitle("גרסה חדשה של האפליקציה")
+                    .setMessage("גרסה " + info.name + " זמינה (מותקנת: " + BuildConfig.VERSION_NAME + "). העדכון יורד בדפדפן, ואז מאשרים התקנה. הנתונים וההתחברות נשמרים.")
+                    .setPositiveButton("עדכון", (d, w) -> { startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(info.apk))); finish(); })
+                    .setNegativeButton("אחר כך", (d, w) -> openPanel())
+                    .setOnCancelListener(d -> openPanel())
+                    .show();
+            });
+        }).start();
     }
 
     private void openPanel() {

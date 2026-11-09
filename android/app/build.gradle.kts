@@ -14,6 +14,8 @@ android {
         versionName = prop("botwa.versionName")
         resValue("string", "app_name", prop("botwa.appName"))
         resValue("string", "default_url", prop("botwa.url"))
+        // where the app looks for a newer version of itself (published by .github/workflows/android.yml); empty = never
+        resValue("string", "update_url", prop("botwa.updateUrl"))
     }
 
     // Release signing from environment variables only (never from files in the repository).
@@ -32,6 +34,7 @@ android {
             if (ks != null) signingConfig = signingConfigs.getByName("release")
         }
     }
+    buildFeatures { buildConfig = true }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
