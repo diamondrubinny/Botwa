@@ -42,7 +42,7 @@ export function buildSafetyFlow(tag: (name: string) => string, links: TemplateLi
     fire: 'מערכות אש: גילוי / כיבוי', hygiene: 'גיהות', training: 'הדרכות', women: 'עבודת נשים', general: 'שאלה כללית / דיווח אחר',
   };
   add({
-    id: 'topics', type: 'menu', label: 'תפריט נושאים', text: 'ברצוני לקבל מידע / לדווח על:', kbOnFreeText: false,
+    id: 'topics', type: 'menu', label: 'תפריט נושאים', text: 'ברצוני לקבל מידע / לדווח על:', kbOnFreeText: true,
     options: [
       { label: T.waste, next: 'waste', examples: ['פינוי פסולת', 'פסולת כימית', 'איסוף פסולת מסוכנת'] },
       { label: T.accident, next: 'accident', examples: ['תאונה', 'כמעט נפגעתי', 'נפצעתי', 'אירוע בטיחותי'] },
@@ -104,7 +104,7 @@ export function buildSafetyFlow(tag: (name: string) => string, links: TemplateLi
   report('wom', { label: 'עבודת נשים', mediaText: 'כתבו את שאלתכם:', tags: ['עבודת נשים'], to: 'Biosafety Officer', areas: false, question: true, place: false });
 
   return flowSchema.parse({
-    start: 'start', nodes,
+    start: 'start', nodes, kbFirst: true,
     labels: { fullName: 'שם מלא', building: 'בניין', room: 'חדר', faculty: 'פקולטה', pi: 'שם ה-PI', status: 'סטטוס', chemicals: 'כימיקלים', description: 'תיאור', where: 'מיקום', question: 'שאלה' },
   });
 }

@@ -670,6 +670,15 @@ export class ChannelManager {
       resolveArea: (t) => resolveArea(this.db, t),
       kbAnswer: async (t) => { const a = await this.kbAnswer(bot, null, t, true, async () => { searched = true; await rx.set('working'); }); if (a) found = true; return a; },
       matchOption: async (t, options) => this.kb?.matchOption(t, options) ?? null,
+      kbSuggest: async (t) => {
+        if (!this.kb || t.trim().length < 3) return [];
+        const hits = await this.kb.search(t, { audience: 'bot', limit: 5 }).catch(() => []);
+        return hits.filter((h) => h.score >= bot.kb.minScore * 0.5).slice(0, 3).map((h) => ({ id: h.sourceId, label: h.title.replace(/\s+/g, ' ').slice(0, 70) }));
+      },
+      kbSource: async (id, q) => {
+        const a = await this.kb?.answerFor(id, q, { minScore: bot.kb.minScore, maxChars: bot.kb.maxChars }).catch(() => null);
+        return a ? [bot.kb.intro, a.text, bot.kb.showSource ? `מקור: ${a.url ?? a.title}` : ''].filter(Boolean).join('\n\n') : null;
+      },
     };
     const r = await runFlow(flow, st, input, ctx, bot.humanLabel);
     await this.botSayAll(channelId, convId, ext, bot, r.replies, r.menu);

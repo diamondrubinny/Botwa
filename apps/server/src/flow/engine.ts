@@ -14,6 +14,8 @@ export interface FlowState {
   files?: number;
   /** progress inside a `list` node */
   list?: { items: string[]; phase: 'item' | 'more' };
+  /** "did you mean" candidates offered after a question the knowledge base could not answer with confidence (picked by letter) */
+  suggest?: { id: string; label: string }[];
 }
 export const NEW_FLOW_STATE: FlowState = { node: null, vars: {}, invalid: 0, done: false };
 
@@ -41,6 +43,10 @@ export interface FlowContext {
   kbAnswer: (text: string) => Promise<string | null>;
   /** index of the option whose meaning matches the free text, or null (needs the local model; returns null when it is off) */
   matchOption: (text: string, options: { label: string; examples: string[] }[]) => Promise<number | null>;
+  /** close-but-not-confident knowledge-base entries for a question, offered as "did you mean" (max 3) */
+  kbSuggest?: (text: string) => Promise<{ id: string; label: string }[]>;
+  /** the formatted answer of one knowledge-base entry chosen from the suggestions */
+  kbSource?: (id: string, question: string) => Promise<string | null>;
   /** the person responsible for the area a free text names (building, place), or null */
   resolveArea?: (text: string) => Promise<string | null>;
 }
@@ -52,6 +58,8 @@ const MENU_WORDS = new Set(['תפריט', 'menu', 'start', 'התחלה', 'תפר
 const SKIP_WORDS = new Set(['דלג', 'דלגי', 'skip', 'לא', 'אין']);
 const YES = new Set(['כן', 'yes', 'y', '1', 'עוד']);
 const NO = new Set(['לא', 'no', 'n', '2', 'די', 'זהו', 'סיימתי']);
+const GREETINGS = new Set(['שלום', 'היי', 'הי', 'הלו', 'אהלן', 'בוקר טוב', 'ערב טוב', 'צהריים טובים', 'תודה', 'תודה רבה', 'ok', 'אוקיי', 'אוקי', 'hello', 'hi']);
+const LETTERS = ['א', 'ב', 'ג'];
 const DEFAULT_LABELS: Record<string, string> = { name: 'שם', phone: 'טלפון', email: 'אימייל', text: 'פירוט' };
 
 const menuText = (n: Extract<FlowNode, { type: 'menu' }>, humanOption: boolean, humanLabel = 'נציג אנושי') =>
@@ -116,6 +124,16 @@ export async function runFlow(flow: Flow, prev: FlowState | null, input: FlowInp
   // 1. handle the answer to the node we were waiting at
   let cursor: string | undefined;
   const w = state.node ? nodes.get(state.node) : undefined;
+  // a letter picks one of the "did you mean" suggestions offered with the last reply
+  if (w?.type === 'menu' && state.suggest?.length && hasText) {
+    const k = LETTERS.indexOf(t.replace(/[.'׳)]/g, ''));
+    const pick = k >= 0 ? state.suggest[k] : undefined;
+    if (pick && ctx.kbSource) {
+      const a = await ctx.kbSource(pick.id, pick.label).catch(() => null);
+      if (a) { replies.push(a, menuText(w, ctx.humanOption, humanLabel)); return { replies, state: { ...state, suggest: undefined, invalid: 0 }, effects, menu: true }; }
+    }
+  }
+  if (state.suggest) state = { ...state, suggest: undefined };
   if (w && state.node !== null) {
     if (w.type === 'menu') {
       let idx: number | null = null;
@@ -131,6 +149,12 @@ export async function runFlow(flow: Flow, prev: FlowState | null, input: FlowInp
       } else {
         const a = w.kbOnFreeText && !/^\d{1,2}$/.test(t) ? await ctx.kbAnswer(inp.text!).catch(() => null) : null;
         if (a) { replies.push(a); replies.push(menuText(w, ctx.humanOption, humanLabel)); return { replies, state: { ...state, invalid: 0 }, effects, menu: true }; }
+        // no confident answer: offer the closest entries ("did you mean")
+        const sug = w.kbOnFreeText && ctx.kbSuggest && !/^\d{1,2}$/.test(t) ? (await ctx.kbSuggest(inp.text!).catch(() => [])).slice(0, 3) : [];
+        if (sug.length && state.invalid < ctx.invalidRetries) {
+          replies.push(`לא מצאתי תשובה מדויקת. האם התכוונתם לאחד מאלה?\n${sug.map((x, i) => `${LETTERS[i]}. ${x.label}`).join('\n')}\n\nכתבו את האות, או בחרו מהתפריט:\n\n${menuText(w, ctx.humanOption, humanLabel)}`);
+          return { replies, state: { ...state, suggest: sug, invalid: state.invalid + 1 }, effects, menu: true };
+        }
         if (state.invalid < ctx.invalidRetries) { replies.push(`${ctx.invalidMessage}\n\n${menuText(w, ctx.humanOption, humanLabel)}`); return { replies, state: { ...state, invalid: state.invalid + 1 }, effects, menu: true }; }
         return handoff('unrecognized');
       }
@@ -197,9 +221,15 @@ export async function runFlow(flow: Flow, prev: FlowState | null, input: FlowInp
   }
   if (!w || state.node === null) {
     cursor = flow.start;
+    // flows with kbFirst answer a question in the very first message before anything else (then carry on, e.g. with identification)
+    const askable = hasText && !/^\d{1,2}$/.test(t) && !MENU_WORDS.has(t) && !GREETINGS.has(t) && t.length >= 6 && !ctx.humanKeywords.some((k) => t.includes(normalize(k)));
+    if (flow.kbFirst && fresh && askable) {
+      const a = await ctx.kbAnswer(inp.text!).catch(() => null);
+      if (a) replies.push(a);
+    }
     // the very first message may already be a question the knowledge base can answer
     const first = nodes.get(flow.start);
-    if (first?.type === 'menu' && hasText && first.kbOnFreeText && !/^\d{1,2}$/.test(t) && !MENU_WORDS.has(t)) {
+    if (first?.type === 'menu' && askable && first.kbOnFreeText && !flow.kbFirst) {
       const a = await ctx.kbAnswer(inp.text!).catch(() => null);
       if (a) { replies.push(a, menuText(first, ctx.humanOption, humanLabel)); return { replies, state: { ...state, node: first.id }, effects, menu: true }; }
     }

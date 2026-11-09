@@ -21,5 +21,5 @@ export function flowFromMenu(bot: BotConfig): Flow {
     }
   });
   if (!opts.length) nodes.push({ id: 'h', type: 'handoff', text: bot.humanMessage });
-  return { start: 'menu', nodes };
+  return { start: 'menu', nodes, kbFirst: false };
 }

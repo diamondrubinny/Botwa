@@ -625,3 +625,56 @@ describe('areas workbook import', () => {
     void uid;
   });
 });
+
+describe('smart questions (kbFirst + did-you-mean)', () => {
+  const smart: Flow = flowSchema.parse({
+    start: 'menu', kbFirst: true, nodes: [
+      { id: 'menu', type: 'menu', text: 'במה נוכל לעזור?', kbOnFreeText: true, options: [{ label: 'לייזרים', next: 'bye', examples: [] }] },
+      { id: 'bye', type: 'handoff', text: '' },
+    ],
+  });
+  const sugCtx = (over: Partial<FlowContext> = {}) => ctx({
+    kbSuggest: async () => [{ id: 's1', label: 'נהלי עבודה עם לייזר' }, { id: 's2', label: 'הגנת עיניים' }],
+    kbSource: async (id) => (id === 's1' ? 'תשובה: נהלי לייזר' : null), ...over,
+  });
+
+  it('answers a question in the first message, then still shows the menu', async () => {
+    const r = await runFlow(smart, null, 'איך מפנים פסולת כימית?', ctx({ kbAnswer: async () => 'תשובה על פסולת' }));
+    expect(r.replies[0]).toBe('תשובה על פסולת');
+    expect(r.replies.join('\n')).toContain('במה נוכל לעזור?');
+    expect(r.state.node).toBe('menu');
+  });
+  it('does not search for greetings, numbers or very short text, nor when the flow is not kbFirst', async () => {
+    let calls = 0;
+    const c = ctx({ kbAnswer: async () => { calls++; return 'x'; } });
+    for (const t of ['שלום', 'היי', '1', 'מה?']) await runFlow(smart, null, t, c);
+    expect(calls).toBe(0);
+    // a flow that starts with a condition and is not kbFirst never searches on the first message
+    await runFlow(flowSchema.parse({ start: 'c', nodes: [{ id: 'c', type: 'condition', check: { kind: 'hours' }, yes: 'm', no: 'm' }, { id: 'm', type: 'menu', text: 'x', options: [{ label: 'a', next: 'e' }] }, { id: 'e', type: 'end', text: '' }] }), null, 'איך מפנים פסולת כימית?', c);
+    expect(calls).toBe(0);
+  });
+  it('offers "did you mean" when unsure, and a letter picks one', async () => {
+    const first = await runFlow(smart, null, 'שלום', sugCtx());          // shows the menu
+    const r1 = await runFlow(smart, first.state, 'משהו על עבודה עם קרן', sugCtx());
+    expect(r1.replies[0]).toContain('א. נהלי עבודה עם לייזר');
+    expect(r1.replies[0]).toContain('ב. הגנת עיניים');
+    expect(r1.state.suggest).toHaveLength(2);
+    const r2 = await runFlow(smart, r1.state, 'א', sugCtx());
+    expect(r2.replies[0]).toBe('תשובה: נהלי לייזר');
+    expect(r2.replies[1]).toContain('במה נוכל לעזור?');
+    expect(r2.state.suggest).toBeUndefined();
+  });
+  it('forgets the suggestions once the customer does something else', async () => {
+    const first = await runFlow(smart, null, 'שלום', sugCtx());
+    const r1 = await runFlow(smart, first.state, 'משהו על עבודה עם קרן', sugCtx());
+    const r2 = await runFlow(smart, r1.state, '1', sugCtx());       // a menu number wins over any suggestion
+    expect(r2.effects.some((e) => e.kind === 'handoff')).toBe(true);
+    expect(r2.state.suggest).toBeUndefined();
+  });
+  it('the safety template is smart by default', async () => {
+    const { buildSafetyFlow } = await import('../src/flow/safetyTemplate.js');
+    const f = buildSafetyFlow(() => '11111111-1111-4111-8111-111111111111');
+    expect(f.kbFirst).toBe(true);
+    expect((f.nodes.find((n) => n.id === 'topics') as { kbOnFreeText: boolean }).kbOnFreeText).toBe(true);
+  });
+});

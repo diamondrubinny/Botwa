@@ -544,6 +544,17 @@ export class KnowledgeBase {
     return { ...top, text };
   }
 
+  /** The formatted passage of one chosen source for a question (used when the customer picks a "did you mean" suggestion). */
+  async answerFor(sourceId: string, question: string, s: AnswerSettings): Promise<(Hit & { text: string }) | null> {
+    const hits = await this.search(question, { audience: 'bot', limit: 8 });
+    const hit = hits.find((h) => h.sourceId === sourceId);
+    if (!hit) return null;
+    await this.db.query('UPDATE kb_sources SET uses = uses + 1 WHERE id = $1', [sourceId]);
+    const src = (await this.db.query('SELECT kind, body FROM kb_sources WHERE id = $1', [sourceId])).rows[0];
+    const text = src?.kind === 'faq' && src.body ? src.body.slice(0, s.maxChars) : bestSnippet(hit.snippet, queryTokens(question), s.maxChars);
+    return { ...hit, text };
+  }
+
   async logQuery(text: string, via: 'bot' | 'staff' | 'test', answered: boolean, score: number | null, sourceId: string | null): Promise<void> {
     await this.db.query('INSERT INTO kb_queries (text, via, answered, score, source_id) VALUES ($1,$2,$3,$4,$5)', [text.replace(/\s+/g, ' ').trim().slice(0, 200), via, answered, score, sourceId]).catch(() => undefined);
   }
