@@ -783,3 +783,38 @@ describe('migration 036: conversations stopped by the old loop guard go back to 
     } finally { await d.end(); }
   });
 });
+
+describe('after "did you mean" during identification', () => {
+  const q: Flow = flowSchema.parse({
+    start: 'f', kbFirst: true, nodes: [
+      { id: 'f', type: 'question', text: 'פקולטה:', save: 'faculty', kbAside: true, next: 'p' },
+      { id: 'p', type: 'question', text: 'שם ה-PI:', save: 'pi', kbAside: true, next: 'e' },
+      { id: 'e', type: 'end', text: '' },
+    ],
+  });
+  const c = ctx({ kbAnswer: async (t) => (t.includes('נפצע') ? 'עזרה ראשונה ודיווח לממונה' : null), kbSuggest: async () => [{ id: 's', label: 'מידת חום' }], kbSource: async () => 'x' });
+  it('a correction ("לא, הכוונה ...") is treated as a new question, never stored as the answer', async () => {
+    const s0 = (await runFlow(q, null, 'שלום', c)).state;
+    const s1 = await runFlow(q, s0, 'מה עושים כשיש תאונה', c);
+    expect(s1.state.suggest).toHaveLength(1);
+    const s2 = await runFlow(q, s1.state, 'לא הכוונה אם עובד נפצע', c);
+    expect(s2.replies[0]).toContain('עזרה ראשונה');
+    expect(s2.state.vars.faculty).toBeUndefined();
+    expect(s2.state.node).toBe('f');
+    const s3 = await runFlow(q, s2.state, 'הנדסה', c);
+    expect(s3.state.vars.faculty).toBe('הנדסה');
+  });
+  it('an ordinary short answer right after the suggestions is still taken as the answer', async () => {
+    const s0 = (await runFlow(q, null, 'שלום', c)).state;
+    const s1 = await runFlow(q, s0, 'מה עושים כשיש תאונה', c);
+    const s2 = await runFlow(q, s1.state, 'מדעי החיים', c);
+    expect(s2.state.vars.faculty).toBe('מדעי החיים');
+    expect(s2.replies).toEqual(['שם ה-PI:']);
+  });
+  it('a long sentence is never stored as a faculty or name', async () => {
+    const s0 = (await runFlow(q, null, 'שלום', c)).state;
+    const r = await runFlow(q, s0, 'עובד אצלנו נפצע היום ביד במעבדה', c);
+    expect(r.state.vars.faculty).toBeUndefined();
+    expect(r.replies[0]).toContain('עזרה ראשונה');
+  });
+});

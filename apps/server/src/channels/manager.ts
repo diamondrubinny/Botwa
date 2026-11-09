@@ -688,7 +688,8 @@ export class ChannelManager {
       kbSuggest: async (t) => {
         if (!this.kb || t.trim().length < 3) return [];
         const hits = await this.kb.search(t, { audience: 'bot', limit: 5 }).catch(() => []);
-        return hits.filter((h) => h.score >= bot.kb.minScore * 0.5).slice(0, 3).map((h) => ({ id: h.sourceId, label: h.title.replace(/\s+/g, ' ').slice(0, 70) }));
+        // only entries with real evidence: two or more of the question's words, an exact phrase, or a strong meaning match
+        return hits.filter((h) => h.score >= bot.kb.minScore * 0.5 && (h.exact || h.matched >= 2 || h.sem >= bot.kb.minScore * 0.8)).slice(0, 3).map((h) => ({ id: h.sourceId, label: h.title.replace(/\s+/g, ' ').slice(0, 70) }));
       },
       kbSource: async (id, q) => {
         const a = await this.kb?.answerFor(id, q, { minScore: bot.kb.minScore, maxChars: bot.kb.maxChars }).catch(() => null);

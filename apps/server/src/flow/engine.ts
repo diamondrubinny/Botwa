@@ -75,9 +75,12 @@ function validate(kind: string, raw: string): string | null {
   if (kind === 'name') return t.length >= 2 && t.length <= 60 && !/[<>{}\n]/.test(t) ? t : null;
   return t.length >= 1 ? t.slice(0, 500) : null;
 }
-const QUESTION_WORDS = new Set(['מה', 'מי', 'מתי', 'איך', 'איפה', 'האם', 'כמה', 'למה', 'מדוע', 'מהו', 'מהי', 'אילו', 'איזה', 'איזו', 'היכן', 'אפשר', 'צריך', 'חייב', 'מותר', 'אסור', 'יש']);
+const QUESTION_WORDS = new Set(['אם', 'לגבי', 'בנוגע', 'רציתי', 'שאלה', 'מה', 'מי', 'מתי', 'איך', 'איפה', 'האם', 'כמה', 'למה', 'מדוע', 'מהו', 'מהי', 'אילו', 'איזה', 'איזו', 'היכן', 'אפשר', 'צריך', 'חייב', 'מותר', 'אסור', 'יש']);
 /** Looks like a question rather than an answer to "your name / building / ...". */
 export const looksLikeQuestion = (t: string): boolean => /[?؟]/.test(t) || QUESTION_WORDS.has(normalize(t).split(' ')[0] ?? '');
+const wordCount = (t: string) => normalize(t).split(' ').filter(Boolean).length;
+/** "no, I meant ..." after "did you mean": a correction, not an answer to the pending question */
+const RE_PHRASE = /^(לא|ממש לא|התכוונתי|הכוונה|כוונתי|לא הכוונה|אני מתכוון|אני מתכוונת)(\s|$)/;
 const kindOf = (n: Extract<FlowNode, { type: 'question' }>) => n.kind ?? (['name', 'phone', 'email'].includes(n.save) ? n.save : 'text');
 
 /** Run the flow for one customer message. Pure apart from the injected context functions. */
@@ -139,6 +142,7 @@ export async function runFlow(flow: Flow, prev: FlowState | null, input: FlowInp
       if (a) { replies.push(withHint(a)); return { replies, state: { ...state, suggest: undefined, invalid: 0 }, effects }; }
     }
   }
+  const hadSuggest = !!state.suggest?.length;
   if (state.suggest) state = { ...state, suggest: undefined };
   if (w && state.node !== null) {
     if (w.type === 'menu') {
@@ -164,7 +168,8 @@ export async function runFlow(flow: Flow, prev: FlowState | null, input: FlowInp
         if (state.invalid < ctx.invalidRetries) { replies.push(`${ctx.invalidMessage}\n\n${menuText(w, ctx.humanOption, humanLabel)}`); return { replies, state: { ...state, invalid: state.invalid + 1 }, effects, menu: true }; }
         return handoff('unrecognized');
       }
-    } else if (w.type === 'question' && w.kbAside && hasText && looksLikeQuestion(t) && t.length >= 6) {
+    } else if (w.type === 'question' && w.kbAside && hasText && t.length >= 6 && !SKIP_WORDS.has(t)
+      && (looksLikeQuestion(t) || wordCount(t) >= 5 || (hadSuggest && (RE_PHRASE.test(t) || wordCount(t) >= 3)))) {
       // a question instead of the answer: answer it from the knowledge base and ask again. It is never stored as the answer.
       const a = await ctx.kbAnswer(inp.text!).catch(() => null);
       if (a) return { replies: [withHint(a)], state: { ...state, invalid: 0 }, effects };
