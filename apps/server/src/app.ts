@@ -138,7 +138,7 @@ export async function buildApp(cfg: Config, db: Db, mgr: ChannelManager, media: 
   const hooks = new WebhookService(db, cfg, webhookSender);
   mgr.webhooks = hooks;
   if (cfg.NODE_ENV !== 'test') hooks.start();
-  apiRoutes(app, db, mgr);
+  apiRoutes(app, db, mgr, cfg);
   integrationRoutes(app, db, cfg, hooks);
   app.addHook('onClose', async () => hooks.stop());
   webchatAdminRoutes(app, db, mgr, cfg);

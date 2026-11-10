@@ -56,6 +56,18 @@ function Keys() {
   }
   return (
     <>
+      <section className="card" aria-labelledby="pa-h">
+        <h2 id="pa-h">Power Apps, Power Automate ו-Power BI</h2>
+        <p className="hint">משיכת נתונים (שיחות, הודעות, אנשי קשר, סטטיסטיקה, שאלות ותשובות) ושליחת תשובות דרך מחבר מותאם (Custom connector).</p>
+        <ol>
+          <li>צרו כאן מפתח עם הרשאת <strong>read</strong> (ו-<strong>send</strong> אם האפליקציה תשלח תשובות).</li>
+          <li>הורידו את קובץ ההגדרות: <a className="btn" href="/api/v1/openapi.json" download="botwa-openapi.json">botwa-openapi.json</a></li>
+          <li>ב-Power Apps: Custom connectors ← New ← Import an OpenAPI file ← בחרו את הקובץ.</li>
+          <li>באימות בחרו API Key, שם הפרמטר <code dir="ltr">Authorization</code>, מיקום Header. בחיבור הדביקו <code dir="ltr">Bearer bk_...</code> (המילה Bearer, רווח, והמפתח).</li>
+          <li>באפליקציה: <code dir="ltr">Botwa.ListConversations().items</code>, <code dir="ltr">Botwa.GetStats({'{'}days: 30{'}'})</code> וכו'.</li>
+        </ol>
+        <p className="hint">כל קריאה של רשימת אנשי הקשר נרשמת ביומן הביקורת. את המפתח שומרים רק בחיבור של Power Apps, לא בתוך האפליקציה עצמה. מדריך מלא: docs/POWER_APPS.he.md.</p>
+      </section>
       <section className="card" aria-labelledby="k-new">
         <h2 id="k-new">מפתח חדש</h2>
         <form onSubmit={create}>

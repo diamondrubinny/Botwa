@@ -43,7 +43,7 @@ export function reportRoutes(app: FastifyInstance, db: Db, cfg: Config) {
 
 interface Agent { name: string; messagesSent: number; conversations: number; avgFirstResponseSeconds: number | null; medianFirstResponseSeconds: number | null }
 
-async function computeSummary(db: Db, cfg: Config, days: number, bucket: 'day' | 'week' | 'month' = 'day') {
+export async function computeSummary(db: Db, cfg: Config, days: number, bucket: 'day' | 'week' | 'month' = 'day') {
   {
 
     const [totals, waits, perAgent, daily, byHour, topTags] = await Promise.all([

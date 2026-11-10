@@ -222,6 +222,27 @@ describe('API keys, REST API and webhooks', () => {
     expect((await staff('DELETE', `/integrations/webhooks/${hookId}`, 'admin@t.io')).statusCode).toBe(200);
     expect((await db.query('SELECT count(*)::int AS n FROM webhook_deliveries')).rows[0].n).toBe(0); // deliveries go with the endpoint
   });
+  it('Power Apps: a Swagger 2.0 description, statistics, contacts (audited) and FAQ with a read key', async () => {
+    const d = (await api('GET', '/api/v1/openapi.json')).json();
+    expect(d.swagger).toBe('2.0');
+    expect(d.host).toBe('panel.test');
+    expect(d.schemes).toEqual(['https']);
+    expect(d.securityDefinitions.apiKey).toEqual(expect.objectContaining({ type: 'apiKey', in: 'header', name: 'Authorization' }));
+    const ops = Object.values(d.paths as Record<string, Record<string, { operationId: string }>>).flatMap((p) => Object.values(p).map((o) => o.operationId));
+    expect(new Set(ops).size).toBe(ops.length);                                         // unique, as connectors require
+    expect(ops).toEqual(expect.arrayContaining(['GetStats', 'ListContacts', 'ListFaq', 'ListConversations', 'SendReply']));
+    expect(JSON.stringify(d)).not.toMatch(/bk_[\w-]{10}/);
+    expect((await api('GET', '/api/v1/stats')).statusCode).toBe(401);
+    const st = (await api('GET', '/api/v1/stats?days=7', keys['read'])).json();
+    expect(st).toMatchObject({ days: 7 });
+    expect(typeof st.inbound).toBe('number');
+    expect(Array.isArray(st.daily)).toBe(true);
+    const c = (await api('GET', '/api/v1/contacts?q=bob', keys['read'])).json();
+    expect(c.items[0]).toMatchObject({ externalId: 'bob', channelType: 'whatsapp' });
+    expect((await db.query(`SELECT count(*)::int AS n FROM audit_log WHERE action = 'api.contacts_read'`)).rows[0].n).toBeGreaterThan(0);
+    await staff('POST', '/kb/sources/faq', 'admin@t.io', { title: 'שעות פעילות', body: 'א-ה 9-17', variants: [] });
+    expect((await api('GET', '/api/v1/faq', keys['read'])).json().items).toEqual([expect.objectContaining({ question: 'שעות פעילות', answer: 'א-ה 9-17' })]);
+  });
 });
 
 describe('network failures are explained', () => {
@@ -244,4 +265,5 @@ describe('network failures are explained', () => {
     const bad = await new Promise<unknown>((res) => (lookup as unknown as (h: string, o: object, cb: (...a: unknown[]) => void) => void)('127.0.0.1', { all: true }, (err) => res(err)));
     expect((bad as Error).message).toBe('blocked_address');
   });
+
 });

@@ -5,7 +5,10 @@ import { audit } from '../audit.js';
 import { sendBlock, type AccessibleConversation } from '../access.js';
 import type { ChannelManager } from '../channels/manager.js';
 import { loadSending, PolicyRejected, SendError } from '../channels/sender.js';
+import type { Config } from '../config.js';
 import type { Db } from '../db.js';
+import { openApiDocument } from '../integrations/openapi.js';
+import { computeSummary } from './reports.js';
 
 export const SCOPES = ['read', 'send', 'manage'] as const;
 export type Scope = (typeof SCOPES)[number];
@@ -18,7 +21,7 @@ declare module 'fastify' { interface FastifyRequest { apiKey?: { id: string; nam
  * read = look at conversations and messages, send = reply in an existing conversation, manage = status, assignment, tags.
  * There is deliberately no "message anyone" endpoint: replies go through the same blocking, opt-out and reply-window rules as staff.
  */
-export function apiRoutes(app: FastifyInstance, db: Db, mgr: ChannelManager) {
+export function apiRoutes(app: FastifyInstance, db: Db, mgr: ChannelManager, cfg: Config) {
   const need = (scope: Scope) => async (req: FastifyRequest, reply: FastifyReply) => {
     const h = req.headers.authorization;
     const key = h?.startsWith('Bearer ') ? h.slice(7).trim() : '';
@@ -41,6 +44,44 @@ export function apiRoutes(app: FastifyInstance, db: Db, mgr: ChannelManager) {
     channel: { id: r.channelId, type: r.channelType }, contact: { id: r.contactId, name: r.contactName, blocked: r.blocked } });
 
   app.get('/api/v1/me', { preHandler: need('read'), config: limit(60) }, async (req) => ({ name: req.apiKey!.name, scopes: req.apiKey!.scopes }));
+
+  // The API description (OpenAPI 2.0 / Swagger, the format Power Apps / Power Automate custom connectors import). Public: it holds no data or keys.
+  app.get('/api/v1/openapi.json', { config: { rateLimit: { max: 30, timeWindow: '1 minute' } } }, async (_req, reply) =>
+    reply.header('cache-control', 'public, max-age=300').header('content-disposition', 'inline; filename="botwa-openapi.json"').send(openApiDocument(cfg)));
+
+  // ---- read-only data for dashboards and apps (Power Apps, Power BI, Excel) ----
+  app.get('/api/v1/stats', { preHandler: need('read'), config: limit(30) }, async (req, reply) => {
+    const q = z.object({ days: z.coerce.number().int().min(1).max(365).default(30) }).safeParse(req.query);
+    if (!q.success) return reply.code(400).send({ error: 'bad_request' });
+    const r = await computeSummary(db, cfg, q.data.days);
+    return {
+      days: r.days, newConversations: r.totals.newConversations, inbound: r.totals.inbound, outbound: r.totals.outbound, openNow: r.totals.openNow, unassignedNow: r.totals.unassignedNow,
+      answered: r.responseTime.answered, unanswered: r.responseTime.unanswered, avgFirstResponseSeconds: r.responseTime.avgSeconds, medianFirstResponseSeconds: r.responseTime.medianSeconds,
+      slaCompliancePercent: r.sla.enabled ? r.sla.compliancePercent : null,
+      daily: r.daily, topTags: r.topTags,
+    };
+  });
+
+  app.get('/api/v1/contacts', { preHandler: need('read'), config: limit(60) }, async (req, reply) => {
+    const q = z.object({ q: z.string().trim().max(100).optional(), limit: z.coerce.number().int().min(1).max(200).default(100), offset: z.coerce.number().int().min(0).max(1000000).default(0) }).safeParse(req.query);
+    if (!q.success) return reply.code(400).send({ error: 'bad_request' });
+    const like = q.data.q ? `%${q.data.q.replace(/[\\%_]/g, '\\$&')}%` : null;
+    const { rows } = await db.query(
+      `SELECT ct.id, ct.display_name AS name, regexp_replace(ct.external_id, '@s\\.whatsapp\\.net$', '') AS "externalId", ch.type AS "channelType", ch.label AS "channelLabel",
+              ct.blocked, ct.opted_out AS "optedOut", ct.created_at AS "createdAt", c.id AS "conversationId", c.status AS "conversationStatus", c.last_message_at AS "lastMessageAt"
+         FROM contacts ct JOIN channels ch ON ch.id = ct.channel_id LEFT JOIN conversations c ON c.contact_id = ct.id
+        WHERE ($1::text IS NULL OR ct.display_name ILIKE $1 OR ct.external_id ILIKE $1)
+        ORDER BY COALESCE(c.last_message_at, ct.created_at) DESC LIMIT $2 OFFSET $3`, [like, q.data.limit, q.data.offset]);
+    await audit(db, { action: 'api.contacts_read', meta: { key: req.apiKey!.name, count: rows.length } }).catch(() => undefined);
+    return { items: rows, limit: q.data.limit, offset: q.data.offset };
+  });
+
+  app.get('/api/v1/faq', { preHandler: need('read'), config: limit(60) }, async () => {
+    const { rows } = await db.query(
+      `SELECT s.id, s.title AS question, s.body AS answer, s.variants, s.audience, s.uses, s.updated_at AS "updatedAt"
+         FROM kb_sources s WHERE s.kind = 'faq' AND s.enabled ORDER BY lower(s.title) LIMIT 2000`);
+    return { items: rows };
+  });
 
   app.get('/api/v1/conversations', { preHandler: need('read'), config: limit(120) }, async (req, reply) => {
     const q = z.object({ status: z.enum(['open', 'closed']).optional(), updated_since: z.string().datetime().optional(), limit: z.coerce.number().int().min(1).max(100).default(50), offset: z.coerce.number().int().min(0).max(100000).default(0) }).safeParse(req.query);
