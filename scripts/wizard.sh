@@ -227,6 +227,9 @@ fi
 unset ADMIN_PASSWORD
 
 DOM="$(grep '^DOMAIN=' .env | cut -d= -f2-)"
+# right after nginx reloads, the web server's default vhost (e.g. HestiaCP's self-signed one) can still answer for a few seconds:
+# wait until the real certificate serves the app before testing
+for _ in $(seq 1 15); do curl -fsS --max-time 5 "https://$DOM/healthz" >/dev/null 2>&1 && break; sleep 2; done
 if [ -x scripts/smoke.sh ]; then DOMAIN="$DOM" bash scripts/smoke.sh || warn "Some smoke checks failed (HTTPS may need a minute after DNS is ready) - re-run: DOMAIN=$DOM ./scripts/smoke.sh"; fi
 
 # The key is shown once, when it was just created. An update keeps the same key: printing it again would only leave it in
