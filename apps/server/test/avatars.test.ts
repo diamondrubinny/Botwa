@@ -89,4 +89,30 @@ describe('profile pictures', () => {
     expect(list.find((u) => u.id === ids.a1)!.avatarV).toBeNull();
     expect((await call('DELETE', `/users/${ids.a2}/avatar`, 'adm')).statusCode).toBe(200);
   });
+
+  it('a gallery of built-in pictures plus ones managers add; anyone picks one', async () => {
+    const list = (await call('GET', '/avatars/gallery', 'a1')).json().items as { id: string; builtin: boolean }[];
+    expect(list.filter((x) => x.builtin)).toHaveLength(24);
+    expect((await call('GET', '/avatars/gallery')).statusCode).toBe(401);
+    const img = await call('GET', '/avatars/gallery/p01', 'a1');
+    expect(img.headers['content-type']).toBe('image/png');
+    expect((await call('GET', '/avatars/gallery/p99', 'a1')).statusCode).toBe(404);
+    expect((await call('GET', '/avatars/gallery/..%2F..%2Fetc%2Fpasswd', 'a1')).statusCode).toBe(404);
+    const pickMine = (id: string, who = 'a1') => app.inject({ method: 'POST', url: '/me/avatar/gallery', payload: { id }, remoteAddress: `10.99.7.${++ip % 250}`, headers: { origin: ORIGIN, cookie: cookies[who]! } });
+    expect((await pickMine('p05')).json()).toEqual({ ok: true });
+    expect((await call('GET', `/users/${ids.a1}/avatar`, 'a2')).statusCode).toBe(200);
+    expect((await pickMine('../x')).statusCode).toBe(400);
+    // managers add pictures (checked like uploads); agents cannot
+    expect((await upload('/avatars/gallery', 'a1', PNG, 'team.png')).statusCode).toBe(403);
+    const added = await upload('/avatars/gallery', 'adm', PNG_TEXT, 'team.png');
+    expect(added.statusCode).toBe(201);
+    const gid = added.json().id as string;
+    expect((await call('GET', '/avatars/gallery', 'a2')).json().items.some((x: { id: string; builtin: boolean }) => x.id === gid && !x.builtin)).toBe(true);
+    expect((await call('GET', `/avatars/gallery/${gid}`, 'a2')).rawPayload.toString('latin1')).not.toContain('GPS');
+    expect((await pickMine(gid, 'a2')).json()).toEqual({ ok: true });
+    expect((await call('DELETE', '/avatars/gallery/p01', 'adm')).statusCode).toBe(400);      // built-in ones stay
+    expect((await call('DELETE', `/avatars/gallery/${gid}`, 'a1')).statusCode).toBe(403);
+    expect((await call('DELETE', `/avatars/gallery/${gid}`, 'adm')).statusCode).toBe(200);
+    expect((await call('GET', `/users/${ids.a2}/avatar`, 'a1')).statusCode).toBe(200);        // a picture already chosen is kept
+  });
 });

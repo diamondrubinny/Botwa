@@ -1,4 +1,4 @@
-import { Avatar, AvatarEditor } from '../components/Avatar';
+import { Avatar, AvatarEditor, AvatarGalleryAdmin } from '../components/Avatar';
 import { useRef, useState, type FormEvent } from 'react';
 import { api, ApiError, can, type Me, type RoleRow, type UserRow } from '../api';
 import { ConfirmDialog } from '../components/ConfirmDialog';
@@ -107,6 +107,7 @@ export function Team({ me }: { me: Me }) {
           </tbody>
         </table>
       </div>
+      {isAdmin && <AvatarGalleryAdmin />}
 
       {pwFor && (
         <section className="card" aria-labelledby="pw-h">

@@ -709,6 +709,13 @@ await page.setInputFiles(`#av-${(await (await page.request.get(BASE + '/auth/me'
 await page.waitForSelector('text=התמונה עודכנה.');
 await page.waitForSelector('aside.sidebar .me-card img.avatar-img');
 check('account: profile picture uploaded and shown in the side menu', true);
+await page.click('button:has-text("בחירה מהגלריה")');
+await page.waitForSelector('.avatar-gallery button img');
+check('account: the avatar gallery offers the built-in pictures', (await page.locator('.avatar-gallery button').count()) >= 24);
+await axe('account: avatar gallery open');
+await page.click('.avatar-gallery button >> nth=3');
+await page.waitForSelector('text=התמונה נבחרה.');
+check('account: a gallery picture is chosen', true);
 check('account: phone alerts card with what-to-alert choices', (await page.textContent('section[aria-labelledby="ntf-h"]'))?.includes('התראות'));
 check('account: "install the app" card with instructions', (await page.textContent('section[aria-labelledby="inst-h"]'))?.includes('אפליקציה'));
 const mf = await (await page.request.get(BASE + '/manifest.webmanifest')).json();

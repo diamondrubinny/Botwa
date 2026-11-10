@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { api, ApiError } from '../api';
 
 /** A person's picture, or the first letter of their name. Decorative: the name is always shown next to it. */
@@ -45,6 +45,17 @@ export const AVATAR_ERR: Record<string, string> = {
 export function AvatarEditor({ userId, name, v, uploadUrl, onChanged, compact = false }: { userId: string; name: string; v?: number | null; uploadUrl: string; onChanged: () => void | Promise<void>; compact?: boolean }) {
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [busy, setBusy] = useState(false);
+  const [gallery, setGallery] = useState<{ id: string; name: string }[] | null>(null);
+  const openGallery = async () => {
+    if (gallery) { setGallery(null); return; }
+    setGallery((await api<{ items: { id: string; name: string }[] }>('GET', '/avatars/gallery').catch(() => ({ items: [] }))).items);
+  };
+  const choose = async (id: string) => {
+    setBusy(true); setMsg(null);
+    try { await api('POST', `${uploadUrl}/gallery`, { id }); setMsg({ ok: true, text: 'התמונה נבחרה.' }); setGallery(null); await onChanged(); }
+    catch (e) { setMsg({ ok: false, text: e instanceof ApiError ? AVATAR_ERR[e.code] ?? 'הבחירה נכשלה.' : 'הבחירה נכשלה.' }); }
+    setBusy(false);
+  };
   const inputId = `av-${userId}`;
   const pick = async (f: File | undefined) => {
     if (!f) return;
@@ -61,9 +72,61 @@ export function AvatarEditor({ userId, name, v, uploadUrl, onChanged, compact = 
         <label htmlFor={inputId} className={`btn${busy ? ' disabled' : ''}`} style={compact ? { minHeight: 32, padding: '0 .6rem' } : undefined}>
           {busy ? 'מעלה…' : v ? 'החלפת תמונה' : 'העלאת תמונה'}<span className="sr-only"> עבור {name}</span>
         </label>
+        <button type="button" style={compact ? { minHeight: 32 } : undefined} disabled={busy} aria-expanded={!!gallery} aria-controls={`gal-${userId}`} onClick={() => void openGallery()}>בחירה מהגלריה<span className="sr-only"> עבור {name}</span></button>
         {v ? <button type="button" style={compact ? { minHeight: 32 } : undefined} disabled={busy} onClick={async () => { setMsg(null); try { await removeAvatar(uploadUrl); setMsg({ ok: true, text: 'התמונה הוסרה.' }); await onChanged(); } catch { setMsg({ ok: false, text: 'ההסרה נכשלה.' }); } }}>הסרה<span className="sr-only"> של התמונה של {name}</span></button> : null}
       </div>
+      {gallery && (
+        <div id={`gal-${userId}`} role="group" aria-label={`גלריית תמונות עבור ${name}`} className="avatar-gallery">
+          {gallery.length === 0 && <p className="hint">הגלריה ריקה.</p>}
+          {gallery.map((g, i) => (
+            <button key={g.id} type="button" disabled={busy} onClick={() => void choose(g.id)} aria-label={`תמונה ${i + 1}${g.name ? `: ${g.name}` : ''}`}>
+              <img src={`/avatars/gallery/${g.id}`} alt="" width={56} height={56} loading="lazy" />
+            </button>
+          ))}
+        </div>
+      )}
       <p role={msg?.ok === false ? 'alert' : 'status'} className={msg?.ok === false ? 'error' : 'hint'} style={{ margin: msg ? '.3rem 0 0' : 0 }}>{msg?.text}</p>
     </div>
+  );
+}
+
+/** Managers: add pictures to the gallery (checked and cleaned like any upload) or remove ones that were added. */
+export function AvatarGalleryAdmin() {
+  const [items, setItems] = useState<{ id: string; name: string; builtin: boolean }[]>([]);
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const [busy, setBusy] = useState(false);
+  const load = async () => setItems((await api<{ items: { id: string; name: string; builtin: boolean }[] }>('GET', '/avatars/gallery').catch(() => ({ items: [] }))).items);
+  useEffect(() => { void load(); }, []);  // eslint-disable-line react-hooks/exhaustive-deps
+  const add = async (f: File | undefined) => {
+    if (!f) return;
+    setBusy(true); setMsg(null);
+    try {
+      const blob = await prepareAvatar(f);
+      const fd = new FormData(); fd.append('file', blob, f.name.replace(/\.[^.]+$/, '') + '.jpg');
+      const res = await fetch('/avatars/gallery', { method: 'POST', credentials: 'same-origin', body: fd });
+      if (!res.ok) throw new ApiError(res.status, ((await res.json().catch(() => ({}))) as { error?: string }).error ?? 'error');
+      setMsg({ ok: true, text: 'התמונה נוספה לגלריה.' }); await load();
+    } catch (e) { setMsg({ ok: false, text: e instanceof ApiError ? (e.code === 'gallery_full' ? 'בגלריה כבר 200 תמונות.' : AVATAR_ERR[e.code] ?? 'ההוספה נכשלה.') : 'ההוספה נכשלה.' }); }
+    setBusy(false);
+  };
+  const own = items.filter((x) => !x.builtin);
+  return (
+    <section className="card" aria-labelledby="gal-h">
+      <h2 id="gal-h">גלריית תמונות פרופיל</h2>
+      <p className="hint">{items.length - own.length} תמונות מובנות, ועוד {own.length} שהוספתם. כל משתמש יכול לבחור מהן ב"החשבון שלי", ומנהל יכול לבחור עבור משתמש כאן בצוות. תמונה שמוסיפים נחתכת לריבוע, פרטי המיקום והמצלמה מוסרים ממנה והיא נסרקת לנוזקות.</p>
+      <div className="avatar-editor">
+        <input id="gal-add" type="file" accept="image/*" className="sr-only" disabled={busy} onChange={(e) => { void add(e.target.files?.[0]); e.target.value = ''; }} />
+        <label htmlFor="gal-add" className={`btn${busy ? ' disabled' : ''}`}>{busy ? 'מוסיף…' : 'הוספת תמונה לגלריה'}</label>
+      </div>
+      {own.length > 0 && (
+        <ul className="avatar-gallery plain">
+          {own.map((g, i) => (
+            <li key={g.id}><img src={`/avatars/gallery/${g.id}`} alt="" width={56} height={56} loading="lazy" />
+              <button type="button" style={{ minHeight: 32 }} onClick={async () => { if (!confirm('להסיר את התמונה מהגלריה? משתמשים שכבר בחרו בה ישמרו אותה.')) return; await api('DELETE', `/avatars/gallery/${g.id}`).catch(() => undefined); await load(); }}>הסרה<span className="sr-only"> של תמונה {i + 1}{g.name ? ` (${g.name})` : ''}</span></button></li>
+          ))}
+        </ul>
+      )}
+      <p role={msg?.ok === false ? 'alert' : 'status'} className={msg?.ok === false ? 'error' : 'hint'}>{msg?.text}</p>
+    </section>
   );
 }

@@ -36,7 +36,7 @@ form.composer textarea { flex: 1; resize: none; max-height: 110px; min-height: 4
 .hp { position: absolute; inset-inline-start: -9999px; width: 1px; height: 1px; overflow: hidden; }
 .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 .offline { background: #fff4d6; color: #5c3b00; padding: 8px 12px; font-size: 13px; border-bottom: 1px solid #f0d58a; }
-@media (prefers-reduced-motion: no-preference) { .msg { animation: pop .15s ease-out; } @keyframes pop { from { transform: translateY(4px); opacity: 0; } } }
+@media (prefers-reduced-motion: no-preference) { .msg { animation: pop .15s ease-out; } @keyframes pop { from { transform: translateY(4px); } } }
 @media (prefers-color-scheme: dark) { :root { --bg: #171b2d; --surface: #0e1120; --text: #eef0fa; --muted: #aab2cc; --border: #2b3250; } .msg.them { background: #1f2438; } .offline { background: #3a2c00; color: #ffe29a; border-color: #5c4600; } .field input[type=text], .field input[type=email], .field input[type=tel], form.composer textarea { border-color: #8b94b0; } }
 
 /* question suggestions while typing */
