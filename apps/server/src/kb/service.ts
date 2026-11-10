@@ -9,7 +9,7 @@ import { extract, kindFor, type DocKind, type HtmlOpts } from './extract.js';
 import type { Renderer, RendererStatus } from './browser.js';
 import { canonicalOf, crawlCfgSchema, DEFAULT_CRAWL, inScope, isSoft404, looksClientRendered, MIN_PAGE_CHARS, normalizeUrl, parseRobots, parseSitemap, prefixOf, robotsAllows, type CrawlCfg, type CrawlReport, type Robots, type Scope } from './crawler.js';
 import { dot, fromBuffer, NO_EMBEDDER, toBuffer, type Embedder } from '../semantic/embedder.js';
-import { GOV_ORIGIN_PREFIX, LEGAL_NOTE } from './gov/notes.js';
+import { GOV_ORIGIN_PREFIX, LEGAL_NOTE, STANDARDS_NOTE } from './gov/notes.js';
 import { bestSnippet, chunkText, indexTerms, queryTokens, variants, words } from './text.js';
 
 export type Audience = 'bot' | 'staff' | 'both';
@@ -38,6 +38,7 @@ export function isConfident(top: Hit | undefined, next: Hit | undefined, minScor
 /** An answer quoted from an imported law names the law and section and says it is not legal advice. */
 function withLegalNote(text: string, hit: Hit, origin: string | null | undefined): string {
   if (!origin?.startsWith(GOV_ORIGIN_PREFIX)) return text;
+  if (origin === 'gov:standards') return `${text}\n\n${STANDARDS_NOTE}`;   // the entry already names the standard
   const where = [hit.title, hit.heading?.split(' › ').pop()].filter(Boolean).join(', ');
   return `${text}\n\n(${where})\n${LEGAL_NOTE}`;
 }

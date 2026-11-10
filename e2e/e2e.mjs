@@ -181,6 +181,11 @@ check('kb: the regulations list can be filtered', (await page.locator('.gov-list
 await page.click('#gov-h ~ div.row button.primary, section[aria-labelledby="gov-h"] button.primary');
 await page.waitForSelector('section[aria-labelledby="gov-h"] p.ok:has-text("ההגדרות נשמרו")');
 await page.waitForTimeout(300);
+await page.waitForSelector('#std-h');
+check('kb: official standards offer the recommended safety words', (await page.inputValue('#std-kw')).includes('סולמ*'));
+check('kb: official standards are staff-only by default', (await page.inputValue('#std-aud')) === 'staff');
+await page.click('section[aria-labelledby="std-h"] button.primary');
+await page.waitForSelector('section[aria-labelledby="std-h"] p.ok:has-text("ההגדרות נשמרו")');
 await axe('kb: laws and regulations');
 await page.click('button.chip:has-text("מקורות")');
 await page.click('button:has-text("שאלה ותשובה")');

@@ -134,7 +134,7 @@ export function kbRoutes(app: FastifyInstance, db: Db, kb: KnowledgeBase) {
        d.categoryId !== undefined, d.categoryId ?? null, d.refreshHours !== undefined, d.refreshHours ?? null, d.crawlPages ?? null, d.crawl ? JSON.stringify(d.crawl) : null],
     );
     // an imported law that staff edit becomes their own text: later imports leave it alone
-    if ((d.title !== undefined || d.body !== undefined) && typeof cur.origin === 'string' && cur.origin.startsWith('gov:')) await db.query('UPDATE kb_sources SET detached = true WHERE id = $1', [p.data.id]);
+    if ((d.title !== undefined || d.body !== undefined || d.variants !== undefined) && typeof cur.origin === 'string' && cur.origin.startsWith('gov:')) await db.query('UPDATE kb_sources SET detached = true WHERE id = $1', [p.data.id]);
     // faq/text content feeds the search index; for documents and links the title is only a label
     if ((d.title !== undefined || d.variants !== undefined || d.body !== undefined) && ['faq', 'text'].includes(cur.kind)) await kb.indexWritten(p.data.id).catch(() => undefined);
     // children of a crawled link inherit audience / enabled / boost / category from the parent

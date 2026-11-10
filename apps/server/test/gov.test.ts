@@ -250,3 +250,116 @@ describe('importing safety laws into the knowledge base', () => {
     expect((await state()).settings.lastReport).toMatchObject({ trigger: 'manual' });
   });
 });
+
+// ---- stage 2: the official standards list (data.gov.il) -----------------------------------------------------------------------------
+import { matchesKeywords, DEFAULT_KEYWORDS, standardEntry, type StdRecord } from '../src/kb/gov/standards.js';
+import { STANDARDS_NOTE } from '../src/kb/gov/notes.js';
+
+const rec = (i: number, number: string, name: string, extra: Partial<StdRecord> = {}): StdRecord => ({
+  index: `1-${String(i).padStart(5, '0')}`, standard_number: number, standard_name: name, standard_edition: 'פברואר 2022', validity_from: '21/02/2022', validity_to: 'התקן בתוקף',
+  amendments: 'אין', mandatory_sections: 'כל הסעיפים', note: 'אין', standard_process: 'לא בתהליך', standard_originality: 'מאומץ', standard_number_en: number.replace('ת"י', 'SI'), standard_name_en: 'Ladders', ...extra,
+});
+
+describe('official standards: choosing and describing', () => {
+  it('matches whole words (after a Hebrew prefix letter) and word starts marked with *', () => {
+    expect(matchesKeywords('ציוד לכיבוי אש: זרנוקים', DEFAULT_KEYWORDS)).toBe(true);
+    expect(matchesKeywords('סולמות: סולמות טלסקופיים', DEFAULT_KEYWORDS)).toBe(true);
+    expect(matchesKeywords('ציוד מגן אישי: מנעלי בטיחות', DEFAULT_KEYWORDS)).toBe(true);
+    expect(matchesKeywords('אבזרים להיגיינה של האשה: טמפונים', DEFAULT_KEYWORDS)).toBe(false);          // "אש" is not "האשה"
+    expect(matchesKeywords('ציוד רפואי: אגד גזה', DEFAULT_KEYWORDS)).toBe(false);                     // "גז" is not "גזה"
+    expect(matchesKeywords('צמנט: צמנט רגיל', DEFAULT_KEYWORDS)).toBe(false);
+    expect(matchesKeywords('מערכות מובלים עבור מתקני חשמל', ['מתקני חשמל'])).toBe(true);
+    expect(matchesKeywords('Ladders - safety', ['ladder*'])).toBe(true);
+  });
+
+  it('describes a standard in plain text, without the source\'s HTML', () => {
+    const e = standardEntry(rec(1, 'ת"י 1847 חלק 2', 'סולמות: דרישות, בדיקות וסימון', { amendments: "גיליון תיקון מס' 1 (מרץ 2023)", note: '<p>שים&nbsp;לב</p>', validity_to: '08/02/2027' }), '10.11.2026');
+    expect(e.title).toBe('ת"י 1847 חלק 2 – סולמות: דרישות, בדיקות וסימון');
+    expect(e.variants).toEqual(['תקן 1847 חלק 2', 'תקן ישראלי 1847 חלק 2', 'ת"י 1847', 'סולמות: דרישות, בדיקות וסימון', 'Ladders']);
+    expect(e.body).toContain('מהדורה: פברואר 2022.\nתוקף: מ־21/02/2022, עד 08/02/2027.\nסעיפים מחייבים: כל הסעיפים.\nגיליונות תיקון: גיליון תיקון מס\' 1 (מרץ 2023).');
+    expect(e.body).toContain('הערה: שים לב');
+    expect(e.body).not.toContain('<');
+    expect(e.body).not.toContain('בתהליך');                                                           // "not in process" is not worth a line
+  });
+});
+
+describe('importing the official standards', () => {
+  let records: StdRecord[] = [];
+  let modified = '2026-11-09T18:59:03';
+  let dgReq: string[] = [];
+  const filler = Array.from({ length: 60 }, (_, i) => rec(100 + i, `ת"י ${9000 + i}`, `צמנט סוג ${i}`, { standard_name_en: 'Cement' }));
+  const dgHttp = async (url: string): Promise<HttpResult> => {
+    dgReq.push(url);
+    const u = new URL(url);
+    if (u.pathname.endsWith('/resource_show')) return { status: 200, retryAfter: null, body: JSON.stringify({ success: true, result: { last_modified: modified } }) };
+    if (u.pathname.endsWith('/datastore_search')) return { status: 200, retryAfter: null, body: JSON.stringify({ success: true, result: { total: records.length, records } }) };
+    return { status: 404, retryAfter: null, body: '' };
+  };
+  const stdState = async () => (await call('GET', '/kb/gov/standards', 'adm')).json() as { settings: { lastReport: Record<string, unknown> }; imported: { id: string; title: string; audience: string; detached: boolean }[]; defaults: string[] };
+  const saveStd = (who: string, p: object = {}) => call('PUT', '/kb/gov/standards', who, { enabled: true, audience: 'staff', refreshDays: 7, includeAll: false, keywords: [], ...p });
+
+  beforeAll(() => {
+    records = [rec(1, 'ת"י 1847 חלק 2', 'סולמות: דרישות, בדיקות וסימון'), rec(2, 'ת"י 129 חלק 1', 'מטפים מיטלטלים: תחזוקה', { standard_name_en: 'Portable fire extinguishers: Maintenance' }), ...filler];
+    mgr.standards!.setDg({ http: dgHttp, sleep: async () => undefined });
+  });
+
+  it('only kb.manage may change it; keywords must be plain words', async () => {
+    expect((await call('GET', '/kb/gov/standards', 'ag')).statusCode).toBe(403);
+    expect((await saveStd('ag')).statusCode).toBe(403);
+    expect((await call('POST', '/kb/gov/standards/sync', 'ag')).statusCode).toBe(403);
+    for (const bad of ['a', 'x<script>', 'גז|גזים', '*סולם']) expect((await saveStd('adm', { keywords: [bad] })).statusCode).toBe(400);
+    expect((await stdState()).defaults).toContain('סולמ*');
+  });
+
+  it('imports the matching standards as question-and-answer entries, staff only', async () => {
+    expect((await saveStd('adm')).statusCode).toBe(200);
+    const r = await mgr.standards!.sync('manual');
+    expect(r).toMatchObject({ total: 62, matched: 2, created: 2, failed: [] });
+    expect(dgReq.some((u) => u.includes('fields=index%2Cstandard_number'))).toBe(true);            // only the fields used, not the whole record
+    const s = await stdState();
+    expect(s.imported.map((x) => [x.title, x.audience])).toEqual([['ת"י 129 חלק 1 – מטפים מיטלטלים: תחזוקה', 'staff'], ['ת"י 1847 חלק 2 – סולמות: דרישות, בדיקות וסימון', 'staff']]);
+    const hits = (await call('POST', '/kb/search', 'adm', { q: 'תקן 1847 חלק 2' })).json().hits as { title: string; exact: boolean }[];
+    expect(hits[0]).toMatchObject({ title: 'ת"י 1847 חלק 2 – סולמות: דרישות, בדיקות וסימון', exact: true });
+    expect(await mgr.kb!.answer('תקן 1847 חלק 2', { minScore: 0.5, maxChars: 900 }, 'bot', 'test')).toBeNull();   // not for customers yet
+  });
+
+  it('opened to the bot, the answer is the whole entry plus where it comes from', async () => {
+    expect((await saveStd('adm', { audience: 'both' })).statusCode).toBe(200);
+    const a = await mgr.kb!.answer('תקן 1847 חלק 2', { minScore: 0.5, maxChars: 900 }, 'bot', 'test');
+    expect(a?.text).toContain('סעיפים מחייבים: כל הסעיפים.');
+    expect(a?.text.endsWith(STANDARDS_NOTE)).toBe(true);
+    expect((await saveStd('adm')).statusCode).toBe(200);
+  });
+
+  it('skips the download when the source did not change, and updates or removes what changed', async () => {
+    dgReq = [];
+    expect(await mgr.standards!.sync('manual')).toMatchObject({ skipped: true });
+    expect(dgReq.filter((u) => u.includes('datastore_search'))).toHaveLength(0);
+    modified = '2026-11-12T08:00:00';
+    records[0] = { ...records[0]!, amendments: "גיליון תיקון מס' 1 (מרץ 2026)" };
+    records.splice(1, 1);                                                                             // the extinguisher standard is no longer official
+    expect(await mgr.standards!.sync('manual')).toMatchObject({ updated: 1, removed: 1, unchanged: 0 });
+    const s = await stdState();
+    expect(s.imported).toHaveLength(1);
+    expect((await db.query(`SELECT body FROM kb_sources WHERE id = $1`, [s.imported[0]!.id])).rows[0].body).toContain('מרץ 2026');
+  });
+
+  it('an empty or broken answer from the source never wipes the list', async () => {
+    const keep = records;
+    records = [];
+    modified = '2026-11-13T08:00:00';
+    expect(await mgr.standards!.sync('manual')).toMatchObject({ failed: [{ title: '*', error: 'unrecognized_format' }] });
+    expect((await stdState()).imported).toHaveLength(1);
+    records = keep;
+  });
+
+  it('"all official standards" imports the whole list; an edited entry is kept as the staff\'s own', async () => {
+    const id = (await stdState()).imported[0]!.id;
+    expect((await call('PATCH', `/kb/sources/${id}`, 'adm', { variants: ['סולם מאושר'] })).statusCode).toBe(200);
+    expect((await saveStd('adm', { includeAll: true })).statusCode).toBe(200);
+    expect(await mgr.standards!.sync('manual')).toMatchObject({ matched: 61, created: 60, detached: 1 });
+    expect((await saveStd('adm', { includeAll: false, keywords: ['מטפ*'] })).statusCode).toBe(200);
+    expect(await mgr.standards!.sync('manual')).toMatchObject({ matched: 0, removed: 61 });
+    expect((await db.query(`SELECT origin, variants FROM kb_sources WHERE id = $1`, [id])).rows[0]).toEqual({ origin: null, variants: ['סולם מאושר'] });
+  });
+});

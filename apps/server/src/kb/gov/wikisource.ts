@@ -15,12 +15,13 @@ export interface HttpResult { status: number; retryAfter: number | null; body: s
 export type GovHttp = (url: string) => Promise<HttpResult>;
 
 const agent = new Agent({ connect: { lookup, timeout: 10_000 }, headersTimeout: 20_000, bodyTimeout: 30_000 });
-const MAX_BYTES = 4 * 1024 * 1024;
+const MAX_BYTES = 8 * 1024 * 1024;
 
-export function makeHttp(userAgent: string): GovHttp {
+/** HTTPS GET to one fixed host only (each public source gets its own instance). */
+export function makeHttp(userAgent: string, host: string = WS_HOST): GovHttp {
   return async (url) => {
     const u = new URL(url);
-    if (u.protocol !== 'https:' || u.hostname !== WS_HOST) throw new FetchError('blocked_address');
+    if (u.protocol !== 'https:' || u.hostname !== host) throw new FetchError('blocked_address');
     let res;
     try {
       res = await undiciFetch(u, { dispatcher: agent, redirect: 'manual', signal: AbortSignal.timeout(45_000), headers: { 'user-agent': userAgent, accept: 'application/json', 'accept-encoding': 'gzip' } });

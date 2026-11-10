@@ -13,7 +13,8 @@ interface State {
 
 const AUD: Record<Audience, string> = { staff: 'נציגים בלבד', both: 'בוט ונציגים', bot: 'בוט בלבד' };
 const ERR: Record<string, string> = {
-  gone: 'הדף הוסר מהמקור (הושבת)', unrecognized_format: 'מבנה הדף לא זוהה', rate_limited: 'המקור ביקש להאט; ינוסה שוב בפעם הבאה', timeout: 'המקור לא ענה בזמן',
+  bad_response: 'תשובה לא תקינה מהמקור', unrecognized_format: 'מבנה הנתונים במקור השתנה; הרשימה הקיימת נשמרה',
+  gone: 'הדף הוסר מהמקור (הושבת)', rate_limited: 'המקור ביקש להאט; ינוסה שוב בפעם הבאה', timeout: 'המקור לא ענה בזמן',
   dns_failed: 'אין גישה לכתובת המקור מהשרת', fetch_failed: 'אין חיבור למקור', kb_full: 'המאגר מלא',
 };
 const date = (s: string | null) => (s ? new Date(s).toLocaleString('he-IL', { dateStyle: 'short', timeStyle: 'short' }) : '—');
@@ -143,6 +144,94 @@ export function GovSources() {
           </tbody>
         </table>
       </section>
+
+      <Standards />
     </>
+  );
+}
+
+interface StdReport { at: string; trigger: 'manual' | 'schedule'; total: number; matched: number; created: number; updated: number; unchanged: number; removed: number; detached: number; skipped: boolean; failed: { title: string; error: string }[]; durationMs: number }
+interface StdState {
+  settings: { enabled: boolean; audience: Audience; refreshDays: number; keywords: string[]; includeAll: boolean; lastRunAt: string | null; lastReport: StdReport | null };
+  defaults: string[]; attribution: string; dataset: string; running: boolean; imported: { id: string; title: string; enabled: boolean; status: string; detached: boolean; audience: Audience }[];
+}
+
+/** Stage 2: the official standards list of the Ministry of Economy (data.gov.il). */
+function Standards() {
+  const [st, setSt] = useState<StdState | null>(null);
+  const [form, setForm] = useState<{ enabled: boolean; audience: Audience; refreshDays: number; includeAll: boolean; keywords: string } | null>(null);
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [q, setQ] = useState('');
+  const load = async () => {
+    const s = await api<StdState>('GET', '/kb/gov/standards').catch(() => null);
+    if (!s) return;
+    setSt(s);
+    setForm((f) => f ?? { enabled: s.settings.enabled, audience: s.settings.audience, refreshDays: s.settings.refreshDays, includeAll: s.settings.includeAll, keywords: (s.settings.keywords.length ? s.settings.keywords : s.defaults).join('\n') });
+  };
+  usePoll(load, st?.running ? 3000 : 15000, [st?.running]);
+  if (!st || !form) return null;
+  const body = () => ({ enabled: form.enabled, audience: form.audience, refreshDays: form.refreshDays, includeAll: form.includeAll, keywords: form.keywords.split('\n').map((k) => k.trim()).filter(Boolean) });
+  const act = async (fn: () => Promise<unknown>, ok: string) => {
+    setMsg(null); setBusy(true);
+    try { await fn(); setMsg({ ok: true, text: ok }); await load(); } catch (e) { setMsg({ ok: false, text: errText(e instanceof ApiError ? e.code : 'generic') }); } finally { setBusy(false); }
+  };
+  const r = st.settings.lastReport;
+  const shown = st.imported.filter((x) => !q || x.title.includes(q.trim()));
+  return (
+    <section className="card" aria-labelledby="std-h">
+      <h2 id="std-h">תקנים רשמיים</h2>
+      <p className="hint">
+        רשימת התקנים הרשמיים בתוקף בישראל, ממאגר המידע הממשלתי (data.gov.il, משרד הכלכלה והתעשייה). לכל תקן נשמרים מספר, שם, מהדורה, תוקף, גיליונות תיקון והסעיפים המחייבים.
+        הנוסח המלא של התקנים נמכר על ידי מכון התקנים ואינו זמין ב־API.{' '}
+        <a href={st.dataset} target="_blank" rel="noopener noreferrer">המאגר במקור<span className="sr-only"> (נפתח בחלון חדש)</span></a>
+      </p>
+      <label className="gov-check"><input type="checkbox" checked={form.enabled} onChange={(e) => setForm({ ...form, enabled: e.target.checked })} /> עדכון אוטומטי</label>
+      <div className="row" style={{ alignItems: 'flex-end', flexWrap: 'wrap' }}>
+        <div className="field">
+          <label htmlFor="std-aud">מי משתמש בתוכן</label>
+          <select id="std-aud" value={form.audience} onChange={(e) => setForm({ ...form, audience: e.target.value as Audience })}>
+            {(['staff', 'both', 'bot'] as const).map((a) => <option key={a} value={a}>{AUD[a]}</option>)}
+          </select>
+        </div>
+        <div className="field" style={{ maxWidth: 160 }}>
+          <label htmlFor="std-days">עדכון כל (ימים)</label>
+          <input id="std-days" type="number" min={1} max={90} value={form.refreshDays} onChange={(e) => setForm({ ...form, refreshDays: Math.max(1, Math.min(90, Number(e.target.value) || 7)) })} />
+        </div>
+      </div>
+      <label className="gov-check"><input type="checkbox" checked={form.includeAll} onChange={(e) => setForm({ ...form, includeAll: e.target.checked })} /> כל התקנים הרשמיים (גם מזון, צעצועים ומוצרי צריכה)</label>
+      {!form.includeAll && (
+        <div className="field">
+          <label htmlFor="std-kw">מילים לבחירת תקנים בנושאי בטיחות (מילה בכל שורה)</label>
+          <textarea id="std-kw" rows={6} dir="rtl" value={form.keywords} onChange={(e) => setForm({ ...form, keywords: e.target.value })} aria-describedby="std-kw-h" />
+          <p id="std-kw-h" className="hint">מילה מתאימה למילה שלמה בשם התקן, גם אחרי אות שימוש (ב, ל, ה…). כוכבית בסוף מתאימה לתחילת מילה: "סולמ*" מוצא "סולמות". כמה מילים יחד מחפשות את הצירוף.</p>
+          <button type="button" onClick={() => setForm({ ...form, keywords: st.defaults.join('\n') })}>החזרת המילים המומלצות</button>
+        </div>
+      )}
+      <div className="row">
+        <button className="primary" disabled={busy} onClick={() => act(() => api('PUT', '/kb/gov/standards', body()), 'ההגדרות נשמרו.')}>שמירה</button>
+        <button disabled={busy || st.running} onClick={() => act(async () => { await api('PUT', '/kb/gov/standards', body()); await api('POST', '/kb/gov/standards/sync'); }, 'הייבוא התחיל.')}>{st.running ? 'מייבא…' : 'שמירה וייבוא עכשיו'}</button>
+      </div>
+      <p role="status" aria-live="polite" className={msg?.ok ? 'ok' : 'error'}>{st.running ? 'הייבוא רץ ברקע…' : msg?.text}</p>
+      {r && (
+        <p>
+          ייבוא אחרון: {date(r.at)} ({r.trigger === 'manual' ? 'ידני' : 'אוטומטי'}): {r.skipped ? 'המאגר במקור לא השתנה מאז הייבוא הקודם.' : `${r.matched} מתוך ${r.total} תקנים נבחרו; נוספו ${r.created}, עודכנו ${r.updated}, ללא שינוי ${r.unchanged}${r.removed ? `, הוסרו ${r.removed}` : ''}${r.detached ? `, ${r.detached} נערכו אצלכם` : ''}.`}
+          {r.failed.length > 0 && <span className="error"> שגיאה: {r.failed.map((f) => ERR[f.error] ?? f.error).join(', ')}</span>}
+        </p>
+      )}
+      {st.imported.length > 0 && (
+        <details>
+          <summary>התקנים שיובאו ({st.imported.length})</summary>
+          <div className="field" style={{ maxWidth: 320 }}>
+            <label htmlFor="std-q">סינון</label>
+            <input id="std-q" value={q} onChange={(e) => setQ(e.target.value)} />
+          </div>
+          <ul className="gov-list">
+            {shown.map((x) => <li key={x.id}>{x.title}{x.detached && <span className="badge connecting"> נערך אצלכם</span>}{!x.enabled && <span className="badge stopped"> מושבת</span>}</li>)}
+            {shown.length === 0 && <li className="hint">אין תוצאות לסינון.</li>}
+          </ul>
+        </details>
+      )}
+    </section>
   );
 }

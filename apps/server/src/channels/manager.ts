@@ -1,4 +1,5 @@
 import type { GovImporter } from '../kb/gov/importer.js';
+import type { StandardsImporter } from '../kb/gov/standards.js';
 import { runSlaCheck } from '../sla.js';
 import { learnNorm, reactionMeaning, recordLearn } from '../learn.js';
 import { EventEmitter } from 'node:events';
@@ -105,6 +106,8 @@ export class ChannelManager {
   kb?: KnowledgeBase;
   /** automatic import of laws and regulations into the knowledge base */
   gov?: GovImporter;
+  /** automatic import of the official standards list */
+  standards?: StandardsImporter;
 
   /** Set by the app: called for each new customer message that reached staff (not blocked, not a duplicate). */
   onInbound?: (conversationId: string) => void;
