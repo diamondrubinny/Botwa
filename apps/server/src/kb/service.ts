@@ -9,6 +9,7 @@ import { extract, kindFor, type DocKind, type HtmlOpts } from './extract.js';
 import type { Renderer, RendererStatus } from './browser.js';
 import { canonicalOf, crawlCfgSchema, DEFAULT_CRAWL, inScope, isSoft404, looksClientRendered, MIN_PAGE_CHARS, normalizeUrl, parseRobots, parseSitemap, prefixOf, robotsAllows, type CrawlCfg, type CrawlReport, type Robots, type Scope } from './crawler.js';
 import { dot, fromBuffer, NO_EMBEDDER, toBuffer, type Embedder } from '../semantic/embedder.js';
+import { GOV_ORIGIN_PREFIX, LEGAL_NOTE } from './gov/notes.js';
 import { bestSnippet, chunkText, indexTerms, queryTokens, variants, words } from './text.js';
 
 export type Audience = 'bot' | 'staff' | 'both';
@@ -32,6 +33,13 @@ export function isConfident(top: Hit | undefined, next: Hit | undefined, minScor
   const lexical = top.exact || top.matched >= 2 || (top.tokens === 1 && top.score >= 0.9 && top.matched >= 1);
   const semantic = top.sem >= minScore && top.sem >= (next?.sem ?? 0) + 0.04;
   return lexical || semantic;
+}
+
+/** An answer quoted from an imported law names the law and section and says it is not legal advice. */
+function withLegalNote(text: string, hit: Hit, origin: string | null | undefined): string {
+  if (!origin?.startsWith(GOV_ORIGIN_PREFIX)) return text;
+  const where = [hit.title, hit.heading?.split(' › ').pop()].filter(Boolean).join(', ');
+  return `${text}\n\n(${where})\n${LEGAL_NOTE}`;
 }
 
 export type Fetcher = (url: string, o?: { allow?: RegExp; accept?: string; maxBytes?: number }) => Promise<Fetched>;
@@ -541,10 +549,10 @@ export class KnowledgeBase {
     await this.logQuery(question, via, ok, top?.score ?? null, ok ? top!.sourceId : null);
     if (!ok || !top) return null;
     await this.db.query('UPDATE kb_sources SET uses = uses + 1 WHERE id = $1', [top.sourceId]);
-    const src = (await this.db.query('SELECT kind, body FROM kb_sources WHERE id = $1', [top.sourceId])).rows[0];
+    const src = (await this.db.query('SELECT kind, body, origin FROM kb_sources WHERE id = $1', [top.sourceId])).rows[0];
     // a FAQ answer is shown whole; documents give the most relevant passage
     const text = src?.kind === 'faq' && src.body ? src.body.slice(0, s.maxChars) : bestSnippet(top.snippet, queryTokens(question), s.maxChars);
-    return { ...top, text };
+    return { ...top, text: withLegalNote(text, top, src?.origin) };
   }
 
   /** The formatted passage of one chosen source for a question (used when the customer picks a "did you mean" suggestion). */
@@ -553,9 +561,9 @@ export class KnowledgeBase {
     const hit = hits.find((h) => h.sourceId === sourceId);
     if (!hit) return null;
     await this.db.query('UPDATE kb_sources SET uses = uses + 1 WHERE id = $1', [sourceId]);
-    const src = (await this.db.query('SELECT kind, body FROM kb_sources WHERE id = $1', [sourceId])).rows[0];
+    const src = (await this.db.query('SELECT kind, body, origin FROM kb_sources WHERE id = $1', [sourceId])).rows[0];
     const text = src?.kind === 'faq' && src.body ? src.body.slice(0, s.maxChars) : bestSnippet(hit.snippet, queryTokens(question), s.maxChars);
-    return { ...hit, text };
+    return { ...hit, text: withLegalNote(text, hit, src?.origin) };
   }
 
   async logQuery(text: string, via: 'bot' | 'staff' | 'test', answered: boolean, score: number | null, sourceId: string | null): Promise<void> {

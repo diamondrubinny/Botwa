@@ -1,4 +1,5 @@
 import { BotLearning } from '../components/BotLearning';
+import { GovSources } from '../components/GovSources';
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { api, ApiError } from '../api';
 import { ConfirmDialog } from '../components/ConfirmDialog';
@@ -8,7 +9,7 @@ import { errText } from '../strings';
 interface Source {
   id: string; kind: 'faq' | 'text' | 'file' | 'link'; title: string; variants: string[]; url: string | null; fileName: string | null; categoryId: string | null;
   audience: 'bot' | 'staff' | 'both'; boost: number; enabled: boolean; status: 'pending' | 'ready' | 'error'; error: string | null; refreshHours: number | null;
-  crawlPages: number; crawlReport?: CrawlReport | null; lastFetchedAt: string | null; parentId: string | null; version: number; uses: number; helpful: number; unhelpful: number; chunks: number; body?: string;
+  crawlPages: number; crawlReport?: CrawlReport | null; lastFetchedAt: string | null; parentId: string | null; version: number; uses: number; helpful: number; unhelpful: number; chunks: number; body?: string; origin?: string | null; detached?: boolean;
 }
 interface Category { id: string; name: string; sources: number }
 interface Hit { sem?: number; cos?: number | null; sourceId: string; title: string; kind: string; url: string | null; snippet: string; score: number; matched: number; tokens: number; exact: boolean; heading: string | null }
@@ -20,12 +21,12 @@ const STATUS = { pending: 'בעיבוד…', ready: 'מוכן', error: 'שגיא
 const ERR_SRC: Record<string, string> = {
   http_404: 'הדף לא נמצא (404)', http_403: 'הגישה נחסמה (403)', fetch_failed: 'לא ניתן להתחבר לכתובת', blocked_address: 'כתובת חסומה מטעמי אבטחה', unsupported_content_type: 'סוג תוכן לא נתמך',
   too_large: 'הקובץ גדול מדי', empty_content: 'לא נמצא טקסט בתוכן', infected: 'נמצאה תוכנה זדונית', scan_unavailable: 'סורק הווירוסים לא זמין', extract_timeout: 'הקריאה ארכה יותר מדי',
-  extract_failed: 'לא ניתן לקרוא את הקובץ', gone: 'הדף כבר לא נמצא באתר (הושבת)', thin_content: 'כמעט אין בדף טקסט', soft_404: 'דף שגיאה', dns_failed: 'כתובת האתר לא נמצאה', timeout: 'האתר לא ענה בזמן', tls_error: 'בעיית תעודת אבטחה באתר', kb_full: 'המאגר מלא', too_many_redirects: 'יותר מדי הפניות', bad_url: 'כתובת לא תקינה',
+  extract_failed: 'לא ניתן לקרוא את הקובץ', gone: 'הדף כבר לא נמצא במקור (הושבת)', thin_content: 'כמעט אין בדף טקסט', soft_404: 'דף שגיאה', dns_failed: 'כתובת האתר לא נמצאה', timeout: 'האתר לא ענה בזמן', tls_error: 'בעיית תעודת אבטחה באתר', kb_full: 'המאגר מלא', too_many_redirects: 'יותר מדי הפניות', bad_url: 'כתובת לא תקינה',
 };
 interface CrawlReport { at: string; discovered: number; indexed: number; unchanged: number; failed: number; robots: number; filtered: number; duplicates: number; thin: number; gone: number; limited: boolean; sitemap: number; boilerplate?: number; rendered?: number }
 const reportText = (r: CrawlReport) => `נסרקו ${r.indexed + r.unchanged + r.failed + r.thin + r.duplicates} דפים: ${r.indexed} חדשים או עודכנו, ${r.unchanged} ללא שינוי${r.failed ? `, ${r.failed} נכשלו` : ''}${r.thin ? `, ${r.thin} כמעט ריקים (לא נשמרו)` : ''}${r.duplicates ? `, ${r.duplicates} כפילויות` : ''}${r.robots ? `, ${r.robots} נחסמו ב-robots.txt` : ''}${r.filtered ? `, ${r.filtered} מחוץ להיקף` : ''}${r.gone ? `, ${r.gone} כבר לא באתר (הושבתו)` : ''}${r.rendered ? `, ${r.rendered} נטענו בדפדפן` : ''}${r.boilerplate ? `, הוסרו ${r.boilerplate} קטעים שחוזרים בהרבה דפים (תפריטים וכותרות)` : ''}${r.limited ? '. הסריקה נעצרה במגבלת הדפים' : ''}`;
-type Tab = 'sources' | 'learn' | 'test' | 'gaps' | 'synonyms' | 'stats' | 'health';
-const TABS: [Tab, string][] = [['sources', 'מקורות'], ['learn', 'הבוט לומד'], ['test', 'בדיקת חיפוש'], ['gaps', 'שאלות ללא מענה'], ['synonyms', 'מילים נרדפות'], ['stats', 'סטטיסטיקה'], ['health', 'בריאות וכלים']];
+type Tab = 'sources' | 'gov' | 'learn' | 'test' | 'gaps' | 'synonyms' | 'stats' | 'health';
+const TABS: [Tab, string][] = [['sources', 'מקורות'], ['gov', 'חקיקה ותקינה'], ['learn', 'הבוט לומד'], ['test', 'בדיקת חיפוש'], ['gaps', 'שאלות ללא מענה'], ['synonyms', 'מילים נרדפות'], ['stats', 'סטטיסטיקה'], ['health', 'בריאות וכלים']];
 
 export function KnowledgeBase() {
   const [tab, setTab] = useState<Tab>('sources');
@@ -37,6 +38,7 @@ export function KnowledgeBase() {
         {TABS.map(([k, l]) => <button key={k} className="chip" aria-pressed={tab === k} onClick={() => setTab(k)}>{l}</button>)}
       </div>
       {tab === 'sources' && <Sources />}
+      {tab === 'gov' && <GovSources />}
       {tab === 'learn' && <BotLearning />}
       {tab === 'test' && <Playground />}
       {tab === 'gaps' && <Gaps onAnswer={() => setTab('sources')} />}
@@ -96,6 +98,7 @@ function Sources() {
                   {s.fileName && <div className="hint">{s.fileName}</div>}
                   {s.boost > 0 && <span className="badge connected">מועדף</span>}
                   {!s.enabled && <span className="badge stopped">מושבת</span>}
+                  {s.origin?.startsWith('gov:') && <span className="badge connecting">{s.detached ? 'חקיקה, נערך אצלכם' : 'חקיקה, מתעדכן אוטומטית'}</span>}
                 </th>
                 <td>{KIND[s.kind]}{s.crawlPages > 0 && ` (+${s.crawlPages} דפים)`}</td>
                 <td>
@@ -239,6 +242,7 @@ function EditForm({ id, onDone }: { id: string; onDone: () => void }) {
       e.preventDefault();
       try { await api('PATCH', `/kb/sources/${id}`, { title: s.title, body: s.body, ...(s.kind === 'faq' ? { variants: variants.split('\n').map((v) => v.trim()).filter(Boolean) } : {}) }); onDone(); } catch (er) { setMsg(errText(er instanceof ApiError ? er.code : 'generic')); }
     }}>
+      {s.origin?.startsWith('gov:') && !s.detached && <p className="hint">זה נוסח שיובא אוטומטית. אחרי שמירה הוא יהפוך לטקסט שלכם ולא יתעדכן יותר מהמקור.</p>}
       <div className="field"><label htmlFor={`e-t-${id}`}>{s.kind === 'faq' ? 'שאלה' : 'כותרת'}</label><input id={`e-t-${id}`} required value={s.title} onChange={(e) => setS({ ...s, title: e.target.value })} /></div>
       {s.kind === 'faq' && <div className="field"><label htmlFor={`e-v-${id}`}>ניסוחים נוספים</label><textarea id={`e-v-${id}`} rows={3} value={variants} onChange={(e) => setVariants(e.target.value)} /></div>}
       <div className="field"><label htmlFor={`e-b-${id}`}>תוכן</label><textarea id={`e-b-${id}`} required rows={6} value={s.body ?? ''} onChange={(e) => setS({ ...s, body: e.target.value })} /></div>

@@ -17,7 +17,7 @@ const audience = z.enum(['bot', 'staff', 'both']);
 const common = { categoryId: z.string().uuid().nullable().optional(), audience: audience.default('both'), boost: z.number().int().min(0).max(2).default(0) };
 const SELECT = `s.id, s.kind, s.title, s.variants, s.url, s.file_name AS "fileName", s.category_id AS "categoryId", s.audience, s.boost, s.enabled, s.status, s.error,
   s.refresh_hours AS "refreshHours", s.crawl_pages AS "crawlPages", s.crawl_cfg AS "crawlCfg", s.crawl_report AS "crawlReport", s.last_fetched_at AS "lastFetchedAt", s.parent_id AS "parentId", s.version,
-  s.uses, s.helpful, s.unhelpful, s.updated_at AS "updatedAt", (SELECT count(*)::int FROM kb_chunks c WHERE c.source_id = s.id) AS chunks`;
+  s.uses, s.helpful, s.unhelpful, s.updated_at AS "updatedAt", s.origin, s.detached, (SELECT count(*)::int FROM kb_chunks c WHERE c.source_id = s.id) AS chunks`;
 
 export function kbRoutes(app: FastifyInstance, db: Db, kb: KnowledgeBase) {
   const manage = requireAuth(db, 'kb.manage');
@@ -122,7 +122,7 @@ export function kbRoutes(app: FastifyInstance, db: Db, kb: KnowledgeBase) {
       refreshHours: z.number().int().min(1).max(8760).nullable().optional(), crawlPages: z.number().int().min(0).max(MAX_CRAWL_PAGES).optional(), crawl: crawlCfgSchema.optional(),
     }).safeParse(req.body);
     if (!p.success || !b.success) return reply.code(400).send({ error: 'bad_request' });
-    const cur = (await db.query('SELECT kind FROM kb_sources WHERE id = $1', [p.data.id])).rows[0];
+    const cur = (await db.query('SELECT kind, origin FROM kb_sources WHERE id = $1', [p.data.id])).rows[0];
     if (!cur) return reply.code(404).send({ error: 'not_found' });
     const d = b.data;
     if ((d.body !== undefined || d.variants !== undefined) && !['faq', 'text'].includes(cur.kind)) return reply.code(400).send({ error: 'bad_request' });
@@ -133,6 +133,8 @@ export function kbRoutes(app: FastifyInstance, db: Db, kb: KnowledgeBase) {
       [p.data.id, d.title ?? null, d.variants ?? null, d.body ?? null, d.enabled ?? null, d.audience ?? null, d.boost ?? null,
        d.categoryId !== undefined, d.categoryId ?? null, d.refreshHours !== undefined, d.refreshHours ?? null, d.crawlPages ?? null, d.crawl ? JSON.stringify(d.crawl) : null],
     );
+    // an imported law that staff edit becomes their own text: later imports leave it alone
+    if ((d.title !== undefined || d.body !== undefined) && typeof cur.origin === 'string' && cur.origin.startsWith('gov:')) await db.query('UPDATE kb_sources SET detached = true WHERE id = $1', [p.data.id]);
     // faq/text content feeds the search index; for documents and links the title is only a label
     if ((d.title !== undefined || d.variants !== undefined || d.body !== undefined) && ['faq', 'text'].includes(cur.kind)) await kb.indexWritten(p.data.id).catch(() => undefined);
     // children of a crawled link inherit audience / enabled / boost / category from the parent

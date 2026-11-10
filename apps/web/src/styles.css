@@ -440,3 +440,11 @@ details > summary { border-radius: 8px; }
 .flow-work.full .flow-scroll { height: calc(100dvh - 7.5rem); }
 .flow-work.full .flow-side { top: 0; max-height: calc(100dvh - 1.2rem); }
 @media (max-width: 1100px) { .flow-work.full { grid-template-columns: minmax(0, 1fr); overflow-y: auto; } .flow-work.full .flow-scroll { height: 70dvh; } }
+
+/* law import: the list of laws and regulations to choose from */
+.gov-list { list-style: none; padding: 0; margin: .5rem 0; max-height: 22rem; overflow-y: auto; border: 1px solid var(--border); border-radius: var(--radius-sm); }
+.gov-list li { padding: .3rem .6rem; border-bottom: 1px solid var(--border); }
+.gov-list li:last-child { border-bottom: 0; }
+.gov-list label { display: flex; gap: .6rem; align-items: center; cursor: pointer; font-weight: 400; margin: 0; }
+.gov-list input[type='checkbox'], .gov-check input[type='checkbox'] { width: 1.15rem; height: 1.15rem; min-height: 0; flex: none; margin: 0; }
+.gov-check { display: inline-flex; gap: .5rem; align-items: center; cursor: pointer; margin-block-end: .6rem; }

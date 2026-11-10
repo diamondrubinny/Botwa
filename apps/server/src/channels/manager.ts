@@ -1,3 +1,4 @@
+import type { GovImporter } from '../kb/gov/importer.js';
 import { runSlaCheck } from '../sla.js';
 import { learnNorm, reactionMeaning, recordLearn } from '../learn.js';
 import { EventEmitter } from 'node:events';
@@ -102,6 +103,8 @@ export class ChannelManager {
 
   /** Set by the app: lets the menu bot answer free-text questions from the knowledge base. */
   kb?: KnowledgeBase;
+  /** automatic import of laws and regulations into the knowledge base */
+  gov?: GovImporter;
 
   /** Set by the app: called for each new customer message that reached staff (not blocked, not a duplicate). */
   onInbound?: (conversationId: string) => void;

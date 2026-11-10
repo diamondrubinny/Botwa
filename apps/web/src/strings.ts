@@ -89,6 +89,8 @@ export const t = {
     templates_failed: 'לא ניתן לקרוא את התבניות מ-Meta כרגע.',
     templates_need_official_channel: 'תבניות זמינות רק בערוץ ווצאפ הרשמי.',
     forbidden: 'אין הרשאה לפעולה זו.',
+    bad_title: 'אחד השמות שנבחרו אינו שם של חוק או תקנה.',
+    source_unavailable: 'המקור לא זמין כרגע. נסו שוב בעוד כמה דקות.',
     generic: 'אירעה שגיאה. נסו שוב.',
   } as Record<string, string>,
 };

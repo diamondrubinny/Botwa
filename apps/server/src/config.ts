@@ -68,6 +68,8 @@ const schema = z.object({
   BACKUP_AUTO_HOUR: z.coerce.number().int().min(0).max(23).optional(),
   // Optional: POST a JSON alert here when a channel is logged out / restricted / in error. Leave blank to disable.
   ALERT_WEBHOOK_URL: z.string().url().optional(),
+  // Contact sent in the User-Agent when importing laws from Wikisource (Wikimedia asks automated clients for one). Default: APP_ORIGIN.
+  GOV_IMPORT_CONTACT: z.string().trim().max(200).regex(/^[^\r\n]*$/).optional(),
   // Customers sending more than this many messages within 2 minutes are auto-blocked as flooders (0 = off).
   FLOOD_LIMIT: z.coerce.number().int().min(0).max(1000).default(30),
   // Passkeys are bound to this host. Default: derived from APP_ORIGIN (apex when apex+www are listed).

@@ -33,7 +33,7 @@ function fakeClamd(): Promise<{ port: number; close: () => void }> {
     const srv = net.createServer((s) => {
       let buf = Buffer.alloc(0);
       s.on('data', (d) => {
-        buf = Buffer.concat([buf, d]);
+        buf = Buffer.concat([buf, Buffer.from(d)]);
         const t = buf.toString('latin1');
         if (t.startsWith('zVERSION\0')) { s.end('ClamAV 1.4.1/27454/Mon Nov  9 08:30:02 2026\0'); return; }
         if (t.startsWith('zINSTREAM\0') && buf.length >= 14 && buf.subarray(-4).equals(Buffer.alloc(4))) s.end(t.includes('EICAR') ? 'stream: Eicar-Test-Signature FOUND\0' : 'stream: OK\0');
