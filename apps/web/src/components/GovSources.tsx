@@ -4,8 +4,10 @@ import { usePoll } from '../hooks';
 import { errText } from '../strings';
 
 type Audience = 'bot' | 'staff' | 'both';
-interface Report { at: string; trigger: 'manual' | 'schedule'; checked: number; created: number; updated: number; unchanged: number; removed: number; detached: number; failed: { title: string; error: string }[]; missing: string[]; durationMs: number }
-interface Imported { id: string; title: string; pageTitle: string; url: string; enabled: boolean; status: 'pending' | 'ready' | 'error'; error: string | null; detached: boolean; audience: Audience; fetchedAt: string | null; revid: number | null; sections: number | null; chunks: number }
+interface Report { at: string; trigger: 'manual' | 'schedule'; checked: number; created: number; updated: number; unchanged: number; removed: number; detached: number; failed: { title: string; error: string }[]; missing: string[]; durationMs: number;
+  knesset?: { checked: number; repealed: string[]; reinstated: string[]; outdated: { title: string; latest: string }[]; notFound: string[]; error: string | null } }
+interface Knesset { id: number; name: string; validity: string; repealed: boolean; latestPublication: string | null; finished: string | null; checkedAt: string; newerThanText: boolean }
+interface Imported { id: string; title: string; pageTitle: string; url: string; enabled: boolean; status: 'pending' | 'ready' | 'error'; error: string | null; detached: boolean; audience: Audience; fetchedAt: string | null; revid: number | null; sections: number | null; chunks: number; knesset: Knesset | null }
 interface State {
   settings: { enabled: boolean; audience: Audience; refreshDays: number; selection: string[]; catalog: string[] | null; catalogAt: string | null; lastRunAt: string | null; lastReport: Report | null };
   defaults: string[]; attribution: string; running: boolean; imported: Imported[];
@@ -13,11 +15,13 @@ interface State {
 
 const AUD: Record<Audience, string> = { staff: 'נציגים בלבד', both: 'בוט ונציגים', bot: 'בוט בלבד' };
 const ERR: Record<string, string> = {
+  repealed: 'בוטל לפי מאגר החקיקה של הכנסת (הושבת)',
   bad_response: 'תשובה לא תקינה מהמקור', unrecognized_format: 'מבנה הנתונים במקור השתנה; הרשימה הקיימת נשמרה',
   gone: 'הדף הוסר מהמקור (הושבת)', rate_limited: 'המקור ביקש להאט; ינוסה שוב בפעם הבאה', timeout: 'המקור לא ענה בזמן',
   dns_failed: 'אין גישה לכתובת המקור מהשרת', fetch_failed: 'אין חיבור למקור', kb_full: 'המאגר מלא',
 };
 const date = (s: string | null) => (s ? new Date(s).toLocaleString('he-IL', { dateStyle: 'short', timeStyle: 'short' }) : '—');
+const dayOf = (s: string) => new Date(`${s}T12:00:00`).toLocaleDateString('he-IL');
 
 /** Laws and regulations on safety at work, imported from the Open Law Book and kept up to date automatically. */
 export function GovSources() {
@@ -57,6 +61,7 @@ export function GovSources() {
         <p className="hint">
           הנוסח המלא של חוקים ותקנות הבטיחות בעבודה נמשך מ"ספר החוקים הפתוח" ונשמר במאגר, מחולק לפי תקנות וסעיפים. העדכון אוטומטי: נמשך מחדש רק מה שהשתנה במקור.
           המקור: {st.attribution}
+          {' '}חוקים ופקודות נבדקים גם מול מאגר החקיקה של הכנסת: חוק שבוטל מושבת אוטומטית, ונוסח ישן מתיקון אחרון מסומן לבדיקה.
         </p>
         <p className="hint"><strong>חשוב:</strong> זה מידע כללי ולא ייעוץ משפטי. כשהבוט עונה מתוך החקיקה הוא מציין את שם התקנה והסעיף ומוסיף הסתייגות. מומלץ להשאיר "נציגים בלבד" עד שהממונה על הבטיחות או היועץ המשפטי מאשרים.</p>
 
@@ -111,6 +116,18 @@ export function GovSources() {
               {date(r.at)} ({r.trigger === 'manual' ? 'ידני' : 'אוטומטי'}, {Math.round(r.durationMs / 1000)} שניות): נבדקו {r.checked}, נוספו {r.created}, עודכנו {r.updated}, ללא שינוי {r.unchanged}
               {r.removed ? `, הוסרו ${r.removed}` : ''}{r.detached ? `, ${r.detached} נערכו אצלכם ולא עודכנו` : ''}.
             </p>
+            {r.knesset && (
+              <p>
+                מאגר החקיקה של הכנסת: נבדקו {r.knesset.checked} חוקים ופקודות
+                {r.knesset.error ? <span className="error"> (המאגר לא היה זמין; נשמר המצב הקודם)</span> : '.'}
+                {r.knesset.repealed.length > 0 && <strong className="error"> בוטלו והושבתו: {r.knesset.repealed.join(', ')}.</strong>}
+                {r.knesset.reinstated.length > 0 && <> חזרו לתוקף: {r.knesset.reinstated.join(', ')}.</>}
+                {r.knesset.notFound.length > 0 && <> לא נמצאו במאגר: {r.knesset.notFound.join(', ')}.</>}
+              </p>
+            )}
+            {r.knesset && r.knesset.outdated.length > 0 && (
+              <p className="error">ייתכן שהנוסח אינו כולל תיקון אחרון: {r.knesset.outdated.map((o) => `${o.title} (פורסם ${dayOf(o.latest)})`).join(', ')}. מומלץ לבדוק מול הנוסח ברשומות.</p>
+            )}
             {r.missing.length > 0 && <p className="error">לא נמצאו במקור: {r.missing.join(', ')}</p>}
             {r.failed.length > 0 && <ul className="error">{r.failed.map((f) => <li key={f.title}>{f.title === '*' ? 'המקור' : f.title}: {ERR[f.error] ?? f.error}</li>)}</ul>}
           </div>
@@ -121,9 +138,9 @@ export function GovSources() {
         <h2 id="gov-imp-h">מה יובא ({st.imported.length})</h2>
         <table>
           <caption className="sr-only">חוקים ותקנות שיובאו למאגר</caption>
-          <thead><tr><th scope="col">שם</th><th scope="col">מצב</th><th scope="col">סעיפים</th><th scope="col">עודכן</th><th scope="col">קהל</th></tr></thead>
+          <thead><tr><th scope="col">שם</th><th scope="col">מצב</th><th scope="col">בכנסת</th><th scope="col">סעיפים</th><th scope="col">עודכן</th><th scope="col">קהל</th></tr></thead>
           <tbody>
-            {st.imported.length === 0 && <tr><td colSpan={5}>עדיין לא יובא דבר. בחרו תקנות ולחצו "שמירה וייבוא עכשיו".</td></tr>}
+            {st.imported.length === 0 && <tr><td colSpan={6}>עדיין לא יובא דבר. בחרו תקנות ולחצו "שמירה וייבוא עכשיו".</td></tr>}
             {st.imported.map((x) => (
               <tr key={x.id}>
                 <th scope="row">
@@ -135,6 +152,15 @@ export function GovSources() {
                 <td>
                   <span className={`badge ${x.status === 'ready' ? 'connected' : x.status === 'error' ? 'error' : 'connecting'}`}>{x.status === 'ready' ? 'מוכן' : x.status === 'error' ? 'שגיאה' : 'בעיבוד…'}</span>
                   {x.error && <div className="error"><small>{ERR[x.error] ?? x.error}</small></div>}
+                </td>
+                <td>
+                  {x.knesset ? (
+                    <>
+                      <span className={`badge ${x.knesset.repealed ? 'error' : 'connected'}`}>{x.knesset.validity || '—'}</span>
+                      {x.knesset.latestPublication && <div className="hint">פרסום אחרון {dayOf(x.knesset.latestPublication)}</div>}
+                      {x.knesset.newerThanText && <div className="error"><small>ייתכן שחסר תיקון בנוסח</small></div>}
+                    </>
+                  ) : <span className="hint">{/^(חוק|פקודת)\s/.test(x.pageTitle) ? 'טרם נבדק' : 'תקנות: לא במאגר הכנסת'}</span>}
                 </td>
                 <td>{x.sections ?? '—'} <span className="hint">({x.chunks} קטעים)</span></td>
                 <td>{date(x.fetchedAt)}</td>

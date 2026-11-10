@@ -28,6 +28,7 @@ import { govRoutes } from './routes/gov.js';
 import { GovImporter } from './kb/gov/importer.js';
 import { makeHttp } from './kb/gov/wikisource.js';
 import { DG_HOST, StandardsImporter } from './kb/gov/standards.js';
+import { KNESSET_HOST } from './kb/gov/knesset.js';
 import { flowRoutes } from './routes/flow.js';
 import { brandingRoutes } from './routes/branding.js';
 import { forwardRoutes } from './routes/forward.js';
@@ -146,7 +147,7 @@ export async function buildApp(cfg: Config, db: Db, mgr: ChannelManager, media: 
   kbRoutes(app, db, kb);
   const govUa = `BotwaGovImport/1.0 (self-hosted support inbox; ${cfg.GOV_IMPORT_CONTACT ?? cfg.APP_ORIGIN.split(',')[0]!.trim()})`;
   const pause = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
-  const gov = new GovImporter(db, kb, { http: makeHttp(govUa), sleep: pause, gapMs: cfg.NODE_ENV === 'test' ? 0 : 1500 });
+  const gov = new GovImporter(db, kb, { http: makeHttp(govUa), sleep: pause, gapMs: cfg.NODE_ENV === 'test' ? 0 : 1500 }, cfg.NODE_ENV === 'test' ? null : { http: makeHttp(govUa, KNESSET_HOST), sleep: pause });
   const standards = new StandardsImporter(db, kb, { http: makeHttp(govUa, DG_HOST), sleep: pause });
   mgr.gov = gov;
   mgr.standards = standards;

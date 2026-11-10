@@ -25,7 +25,7 @@ setInterval(() => void mgr.checkSla().catch((err) => app.log.error({ err }, 'sla
 setInterval(() => void mgr.retryForwards().catch((err) => app.log.error({ err }, 'group forward retry failed')), 60_000).unref();
 setInterval(() => void mgr.catchUp().catch((err) => app.log.error({ err }, 'bot catch-up failed')), 60_000).unref();
 setInterval(() => void mgr.kb?.embedMissing().catch((err) => app.log.error({ err }, 'kb embed failed')), 600_000).unref();
-setInterval(() => void mgr.gov?.runDue().then((r) => { if (r?.failed.length) void sendAlert(cfg, `ייבוא החקיקה למאגר הידע: ${r.failed.length} כשלים (${r.failed.map((f) => f.error).slice(0, 3).join(', ')})`); }).catch((err) => app.log.error({ err }, 'law import failed')), 3600_000).unref();
+setInterval(() => void mgr.gov?.runDue().then((r) => { if (r?.failed.length) void sendAlert(cfg, `ייבוא החקיקה למאגר הידע: ${r.failed.length} כשלים (${r.failed.map((f) => f.error).slice(0, 3).join(', ')})`); if (r?.knesset?.repealed.length) void sendAlert(cfg, `לפי מאגר החקיקה של הכנסת בוטלו: ${r.knesset.repealed.join(', ')}. הם הושבתו במאגר הידע.`); }).catch((err) => app.log.error({ err }, 'law import failed')), 3600_000).unref();
 setInterval(() => void mgr.standards?.runDue().then((r) => { if (r?.failed.length) void sendAlert(cfg, `ייבוא התקנים הרשמיים למאגר הידע נכשל (${r.failed.map((f) => f.error).slice(0, 3).join(', ')})`); }).catch((err) => app.log.error({ err }, 'standards import failed')), 3600_000).unref();
 setInterval(() => void mgr.kb?.refreshDue().catch((err) => app.log.error({ err }, 'kb refresh failed')), 3600_000).unref();
 // learning suggestions nobody approved: kept 90 days at most (they may hold customers' wording)

@@ -363,3 +363,74 @@ describe('importing the official standards', () => {
     expect((await db.query(`SELECT origin, variants FROM kb_sources WHERE id = $1`, [id])).rows[0]).toEqual({ origin: null, variants: ['סולם מאושר'] });
   });
 });
+
+// ---- stage 3: status of the imported laws in the Knesset database -----------------------------------------------------------------
+describe('law status from the Knesset database', () => {
+  const L1 = 'פקודת הבטיחות בעבודה';
+  const L2 = 'חוק ארגון הפיקוח על העבודה';
+  const lawText = (title: string, extra = '') => `${extra}{{ח:כותרת|${title}}}\n{{ח:סעיף|1|הגדרות}}\n{{ח:ת}} בחוק זה מפקח עבודה הוא מי שמונה לפי סעיף 2, והוא רשאי להיכנס לכל מקום עבודה ולבדוק את קיום הוראות הבטיחות והגיהות בו.\n\n{{ח:סעיף|2|מינוי}}\n{{ח:ת}} השר ימנה מפקח עבודה ראשי ומפקחי עבודה, ויפרסם הודעה על כך ברשומות כפי שנקבע.`;
+  const laws: Record<number, { IsraelLawID: number; Name: string; LawValidityDesc: string; PublicationDate: string; LatestPublicationDate: string; ValidityFinishDate: string | null }> = {
+    2000850: { IsraelLawID: 2000850, Name: 'פקודת הבטיחות בעבודה [נוסח חדש], התש"ל-1970', LawValidityDesc: 'תקף', PublicationDate: '1970-08-30T00:00:00', LatestPublicationDate: '2017-07-12T00:00:00', ValidityFinishDate: null },
+    2000843: { IsraelLawID: 2000843, Name: 'פקודת הבטיחות בעבודה, 1946', LawValidityDesc: 'בטל', PublicationDate: '1946-02-05T00:00:00', LatestPublicationDate: '1970-08-30T00:00:00', ValidityFinishDate: '1971-03-27T00:00:00' },
+    2000104: { IsraelLawID: 2000104, Name: 'חוק ארגון הפיקוח על העבודה, התשי"ד-1954', LawValidityDesc: 'תקף', PublicationDate: '1954-09-03T00:00:00', LatestPublicationDate: '2023-11-21T00:00:00', ValidityFinishDate: null },
+  };
+  const knReq: string[] = [];
+  const knHttp = async (url: string): Promise<HttpResult> => {
+    knReq.push(decodeURIComponent(url));
+    const u = new URL(url);
+    const byId = /KNS_IsraelLaw\((\d+)\)$/.exec(u.pathname);
+    if (byId) { const r = laws[Number(byId[1])]; return r ? { status: 200, retryAfter: null, body: JSON.stringify(r) } : { status: 404, retryAfter: null, body: '' }; }
+    const f = /startswith\(Name,'(.*)'\)/.exec(u.searchParams.get('$filter') ?? '')?.[1] ?? '';
+    return { status: 200, retryAfter: null, body: JSON.stringify({ value: Object.values(laws).filter((r) => r.Name.startsWith(f.replace(/''/g, "'"))) }) };
+  };
+  const row = async (t: string) => (await state()).imported.find((x) => x.pageTitle === t) as unknown as { enabled: boolean; status: string; error: string | null; knesset: Record<string, unknown> | null };
+
+  beforeAll(async () => {
+    wiki[L1] = { revid: 300, content: lawText('פקודת הבטיחות בעבודה [נוסח חדש], תש״ל–1970', '{{ח:מאגר|2000850}}\n') };
+    wiki[L2] = { revid: 400, content: lawText('חוק ארגון הפיקוח על העבודה, התשי״ד–1954') };
+    mgr.gov!.setKn({ http: knHttp, sleep: async () => undefined });
+    expect((await save('adm', { selection: [T1, L1, L2] })).statusCode).toBe(200);
+  });
+  afterAll(() => mgr.gov!.setKn(null));
+
+  it('checks only laws and ordinances (regulations are not in the database), by id or by name and year', async () => {
+    const r = await mgr.gov!.sync('manual');
+    expect(r.knesset).toMatchObject({ checked: 2, repealed: [], notFound: [], error: null });
+    expect(knReq.some((u) => u.includes('KNS_IsraelLaw(2000850)'))).toBe(true);                                 // the id stated on the page
+    expect(knReq.some((u) => u.includes(`startswith(Name,'${L2}')`))).toBe(true);                                // the other by name
+    expect(knReq.some((u) => u.includes('עזרה ראשונה'))).toBe(false);
+    expect((await row(L1)).knesset).toMatchObject({ id: 2000850, validity: 'תקף', repealed: false, latestPublication: '2017-07-12', newerThanText: false });
+    // the text was revised (2026) after the law's latest publication: not outdated. A later amendment would flag it:
+    expect(r.knesset!.outdated).toEqual([]);
+  });
+
+  it('a newer amendment than the text is flagged; a repealed law stops answering and comes back when in force again', async () => {
+    laws[2000104]!.LatestPublicationDate = '2027-01-15T00:00:00';
+    laws[2000850]!.LawValidityDesc = 'בטל';
+    const r = await mgr.gov!.sync('manual');
+    expect(r.knesset).toMatchObject({ repealed: [L1], outdated: [{ title: L2, latest: '2027-01-15' }] });
+    expect(await row(L1)).toMatchObject({ enabled: false, status: 'error', error: 'repealed' });
+    expect((await row(L2)).knesset).toMatchObject({ newerThanText: true });
+    expect((await mgr.gov!.sync('manual')).knesset!.repealed).toEqual([]);                                      // reported once
+    laws[2000850]!.LawValidityDesc = 'תקף';
+    expect((await mgr.gov!.sync('manual')).knesset!.reinstated).toEqual([L1]);
+    expect(await row(L1)).toMatchObject({ enabled: true, status: 'ready', error: null });
+  });
+
+  it('without an id, picks the law of the title\'s year and prefers the one in force', async () => {
+    const { lawStatus } = await import('../src/kb/gov/knesset.js');
+    const kn = { http: knHttp, sleep: async () => undefined };
+    expect(await lawStatus(kn, { knessetId: null, pageTitle: L1, fullTitle: 'פקודת הבטיחות בעבודה [נוסח חדש], תש״ל–1970' })).toMatchObject({ id: 2000850 });
+    expect(await lawStatus(kn, { knessetId: null, pageTitle: L1, fullTitle: 'פקודת הבטיחות בעבודה, 1946' })).toMatchObject({ id: 2000843, repealed: true });
+    expect(await lawStatus(kn, { knessetId: null, pageTitle: "חוק שאינו קיים'", fullTitle: 'x' })).toBeNull();
+    expect(knReq.at(-1)).toContain("startswith(Name,'חוק שאינו קיים''')");                                       // quotes doubled for OData
+  });
+
+  it('a Knesset outage never fails the import', async () => {
+    mgr.gov!.setKn({ http: async () => ({ status: 500, retryAfter: null, body: '' }), sleep: async () => undefined });
+    const r = await mgr.gov!.sync('manual');
+    expect(r.failed).toEqual([]);
+    expect(r.knesset).toMatchObject({ error: 'http_500' });
+    expect((await row(L1)).knesset).toMatchObject({ id: 2000850 });                                              // the previous status is kept
+  });
+});

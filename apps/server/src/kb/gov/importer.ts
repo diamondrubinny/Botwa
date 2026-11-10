@@ -3,6 +3,7 @@ import type { Db } from '../../db.js';
 import type { KnowledgeBase } from '../service.js';
 import { categorizeSource } from '../../safety/importer.js';
 import { ATTRIBUTION } from './notes.js';
+import { isPrimaryLaw, lawStatus, type KnOptions } from './knesset.js';
 import { parseLawWikitext } from './wikilaw.js';
 import { catalog, DEFAULT_TITLES, fetchPage, isLawTitle, pageUrl, revisions, type WsOptions } from './wikisource.js';
 
@@ -12,6 +13,8 @@ export const CATEGORY_NAME = 'חקיקה ותקינה (ייבוא אוטומטי
 export interface GovReport {
   at: string; trigger: 'manual' | 'schedule'; checked: number; created: number; updated: number; unchanged: number; removed: number; detached: number;
   failed: { title: string; error: string }[]; missing: string[]; durationMs: number;
+  /** stage 3: status of the imported laws in the Knesset database */
+  knesset?: { checked: number; repealed: string[]; reinstated: string[]; outdated: { title: string; latest: string }[]; notFound: string[]; error: string | null };
 }
 export interface GovSettings { enabled: boolean; audience: 'bot' | 'staff' | 'both'; refreshDays: number; selection: string[]; catalog: string[] | null; catalogAt: string | null; lastRunAt: string | null; lastReport: GovReport | null }
 
@@ -20,9 +23,10 @@ export const validTitle = (t: string) => isLawTitle(t) && !/[|#<>[\]{}\u0000-\u0
 
 export class GovImporter {
   private running: Promise<GovReport> | null = null;
-  constructor(private readonly db: Db, private readonly kb: KnowledgeBase, private ws: WsOptions) {}
+  constructor(private readonly db: Db, private readonly kb: KnowledgeBase, private ws: WsOptions, private kn: KnOptions | null = null) {}
   /** Tests replace the network. */
   setWs(o: WsOptions): void { this.ws = o; }
+  setKn(o: KnOptions | null): void { this.kn = o; }
   isRunning(): boolean { return this.running !== null; }
 
   async settings(): Promise<GovSettings> {
@@ -46,7 +50,7 @@ export class GovImporter {
   async imported() {
     return (await this.db.query(
       `SELECT s.id, s.title, s.external_id AS "pageTitle", s.url, s.enabled, s.status, s.error, s.detached, s.audience, s.last_fetched_at AS "fetchedAt",
-              (s.meta->>'revid')::int AS revid, (s.meta->>'sections')::int AS sections, (SELECT count(*)::int FROM kb_chunks c WHERE c.source_id = s.id) AS chunks
+              (s.meta->>'revid')::int AS revid, (s.meta->>'sections')::int AS sections, s.meta->'knesset' AS knesset, (SELECT count(*)::int FROM kb_chunks c WHERE c.source_id = s.id) AS chunks
          FROM kb_sources s WHERE s.origin = $1 ORDER BY s.external_id`, [ORIGIN])).rows;
   }
 
@@ -138,7 +142,38 @@ export class GovImporter {
         if (cur) await this.db.query(`UPDATE kb_sources SET error = $2 WHERE id = $1`, [cur.id, (e as Error).message.slice(0, 120)]);
       }
     }
+    await this.checkKnesset(rep);
     return this.finish(rep, t0);
+  }
+
+  /**
+   * The Knesset database knows whether a law is still in force and when it was last amended. A repealed law stops answering (until the
+   * database says otherwise); a text older than the law's latest publication is flagged, since an amendment may be missing from it.
+   * The check never fails the import: a Knesset outage only leaves the previous status in place.
+   */
+  private async checkKnesset(rep: GovReport): Promise<void> {
+    if (!this.kn) return;
+    const k: NonNullable<GovReport['knesset']> = { checked: 0, repealed: [], reinstated: [], outdated: [], notFound: [], error: null };
+    rep.knesset = k;
+    const rows = (await this.db.query(`SELECT id, external_id, title, error, meta FROM kb_sources WHERE origin = $1 AND NOT detached ORDER BY external_id`, [ORIGIN])).rows
+      .filter((r) => isPrimaryLaw(r.external_id as string));
+    for (const r of rows) {
+      let st;
+      try { st = await lawStatus(this.kn, { knessetId: (r.meta?.knessetId as string | null) ?? null, pageTitle: r.external_id, fullTitle: r.title }); } catch (e) { k.error = (e as Error).message.slice(0, 80); return; }
+      k.checked++;
+      if (!st) { k.notFound.push(r.external_id); continue; }
+      const revised = typeof r.meta?.revisedAt === 'string' ? (r.meta.revisedAt as string).slice(0, 10) : null;
+      const newer = !!(st.latestPublication && revised && st.latestPublication > revised);
+      if (newer) k.outdated.push({ title: r.external_id, latest: st.latestPublication! });
+      await this.db.query(`UPDATE kb_sources SET meta = meta || jsonb_build_object('knesset', $2::jsonb) WHERE id = $1`, [r.id, JSON.stringify({ ...st, newerThanText: newer })]);
+      if (st.repealed) {
+        if (r.error !== 'repealed') k.repealed.push(r.external_id);   // newly repealed only (an alert goes out once)
+        await this.db.query(`UPDATE kb_sources SET enabled = false, status = 'error', error = 'repealed', updated_at = now() WHERE id = $1`, [r.id]);
+      } else if (r.error === 'repealed') {
+        k.reinstated.push(r.external_id);
+        await this.db.query(`UPDATE kb_sources SET enabled = true, status = 'ready', error = NULL, updated_at = now() WHERE id = $1`, [r.id]);
+      }
+    }
   }
 
   private async finish(rep: GovReport, t0: number): Promise<GovReport> {
