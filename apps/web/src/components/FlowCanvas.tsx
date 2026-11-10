@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent as RKeyboardEvent, type PointerEvent as RPointerEvent } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent as RKeyboardEvent, type PointerEvent as RPointerEvent } from 'react';
 
 /** What the canvas needs to know about a node (the editor keeps the full node). */
 export interface CanvasNode { id: string; kind: string; typeLabel: string; title: string; subtitle: string; cls: string; ports: { key: string; label: string; to?: string }[] }
@@ -27,8 +27,8 @@ export function autoLayout(nodes: CanvasNode[], start: string): Record<string, P
   for (const n of nodes) {
     const l = layer.get(n.id)!;
     const y = yOf.get(l) ?? 20;
-    out[n.id] = { x: (maxL - l) * (W + 90) + 30, y };
-    yOf.set(l, y + heightOf(n) + 34);
+    out[n.id] = { x: (maxL - l) * (W + 70) + 30, y };
+    yOf.set(l, y + heightOf(n) + 22);
   }
   return out;
 }
@@ -44,22 +44,33 @@ interface Props {
   onMove: (id: string, pos: Pos, record: boolean) => void;
   onConnect: (from: string, port: string, to: string) => void;
   onArrange: () => void;
+  /** full screen: the canvas (and the editor panel next to it) fills the window */
+  full?: boolean;
+  onToggleFull?: () => void;
 }
 
 type Drag =
   | { kind: 'node'; id: string; from: Pos; grab: Pos; moved: boolean; pointer: number }
-  | { kind: 'link'; id: string; port: string; from: Pos; at: Pos; pointer: number };
+  | { kind: 'link'; id: string; port: string; from: Pos; at: Pos; pointer: number }
+  | { kind: 'pan'; x: number; y: number; left: number; top: number; pointer: number };
 
 /**
  * The flow chart: drag nodes to arrange them, drag from a node's round handle to another node to connect, zoom and fit.
  * Everything here also works without a mouse: arrow keys move the focused node, and every connection can be set in the node's form.
  */
-export function FlowCanvas({ nodes, start, layout, selected, canEdit, onSelect, onMove, onConnect, onArrange }: Props) {
+export function FlowCanvas({ nodes, start, layout, selected, canEdit, onSelect, onMove, onConnect, onArrange, full = false, onToggleFull }: Props) {
   const svgRef = useRef<SVGSVGElement>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
   const [zoom, setZoom] = useState(1);
   const [drag, setDrag] = useState<Drag | null>(null);
   const [hover, setHover] = useState<string | null>(null);
+  const [view, setView] = useState({ left: 0, top: 0, w: 0, h: 0 });     // the visible part, for the minimap
+  const [q, setQ] = useState('');
+  const [hit, setHit] = useState(0);
+  const [showMap, setShowMap] = useState(() => { try { return localStorage.getItem('botwa.flowMap') !== '0'; } catch { return true; } });
+  const toggleMap = () => setShowMap((v) => { try { localStorage.setItem('botwa.flowMap', v ? '0' : '1'); } catch { /* storage blocked: keep it for this visit only */ } return !v; });
+  const fitted = useRef(false);
+  const zoomAnchor = useRef<{ cx: number; cy: number } | null>(null);
 
   const auto = useMemo(() => autoLayout(nodes, start), [nodes, start]);
   const pos = (id: string): Pos => layout?.[id] ?? auto[id] ?? { x: 20, y: 20 };
@@ -88,6 +99,12 @@ export function FlowCanvas({ nodes, start, layout, selected, canEdit, onSelect, 
     if (!drag) return;
     const move = (e: PointerEvent) => {
       if (e.pointerId !== drag.pointer) return;
+      if (drag.kind === 'pan') {
+        const w = wrapRef.current; if (!w) return;
+        w.scrollLeft = drag.left - (e.clientX - drag.x);
+        w.scrollTop = drag.top - (e.clientY - drag.y);
+        return;
+      }
       const at = toSvg(e.clientX, e.clientY);
       if (drag.kind === 'node') {
         const next = { x: Math.max(0, snap(at.x - drag.grab.x)), y: Math.max(0, snap(at.y - drag.grab.y)) };
@@ -102,6 +119,7 @@ export function FlowCanvas({ nodes, start, layout, selected, canEdit, onSelect, 
     };
     const up = (e: PointerEvent) => {
       if (e.pointerId !== drag.pointer) return;
+      if (drag.kind === 'pan') { setDrag(null); return; }
       if (drag.kind === 'node') {
         if (drag.moved) onMove(drag.id, pos(drag.id), true); else onSelect(drag.id);
       } else {
@@ -140,15 +158,61 @@ export function FlowCanvas({ nodes, start, layout, selected, canEdit, onSelect, 
     const p = pos(id);
     onMove(id, { x: Math.max(0, p.x + d[0]!), y: Math.max(0, p.y + d[1]!) }, true);
   };
-  const fit = () => {
-    const w = wrapRef.current?.clientWidth ?? 900;
-    setZoom(Math.max(0.35, Math.min(1.25, Math.floor(((w - 24) / bounds.w) * 20) / 20)));
+  const clampZ = (z: number) => Math.max(0.25, Math.min(1.6, Math.round(z * 100) / 100));
+  /** change the zoom keeping the middle of what is on screen in the middle */
+  const zoomTo = (z: number) => {
+    const w = wrapRef.current;
+    if (w) zoomAnchor.current = { cx: (w.scrollLeft + w.clientWidth / 2) / zoom, cy: (w.scrollTop + w.clientHeight / 2) / zoom };
+    setZoom(clampZ(z));
   };
+  useLayoutEffect(() => {
+    const w = wrapRef.current, a = zoomAnchor.current;
+    if (!w || !a) return;
+    zoomAnchor.current = null;
+    w.scrollLeft = a.cx * zoom - w.clientWidth / 2;
+    w.scrollTop = a.cy * zoom - w.clientHeight / 2;
+  }, [zoom]);
+  /** the whole chart on screen (width and height) */
+  const fit = () => {
+    const w = wrapRef.current;
+    if (!w) return;
+    // everything on screen, but never so small that it cannot be read (then the minimap and search help to move around)
+    setZoom(clampZ(Math.max(0.45, Math.min(1.1, (w.clientWidth - 16) / bounds.w, (w.clientHeight - 16) / bounds.h))));
+    requestAnimationFrame(() => { w.scrollLeft = w.scrollWidth; w.scrollTop = 0; });   // the start is on the right
+  };
+  // first time a chart is shown, and when switching to full screen: fit it, so everything is visible without zooming by hand
+  useEffect(() => { if (nodes.length && !fitted.current) { fitted.current = true; fit(); } });  // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (nodes.length) requestAnimationFrame(fit); }, [full]);  // eslint-disable-line react-hooks/exhaustive-deps
   const wheel = (e: React.WheelEvent) => {
     if (!e.ctrlKey && !e.metaKey) return;
     e.preventDefault();
-    setZoom((z) => Math.max(0.35, Math.min(1.6, Math.round((z - Math.sign(e.deltaY) * 0.1) * 10) / 10)));
+    zoomTo(zoom - Math.sign(e.deltaY) * 0.1);
   };
+  const track = () => { const w = wrapRef.current; if (w) setView({ left: w.scrollLeft, top: w.scrollTop, w: w.clientWidth, h: w.clientHeight }); };
+  useEffect(track, [zoom, bounds.w, bounds.h, full]);  // eslint-disable-line react-hooks/exhaustive-deps
+  /** bring a node to the middle of the screen */
+  const reveal = (id: string) => {
+    const w = wrapRef.current, n = byId.get(id);
+    if (!w || !n) return;
+    const p = pos(id);
+    const x = (p.x + W / 2) * zoom, y = (p.y + heightOf(n) / 2) * zoom;
+    if (x < w.scrollLeft + 40 || x > w.scrollLeft + w.clientWidth - 40 || y < w.scrollTop + 40 || y > w.scrollTop + w.clientHeight - 40) {
+      w.scrollTo({ left: x - w.clientWidth / 2, top: y - w.clientHeight / 2, behavior: 'smooth' });
+    }
+  };
+  // a node chosen elsewhere (the list, a search) is scrolled into view
+  useEffect(() => { if (selected && !drag) reveal(selected); }, [selected]);  // eslint-disable-line react-hooks/exhaustive-deps
+  const startPan = (e: RPointerEvent) => {
+    if (e.button !== 0 || (e.target as Element).closest('[data-node-id]')) return;
+    const w = wrapRef.current; if (!w) return;
+    e.preventDefault();
+    setDrag({ kind: 'pan', x: e.clientX, y: e.clientY, left: w.scrollLeft, top: w.scrollTop, pointer: e.pointerId });
+  };
+  // search: matching nodes are marked; Enter goes to the next one
+  const needle = q.trim().toLowerCase();
+  const matches = needle ? nodes.filter((n) => `${n.title} ${n.subtitle} ${n.typeLabel} ${n.ports.map((p) => p.label).join(' ')}`.toLowerCase().includes(needle)).map((n) => n.id) : [];
+  const goHit = (i: number) => { if (!matches.length) return; const k = ((i % matches.length) + matches.length) % matches.length; setHit(k); reveal(matches[k]!); };
+  const low = zoom < 0.62;   // zoomed out: bigger, single-line labels so the chart stays readable
 
   const edgePath = (a: Pos, b: CanvasNode) => {
     const t = pos(b.id), th = heightOf(b);
@@ -167,16 +231,26 @@ export function FlowCanvas({ nodes, start, layout, selected, canEdit, onSelect, 
   return (
     <div className="flow-canvas">
       <div className="flow-toolbar" role="toolbar" aria-label="תצוגת התרשים">
-        <button type="button" onClick={() => setZoom((z) => Math.max(0.35, Math.round((z - 0.1) * 10) / 10))} aria-label="הקטנת התצוגה">−</button>
+        <button type="button" onClick={() => zoomTo(zoom - 0.1)} aria-label="הקטנת התצוגה">−</button>
         <span className="flow-zoom" aria-live="polite">{Math.round(zoom * 100)}%</span>
-        <button type="button" onClick={() => setZoom((z) => Math.min(1.6, Math.round((z + 0.1) * 10) / 10))} aria-label="הגדלת התצוגה">+</button>
-        <button type="button" onClick={() => setZoom(1)}>100%</button>
-        <button type="button" onClick={fit}>התאמה לרוחב</button>
+        <button type="button" onClick={() => zoomTo(zoom + 0.1)} aria-label="הגדלת התצוגה">+</button>
+        <button type="button" onClick={fit}>התאמה למסך</button>
+        <button type="button" onClick={() => zoomTo(1)}>100%</button>
+        {onToggleFull && <button type="button" aria-pressed={full} onClick={onToggleFull}>{full ? 'יציאה ממסך מלא' : 'מסך מלא'}</button>}
+        <button type="button" aria-pressed={showMap} onClick={toggleMap}>מפה קטנה</button>
         {canEdit && <button type="button" onClick={onArrange}>סידור אוטומטי</button>}
-        <span className="hint flow-help">{canEdit ? 'גוררים צומת להזזה (או חצים כשהוא מסומן, Shift לצעד גדול). מושכים מהעיגול שבצד שמאל של צומת אל צומת אחר כדי לחבר. Ctrl+Z מבטל.' : 'לחיצה על צומת מציגה את פרטיו.'}</span>
+        <span className="flow-search">
+          <label htmlFor="flow-q" className="sr-only">חיפוש צומת</label>
+          <input id="flow-q" type="search" placeholder="חיפוש צומת…" value={q} onChange={(e) => { setQ(e.target.value); setHit(0); const v = e.target.value.trim().toLowerCase(); const first = v ? nodes.find((n) => `${n.title} ${n.subtitle} ${n.typeLabel} ${n.ports.map((p) => p.label).join(' ')}`.toLowerCase().includes(v)) : undefined; if (first) reveal(first.id); }}
+            onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); goHit(e.shiftKey ? hit - 1 : hit + 1); } }} />
+          {needle && <span className="hint" aria-live="polite">{matches.length ? `${hit + 1} מתוך ${matches.length}` : 'לא נמצא'}</span>}
+          {matches.length > 0 && <button type="button" onClick={() => onSelect(matches[hit]!)}>פתיחה</button>}
+        </span>
+        <span className="hint flow-help">{canEdit ? 'גוררים רקע ריק כדי לנוע בתרשים, וצומת כדי להזיז אותו (או חצים כשהוא מסומן). מושכים מהעיגול שבצד שמאל של צומת אל צומת אחר כדי לחבר. Ctrl+גלגלת לזום, Ctrl+Z מבטל.' : 'גוררים רקע ריק כדי לנוע. לחיצה על צומת מציגה את פרטיו.'}</span>
       </div>
-      <div className="flow-scroll" ref={wrapRef} onWheel={wheel}>
-        <svg ref={svgRef} width={bounds.w * zoom} height={bounds.h * zoom} viewBox={`0 0 ${bounds.w} ${bounds.h}`} className={`flow-svg${drag ? ' dragging' : ''}`} role="group" aria-label="תרשים הזרימה">
+      <div className="flow-stage">
+      <div className="flow-scroll" ref={wrapRef} onWheel={wheel} onScroll={track}>
+        <svg ref={svgRef} width={bounds.w * zoom} height={bounds.h * zoom} viewBox={`0 0 ${bounds.w} ${bounds.h}`} className={`flow-svg${drag ? ' dragging' : ''}${drag?.kind === 'pan' ? ' panning' : ''}${low ? ' low' : ''}`} role="group" aria-label="תרשים הזרימה" onPointerDown={startPan}>
           <defs>
             <pattern id="fgrid" width="20" height="20" patternUnits="userSpaceOnUse"><circle cx="1" cy="1" r="1" className="flow-dot" /></pattern>
             <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" className="flow-arrow" /></marker>
@@ -203,20 +277,24 @@ export function FlowCanvas({ nodes, start, layout, selected, canEdit, onSelect, 
             const isStart = start === n.id;
             const targets = n.ports.filter((x) => x.to).map((x) => byId.get(x.to!)?.title).filter(Boolean);
             return (
-              <g key={n.id} data-node-id={n.id} className={`flow-node ${n.cls}${selected === n.id ? ' sel' : ''}${hover === n.id ? ' drop' : ''}${drag?.kind === 'node' && drag.id === n.id && drag.moved ? ' lifting' : ''}`}
+              <g key={n.id} data-node-id={n.id} className={`flow-node ${n.cls}${selected === n.id ? ' sel' : ''}${matches.includes(n.id) ? ' match' : ''}${hover === n.id ? ' drop' : ''}${drag?.kind === 'node' && drag.id === n.id && drag.moved ? ' lifting' : ''}`}
                 role="button" tabIndex={0} aria-pressed={selected === n.id} aria-describedby={`fdesc-${n.id}`}
                 onPointerDown={(e) => startNodeDrag(e, n.id)} onKeyDown={(e) => keyMove(e, n.id)}>
                 <desc id={`fdesc-${n.id}`}>{targets.length ? `ממשיך אל: ${targets.join(', ')}` : 'סוף הענף'}</desc>
                 <rect x={p.x} y={p.y} width={W} height={h} rx="12" className="flow-box" />
                 <rect x={p.x + W - 6} y={p.y} width="6" height={h} rx="3" className="flow-stripe" />
-                <text x={p.x + W - 16} y={p.y + 22} className="flow-type" direction="rtl">{clip(n.typeLabel, 26)}</text>
+                {low ? (
+                  <text x={p.x + W - 16} y={p.y + 41} className="flow-text-big" direction="rtl">{clip(n.subtitle || n.typeLabel, 13)}</text>
+                ) : (<>
+                  <text x={p.x + W - 16} y={p.y + 22} className="flow-type" direction="rtl">{clip(n.typeLabel, 26)}</text>
+                  <text x={p.x + W - 16} y={p.y + 44} className="flow-text" direction="rtl">{clip(n.subtitle, 28)}</text>
+                </>)}
                 {isStart && <g><rect x={p.x + 8} y={p.y + 8} width="54" height="18" rx="9" className="flow-start" /><text x={p.x + 35} y={p.y + 21} textAnchor="middle" className="flow-start-t">התחלה</text></g>}
-                <text x={p.x + W - 16} y={p.y + 44} className="flow-text" direction="rtl">{clip(n.subtitle, 28)}</text>
                 {n.ports.map((port, i) => {
                   const pp = portPos(n, i);
                   return (
                     <g key={port.key} aria-hidden="true">
-                      {n.ports.length > 1 && <text x={p.x + W - 16} y={pp.y + 4} className="flow-port-label" direction="rtl">{clip(port.label, 26)}</text>}
+                      {n.ports.length > 1 && !low && <text x={p.x + W - 16} y={pp.y + 4} className="flow-port-label" direction="rtl">{clip(port.label, 26)}</text>}
                       {canEdit && <circle cx={pp.x} cy={pp.y} r="7" className={`flow-port${port.to ? ' on' : ''}`} onPointerDown={(e) => startLink(e, n, i)}><title>גררו אל צומת כדי לחבר{port.label ? ` (${port.label})` : ''}</title></circle>}
                     </g>
                   );
@@ -226,6 +304,28 @@ export function FlowCanvas({ nodes, start, layout, selected, canEdit, onSelect, 
           })}
         </svg>
       </div>
+      {showMap && (bounds.w * zoom > view.w + 4 || bounds.h * zoom > view.h + 4) ? (
+        <Minimap nodes={nodes} pos={pos} bounds={bounds} view={view} zoom={zoom} selected={selected}
+          onJump={(cx, cy) => { const w = wrapRef.current; if (w) { w.scrollLeft = cx * zoom - w.clientWidth / 2; w.scrollTop = cy * zoom - w.clientHeight / 2; } }} />
+      ) : null}
+      </div>
     </div>
+  );
+}
+
+/** A small overview of the whole chart with the visible part marked; click or drag on it to move there. Pointer only (the keyboard has search and the node list). */
+function Minimap({ nodes, pos, bounds, view, zoom, selected, onJump }: { nodes: CanvasNode[]; pos: (id: string) => Pos; bounds: { w: number; h: number }; view: { left: number; top: number; w: number; h: number }; zoom: number; selected: string | null; onJump: (cx: number, cy: number) => void }) {
+  const MW = 190;
+  const scale = MW / bounds.w;
+  const MH = Math.min(150, bounds.h * scale);
+  const sy = MH / bounds.h;
+  const at = (e: RPointerEvent<SVGSVGElement>) => { const r = e.currentTarget.getBoundingClientRect(); onJump(((e.clientX - r.left) / r.width) * bounds.w, ((e.clientY - r.top) / r.height) * bounds.h); };
+  return (
+    <svg className="flow-minimap" width={MW} height={MH} viewBox={`0 0 ${bounds.w} ${bounds.h}`} preserveAspectRatio="none" aria-hidden="true"
+      onPointerDown={(e) => { e.currentTarget.setPointerCapture(e.pointerId); at(e); }} onPointerMove={(e) => { if (e.buttons === 1) at(e); }}>
+      <rect x="0" y="0" width={bounds.w} height={bounds.h} className="mm-bg" />
+      {nodes.map((n) => { const p = pos(n.id); return <rect key={n.id} x={p.x} y={p.y} width={W} height={heightOf(n)} rx="10" className={`mm-node${n.id === selected ? ' sel' : ''}`} />; })}
+      <rect x={view.left / zoom} y={view.top / zoom} width={view.w / zoom} height={view.h / zoom} className="mm-view" style={{ strokeWidth: 2 / Math.min(scale, sy) }} />
+    </svg>
   );
 }

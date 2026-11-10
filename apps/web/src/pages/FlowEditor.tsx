@@ -204,6 +204,15 @@ export function FlowEditor({ me }: { me: Me }) {
     });
   };
   const [connectNew, setConnectNew] = useState(true);
+  const [full, setFull] = useState(false);
+  useEffect(() => {
+    if (!full) return;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    const esc = (e: KeyboardEvent) => { if (e.key === 'Escape' && !(e.target as HTMLElement)?.closest('input, textarea, select')) setFull(false); };
+    document.addEventListener('keydown', esc);
+    return () => { document.body.style.overflow = prev; document.removeEventListener('keydown', esc); };
+  }, [full]);
   const canvasNodes = useMemo(() => (flow ? toCanvas(flow) : []), [flow]);
   const moveNode = (id: string, p: Pos, record: boolean) => change((f) => {
     if (!f) return f;
@@ -280,9 +289,9 @@ export function FlowEditor({ me }: { me: Me }) {
                   <button type="button" onClick={redo} disabled={future.current.length === 0} aria-keyshortcuts="Control+Shift+Z">חזרה על פעולה</button>
                 </div>}
               </div>
-              <div className="flow-work">
+              <div className={`flow-work${full ? ' full' : ''}`} role={full ? 'dialog' : undefined} aria-modal={full ? true : undefined} aria-label={full ? 'עורך התרשים במסך מלא' : undefined}>
                 <FlowCanvas nodes={canvasNodes} start={flow.start} layout={flow.layout} selected={open} canEdit={canEdit}
-                  onSelect={selectNode} onMove={moveNode} onConnect={link} onArrange={arrange} />
+                  onSelect={selectNode} onMove={moveNode} onConnect={link} onArrange={arrange} full={full} onToggleFull={() => setFull((f) => !f)} />
                 <aside className="flow-side" aria-labelledby="fs-h">
                   {selNode ? (
                     <>

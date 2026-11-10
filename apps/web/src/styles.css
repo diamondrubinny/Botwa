@@ -318,7 +318,7 @@ h1 { font-size: 1.75rem; font-weight: 800; margin-bottom: 1.25rem; }
 h2 { font-weight: 700; }
 @keyframes rise { from { transform: translateY(8px); } to { transform: none; } }
 /* never on the inbox/chat containers: a transform on an ancestor would break the full-screen (position: fixed) chat on phones */
-main > h1, main > .card:not(.chat-pane), main > ul, main > section { animation: rise .28s var(--ease) both; }
+main > h1, main > .card:not(.chat-pane), main > ul, main > section { animation: rise .28s var(--ease) backwards; }   /* backwards, not both: a finished transform animation would still trap position:fixed children (full-screen editor) */
 
 /* cards */
 .card { border-color: color-mix(in srgb, var(--border) 80%, transparent); box-shadow: 0 1px 2px rgba(20, 24, 36, .04), 0 10px 30px -12px rgba(20, 24, 36, .14); transition: box-shadow .2s var(--ease), transform .2s var(--ease); }
@@ -353,7 +353,7 @@ tbody tr:last-child > * { border-bottom: 0; }
 .chat-pane, .inbox > .card { overflow: hidden; }
 .chat-tools { gap: .4rem; padding: .5rem .8rem; }
 .chat-tools button, .chat-tools select { min-height: 36px; font-size: .9rem; padding-block: .2rem; }
-.msg { box-shadow: 0 1px 2px rgba(20, 24, 36, .06); animation: rise .2s var(--ease) both; }
+.msg { box-shadow: 0 1px 2px rgba(20, 24, 36, .06); animation: rise .2s var(--ease) backwards; }
 .composer { border-top: 1px solid var(--border); }
 
 /* reports: toolbar + KPI tiles */
@@ -386,7 +386,7 @@ details > summary { border-radius: 8px; }
 .flow-toolbar button { min-height: 36px; padding: .2rem .7rem; }
 .flow-zoom { min-width: 3.2em; text-align: center; font-variant-numeric: tabular-nums; }
 .flow-help { flex-basis: 100%; }
-.flow-scroll { overflow: auto; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface-2); max-height: 72vh; touch-action: pan-x pan-y; }
+.flow-scroll { overflow: auto; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface-2); height: min(74vh, 900px); touch-action: none; }
 .flow-svg { display: block; user-select: none; -webkit-user-select: none; }
 .flow-svg .flow-dot { fill: var(--border); }
 .flow-svg .flow-node { cursor: grab; }
@@ -422,3 +422,21 @@ details > summary { border-radius: 8px; }
 .avatar-gallery button img, .avatar-gallery li img { border-radius: 50%; display: block; }
 .avatar-gallery li { display: flex; flex-direction: column; align-items: center; gap: .25rem; }
 .avatar-gallery button:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+
+/* flow chart: navigation */
+.flow-stage { position: relative; }
+.flow-minimap { position: absolute; bottom: 18px; left: 18px; opacity: .92; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 4px 14px rgba(20, 24, 36, .18); cursor: pointer; touch-action: none; }
+.flow-minimap .mm-bg { fill: var(--surface-2); }
+.flow-minimap .mm-node { fill: var(--input-border); opacity: .55; }
+.flow-minimap .mm-node.sel { fill: var(--accent); opacity: 1; }
+.flow-minimap .mm-view { fill: var(--accent-soft); stroke: var(--accent); }
+.flow-svg > rect:first-of-type { cursor: grab; }
+.flow-svg.panning, .flow-svg.panning * { cursor: grabbing !important; }
+.flow-svg .flow-node.match .flow-box { stroke: var(--warn); stroke-width: 3.5; }
+.flow-svg .flow-text-big { font-size: 25px; font-weight: 700; }
+.flow-search { display: inline-flex; align-items: center; gap: .35rem; flex-wrap: wrap; }
+.flow-search input { width: 190px; min-height: 36px; padding: .2rem .6rem; }
+.flow-work.full { position: fixed; inset: 0; z-index: 60; background: var(--bg); padding: .6rem; margin: 0; height: 100dvh; grid-template-columns: minmax(0, 1fr) 360px; }
+.flow-work.full .flow-scroll { height: calc(100dvh - 7.5rem); }
+.flow-work.full .flow-side { top: 0; max-height: calc(100dvh - 1.2rem); }
+@media (max-width: 1100px) { .flow-work.full { grid-template-columns: minmax(0, 1fr); overflow-y: auto; } .flow-work.full .flow-scroll { height: 70dvh; } }
