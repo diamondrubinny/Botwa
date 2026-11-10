@@ -6,3 +6,6 @@ export const LEGAL_NOTE = 'מידע כללי מתוך החקיקה, אינו י�
 export const STANDARDS_ATTRIBUTION = 'מאגר התקנים הרשמיים, משרד הכלכלה והתעשייה (data.gov.il). הנוסח המלא של התקן נרכש ממכון התקנים הישראלי.';
 /** Added to every answer given from the official standards list. */
 export const STANDARDS_NOTE = 'מקור: רשימת התקנים הרשמיים של משרד הכלכלה (data.gov.il). לפרטי התקן המלאים ולתחולתו פנו לממונה הבטיחות.';
+export const FIRE_ATTRIBUTION = 'דרישות בטיחות אש לרישוי עסקים, הרשות הארצית לכבאות והצלה (data.gov.il).';
+/** Added to every answer given from the fire-safety licensing requirements. */
+export const FIRE_NOTE = 'מקור: דרישות בטיחות אש לרישוי עסקים של הרשות הארצית לכבאות והצלה (data.gov.il). על כל עסק חלות הדרישות שהיו בתוקף במועד הרישוי או חידושו; לבירור פנו לרשות הכבאות.';

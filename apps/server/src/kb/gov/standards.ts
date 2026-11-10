@@ -93,7 +93,7 @@ export interface StdReport {
 export interface StdSettings { enabled: boolean; audience: 'bot' | 'staff' | 'both'; refreshDays: number; keywords: string[]; includeAll: boolean; lastRunAt: string | null; lastReport: StdReport | null; sourceModified: string | null }
 export interface DgOptions { http: GovHttp; sleep: (ms: number) => Promise<void> }
 
-async function dgApi<T>(o: DgOptions, action: string, params: Record<string, string>): Promise<T> {
+export async function dgApi<T>(o: DgOptions, action: string, params: Record<string, string>): Promise<T> {
   const url = `https://${DG_HOST}/api/3/action/${action}?${new URLSearchParams(params)}`;
   for (let attempt = 0; attempt < 4; attempt++) {
     const r = await o.http(url);

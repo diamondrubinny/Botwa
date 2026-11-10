@@ -434,3 +434,108 @@ describe('law status from the Knesset database', () => {
     expect((await row(L1)).knesset).toMatchObject({ id: 2000850 });                                              // the previous status is kept
   });
 });
+
+// ---- stage 4: fire-safety requirements for business licensing ----------------------------------------------------------------------
+import { groupRows, subtypeEntry } from '../src/kb/gov/fire.js';
+import { FIRE_NOTE } from '../src/kb/gov/notes.js';
+
+describe('fire-safety licensing requirements', () => {
+  const row = (code: number, name: string, sub: string, num: string, desc: string, remarks = 'NULL', src = 'הוראת נציב 550') => ({
+    CategoryDesc1: `קבוצה ${Math.floor(code)} - קבוצה`, CategoryCode2: code, CategoryDesc2: name, CategoryDesc3: sub, CategoryDesc4: '', CategoryDesc5: '', CategoryDesc6: '', CategoryDesc7: '',
+    RequirementNumber: num, RequirementDesc: desc, Remarks: remarks, REQUIREMENT_SOURCE_DESC: src,
+  });
+  let rows: ReturnType<typeof row>[] = [];
+  const build = () => {
+    rows = [
+      row(1.01, 'בית מרקחת', 'בית מרקחת עד 200 מ"ר', '3.2.18.1', 'שילוט', 'בעסק יותקנו שלטי "יציאה" בגוון לבן על רקע ירוק, עם תאורת חירום ל־60 דקות.'),
+      row(1.01, 'בית מרקחת', 'בית מרקחת עד 200 מ"ר', '3.2.18.1', 'שילוט', 'בעסק יותקנו שלטי "יציאה" בגוון לבן על רקע ירוק, עם תאורת חירום ל־60 דקות.'),   // repeated in the source
+      row(1.01, 'בית מרקחת', 'בית מרקחת מעל 500 מ"ר', '03.04.03.1', 'מערכת מתזי מים אוטומטית (ספרינקלרים) לפי ת"י 1596', 'המערכת תותקן בכל חלקי העסק'),
+      row(1.01, 'בית מרקחת', 'בית מרקחת מעל 500 מ"ר', '3.2.18.1', 'שילוט', 'בעסק יותקנו שלטי "יציאה" בגוון לבן על רקע ירוק, עם תאורת חירום ל־60 דקות.'),
+      { ...row(1, '', '', '9.9', 'שורה של קבוצה שלמה'), CategoryCode2: null as unknown as number },
+    ];
+    // filler: other business types, so the answer looks like the real dataset (it is checked for size)
+    for (let t = 2; t <= 12; t++) for (let i = 0; i < 100; i++) rows.push(row(t + 0.01, `עסק מסוג ${t}`, `תת סוג ${i % 4}`, `${t}.${i}`, `דרישה כללית מספר ${i} לעסק מסוג ${t}`));
+  };
+  let resources = [
+    { id: '00000000-0000-4000-8000-000000000001', datastore_active: true, last_modified: '2026-10-01T00:00:00' },
+    { id: '00000000-0000-4000-8000-000000000002', datastore_active: true, last_modified: '2026-11-03T07:34:48' },
+    { id: '00000000-0000-4000-8000-000000000003', datastore_active: false, last_modified: '2026-12-01T00:00:00' },
+  ];
+  const fireReq: string[] = [];
+  const fireHttp = async (url: string): Promise<HttpResult> => {
+    fireReq.push(url);
+    const u = new URL(url);
+    if (u.pathname.endsWith('/package_show')) return { status: 200, retryAfter: null, body: JSON.stringify({ success: true, result: { resources } }) };
+    if (u.pathname.endsWith('/datastore_search')) {
+      const off = Number(u.searchParams.get('offset')), lim = Number(u.searchParams.get('limit'));
+      return { status: 200, retryAfter: null, body: JSON.stringify({ success: true, result: { total: rows.length, records: rows.slice(off, off + lim) } }) };
+    }
+    return { status: 404, retryAfter: null, body: '' };
+  };
+  const fireState = async () => (await call('GET', '/kb/gov/fire', 'adm')).json() as { settings: { catalog: { code: string; name: string; subtypes: number; requirements: number }[] | null; lastReport: Record<string, unknown> }; imported: { id: string; title: string; code: string; audience: string; chunks: number }[] };
+  const saveFire = (who: string, p: object = {}) => call('PUT', '/kb/gov/fire', who, { enabled: true, audience: 'staff', refreshDays: 30, selection: [], ...p });
+
+  beforeAll(() => { build(); mgr.fire!.setDg({ http: fireHttp, sleep: async () => undefined }); });
+
+  it('groups by business type and sub-type, without repeating a requirement, and skips rows that are not a business', () => {
+    const { types, subtypes } = groupRows(rows);
+    expect(types[0]).toEqual({ code: '1.01', name: 'בית מרקחת', group: 'קבוצה 1 - קבוצה', subtypes: 2, requirements: 3 });
+    expect(types).toHaveLength(12);
+    const e = subtypeEntry(subtypes.get('1.01')![1]!, '10.11.2026');
+    expect(e.title).toBe('דרישות כבאות לרישוי עסקים – בית מרקחת › בית מרקחת מעל 500 מ"ר');
+    expect(e.body).toContain('### דרישה 03.04.03.1 – מערכת מתזי מים אוטומטית (ספרינקלרים) לפי ת"י 1596\n\nמערכת מתזי מים אוטומטית (ספרינקלרים) לפי ת"י 1596\nהמערכת תותקן בכל חלקי העסק\nמקור הדרישה: הוראת נציב 550.');
+    expect(e.body).not.toContain('NULL');
+  });
+
+  it('is off and empty until chosen; only kb.manage; business type numbers only', async () => {
+    expect(await mgr.fire!.runDue()).toBeNull();
+    expect((await call('GET', '/kb/gov/fire', 'ag')).statusCode).toBe(403);
+    expect((await saveFire('ag')).statusCode).toBe(403);
+    expect((await call('POST', '/kb/gov/fire/sync', 'ag')).statusCode).toBe(403);
+    for (const bad of [['1'], ['1.01; DROP'], ['abc']]) expect((await saveFire('adm', { selection: bad })).statusCode).toBe(400);
+  });
+
+  it('the first import loads the list of business types from the newest snapshot (in pages) and imports nothing', async () => {
+    expect((await saveFire('adm')).statusCode).toBe(200);
+    const r = await mgr.fire!.sync('manual');
+    expect(r).toMatchObject({ resource: '00000000-0000-4000-8000-000000000002', total: 1105, types: 12, chosen: 0, created: 0, failed: [] });
+    expect(fireReq.filter((u) => u.includes('datastore_search'))).toHaveLength(1);                       // 1,105 rows: one page of 3,000
+    expect(fireReq.some((u) => u.includes('fields=CategoryDesc1'))).toBe(true);
+    expect((await fireState()).settings.catalog?.[0]).toMatchObject({ code: '1.01', name: 'בית מרקחת', subtypes: 2, requirements: 3 });
+  });
+
+  it('imports the chosen business types, one source per sub-type and one passage per requirement', async () => {
+    expect((await saveFire('adm', { selection: ['1.01'] })).statusCode).toBe(200);
+    expect(await mgr.fire!.sync('manual')).toMatchObject({ chosen: 1, created: 2 });
+    const s = await fireState();
+    expect(s.imported.map((x) => [x.title, x.code, x.audience, x.chunks])).toEqual([
+      ['דרישות כבאות לרישוי עסקים – בית מרקחת › בית מרקחת מעל 500 מ"ר', '1.01', 'staff', 3],
+      ['דרישות כבאות לרישוי עסקים – בית מרקחת › בית מרקחת עד 200 מ"ר', '1.01', 'staff', 2],
+    ]);
+    const hits = (await call('POST', '/kb/search', 'adm', { q: 'ספרינקלרים בבית מרקחת מעל 500 מטר' })).json().hits as { title: string; heading: string }[];
+    expect(hits[0]).toMatchObject({ title: 'דרישות כבאות לרישוי עסקים – בית מרקחת › בית מרקחת מעל 500 מ"ר' });
+    expect(hits[0]!.heading).toContain('דרישה 03.04.03.1');
+    expect(await mgr.kb!.answer('ספרינקלרים בבית מרקחת מעל 500', { minScore: 0.5, maxChars: 900 }, 'bot', 'test')).toBeNull();   // staff only
+    expect((await saveFire('adm', { selection: ['1.01'], audience: 'both' })).statusCode).toBe(200);
+    const a = await mgr.kb!.answer('ספרינקלרים בבית מרקחת מעל 500', { minScore: 0.5, maxChars: 900 }, 'bot', 'test');
+    expect(a?.text).toContain('המערכת תותקן בכל חלקי העסק');
+    expect(a?.text.endsWith(FIRE_NOTE)).toBe(true);
+    expect((await saveFire('adm', { selection: ['1.01'] })).statusCode).toBe(200);
+  });
+
+  it('skips an unchanged snapshot; a new one updates what changed and removes what is gone; a broken one changes nothing', async () => {
+    fireReq.length = 0;
+    expect(await mgr.fire!.sync('manual')).toMatchObject({ skipped: true });
+    expect(fireReq.filter((u) => u.includes('datastore_search'))).toHaveLength(0);
+    resources = [...resources, { id: '00000000-0000-4000-8000-000000000004', datastore_active: true, last_modified: '2026-12-07T00:00:00' }];
+    rows = rows.filter((r) => r.CategoryDesc3 !== 'בית מרקחת עד 200 מ"ר');
+    rows[0] = { ...rows[0]!, Remarks: 'המערכת תותקן בכל חלקי העסק, כולל המחסן' };
+    expect(await mgr.fire!.sync('manual')).toMatchObject({ resource: '00000000-0000-4000-8000-000000000004', updated: 1, removed: 1 });
+    const keep = rows;
+    rows = rows.slice(0, 50);
+    resources = [...resources, { id: '00000000-0000-4000-8000-000000000005', datastore_active: true, last_modified: '2027-01-07T00:00:00' }];
+    expect(await mgr.fire!.sync('manual')).toMatchObject({ failed: [{ title: '*', error: 'unrecognized_format' }] });
+    expect((await fireState()).imported).toHaveLength(1);
+    rows = keep;
+  });
+});

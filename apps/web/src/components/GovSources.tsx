@@ -172,6 +172,7 @@ export function GovSources() {
       </section>
 
       <Standards />
+      <Fire />
     </>
   );
 }
@@ -256,6 +257,113 @@ function Standards() {
             {shown.map((x) => <li key={x.id}>{x.title}{x.detached && <span className="badge connecting"> נערך אצלכם</span>}{!x.enabled && <span className="badge stopped"> מושבת</span>}</li>)}
             {shown.length === 0 && <li className="hint">אין תוצאות לסינון.</li>}
           </ul>
+        </details>
+      )}
+    </section>
+  );
+}
+
+interface FireType { code: string; name: string; group: string; subtypes: number; requirements: number }
+interface FireReport { at: string; trigger: 'manual' | 'schedule'; total: number; types: number; chosen: number; created: number; updated: number; unchanged: number; removed: number; detached: number; skipped: boolean; failed: { title: string; error: string }[] }
+interface FireState {
+  settings: { enabled: boolean; audience: Audience; refreshDays: number; selection: string[]; catalog: FireType[] | null; catalogAt: string | null; lastReport: FireReport | null };
+  attribution: string; dataset: string; running: boolean; imported: { id: string; title: string; code: string; detached: boolean; enabled: boolean; chunks: number }[];
+}
+
+/** Stage 4: fire-safety requirements for a business licence, by business type. */
+function Fire() {
+  const [st, setSt] = useState<FireState | null>(null);
+  const [form, setForm] = useState<{ enabled: boolean; audience: Audience; refreshDays: number; picked: Set<string> } | null>(null);
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [q, setQ] = useState('');
+  const load = async () => {
+    const s = await api<FireState>('GET', '/kb/gov/fire').catch(() => null);
+    if (!s) return;
+    setSt(s);
+    setForm((f) => f ?? { enabled: s.settings.enabled, audience: s.settings.audience, refreshDays: s.settings.refreshDays, picked: new Set(s.settings.selection) });
+  };
+  usePoll(load, st?.running ? 3000 : 15000, [st?.running]);
+  const groups = useMemo(() => {
+    const m = new Map<string, FireType[]>();
+    for (const t of st?.settings.catalog ?? []) if (!q || `${t.name} ${t.code}`.includes(q.trim())) m.set(t.group, [...(m.get(t.group) ?? []), t]);
+    return [...m.entries()];
+  }, [st, q]);
+  if (!st || !form) return null;
+  const cat = st.settings.catalog;
+  const chosenReq = (cat ?? []).filter((t) => form.picked.has(t.code)).reduce((a, t) => a + t.requirements, 0);
+  const body = () => ({ enabled: form.enabled, audience: form.audience, refreshDays: form.refreshDays, selection: [...form.picked] });
+  const act = async (fn: () => Promise<unknown>, ok: string) => {
+    setMsg(null); setBusy(true);
+    try { await fn(); setMsg({ ok: true, text: ok }); await load(); } catch (e) { setMsg({ ok: false, text: errText(e instanceof ApiError ? e.code : 'generic') }); } finally { setBusy(false); }
+  };
+  const toggle = (code: string) => setForm({ ...form, picked: new Set(form.picked.has(code) ? [...form.picked].filter((x) => x !== code) : [...form.picked, code]) });
+  const r = st.settings.lastReport;
+  return (
+    <section className="card" aria-labelledby="fire-h">
+      <h2 id="fire-h">דרישות כבאות לרישוי עסקים</h2>
+      <p className="hint">
+        דרישות בטיחות האש של הרשות הארצית לכבאות והצלה לקבלת רישיון עסק או חידושו (data.gov.il), לפי סוג העסק וגודלו. בחרו רק את סוגי העסקים שרלוונטיים לכם: כל הסוגים יחד הם כ־22,000 דרישות.
+        על כל עסק חלות הדרישות שהיו בתוקף במועד הרישוי או חידושו.{' '}
+        <a href={st.dataset} target="_blank" rel="noopener noreferrer">המאגר במקור<span className="sr-only"> (נפתח בחלון חדש)</span></a>
+      </p>
+      {!cat ? (
+        <div>
+          <p>כדי לבחור סוגי עסקים צריך קודם לטעון את הרשימה מהמקור (כחצי דקה).</p>
+          <button className="primary" disabled={busy || st.running} onClick={() => act(async () => { await api('PUT', '/kb/gov/fire', body()); await api('POST', '/kb/gov/fire/sync'); }, 'טעינת הרשימה התחילה.')}>{st.running ? 'טוען…' : 'טעינת סוגי העסקים מהמקור'}</button>
+        </div>
+      ) : (
+        <>
+          <label className="gov-check"><input type="checkbox" checked={form.enabled} onChange={(e) => setForm({ ...form, enabled: e.target.checked })} /> עדכון אוטומטי</label>
+          <div className="row" style={{ alignItems: 'flex-end', flexWrap: 'wrap' }}>
+            <div className="field">
+              <label htmlFor="fire-aud">מי משתמש בתוכן</label>
+              <select id="fire-aud" value={form.audience} onChange={(e) => setForm({ ...form, audience: e.target.value as Audience })}>
+                {(['staff', 'both', 'bot'] as const).map((a) => <option key={a} value={a}>{AUD[a]}</option>)}
+              </select>
+            </div>
+            <div className="field" style={{ maxWidth: 160 }}>
+              <label htmlFor="fire-days">עדכון כל (ימים)</label>
+              <input id="fire-days" type="number" min={1} max={90} value={form.refreshDays} onChange={(e) => setForm({ ...form, refreshDays: Math.max(1, Math.min(90, Number(e.target.value) || 30)) })} />
+            </div>
+          </div>
+          <fieldset>
+            <legend>סוגי עסקים ({form.picked.size} נבחרו, {chosenReq.toLocaleString('he-IL')} דרישות)</legend>
+            <div className="row" style={{ flexWrap: 'wrap' }}>
+              <div className="field" style={{ maxWidth: 320 }}>
+                <label htmlFor="fire-q">סינון</label>
+                <input id="fire-q" value={q} onChange={(e) => setQ(e.target.value)} />
+              </div>
+              <button type="button" onClick={() => setForm({ ...form, picked: new Set() })}>ניקוי הבחירה</button>
+            </div>
+            {chosenReq > 8000 && <p className="error">נבחרו הרבה דרישות. המאגר מוגבל ל־30,000 קטעים בסך הכול, ותשובות לשאלות אחרות עלולות להיפגע. מומלץ לצמצם.</p>}
+            {groups.map(([g, list]) => (
+              <details key={g} open={!!q || list.some((t) => form.picked.has(t.code))}>
+                <summary>{g} ({list.filter((t) => form.picked.has(t.code)).length}/{list.length})</summary>
+                <ul className="gov-list">
+                  {list.map((t) => <li key={t.code}><label><input type="checkbox" checked={form.picked.has(t.code)} onChange={() => toggle(t.code)} /> {t.code} – {t.name} <span className="hint">({t.subtypes} תת־סוגים, {t.requirements} דרישות)</span></label></li>)}
+                </ul>
+              </details>
+            ))}
+            {groups.length === 0 && <p className="hint">אין תוצאות לסינון.</p>}
+          </fieldset>
+          <div className="row">
+            <button className="primary" disabled={busy} onClick={() => act(() => api('PUT', '/kb/gov/fire', body()), 'ההגדרות נשמרו.')}>שמירה</button>
+            <button disabled={busy || st.running} onClick={() => act(async () => { await api('PUT', '/kb/gov/fire', body()); await api('POST', '/kb/gov/fire/sync'); }, 'הייבוא התחיל.')}>{st.running ? 'מייבא…' : 'שמירה וייבוא עכשיו'}</button>
+          </div>
+        </>
+      )}
+      <p role="status" aria-live="polite" className={msg?.ok ? 'ok' : 'error'}>{st.running ? 'הייבוא רץ ברקע…' : msg?.text}</p>
+      {r && (
+        <p>
+          ייבוא אחרון: {date(r.at)} ({r.trigger === 'manual' ? 'ידני' : 'אוטומטי'}): {r.skipped ? 'המאגר במקור לא השתנה.' : `${r.total.toLocaleString('he-IL')} דרישות ב־${r.types} סוגי עסקים במקור; ${r.chosen} סוגים נבחרו; נוספו ${r.created}, עודכנו ${r.updated}, ללא שינוי ${r.unchanged}${r.removed ? `, הוסרו ${r.removed}` : ''}${r.detached ? `, ${r.detached} נערכו אצלכם` : ''}.`}
+          {r.failed.length > 0 && <span className="error"> שגיאה: {r.failed.map((f) => ERR[f.error] ?? f.error).join(', ')}</span>}
+        </p>
+      )}
+      {st.imported.length > 0 && (
+        <details>
+          <summary>מה יובא ({st.imported.length} תת־סוגים)</summary>
+          <ul className="gov-list">{st.imported.map((x) => <li key={x.id}>{x.title} <span className="hint">({x.chunks} דרישות)</span>{x.detached && <span className="badge connecting"> נערך אצלכם</span>}</li>)}</ul>
         </details>
       )}
     </section>

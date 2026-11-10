@@ -186,6 +186,8 @@ check('kb: official standards offer the recommended safety words', (await page.i
 check('kb: official standards are staff-only by default', (await page.inputValue('#std-aud')) === 'staff');
 await page.click('section[aria-labelledby="std-h"] button.primary');
 await page.waitForSelector('section[aria-labelledby="std-h"] p.ok:has-text("ההגדרות נשמרו")');
+await page.waitForSelector('#fire-h');
+check('kb: fire licensing requirements start with loading the business types (nothing imported by default)', await page.isVisible('section[aria-labelledby="fire-h"] button:has-text("טעינת סוגי העסקים מהמקור")'));
 await axe('kb: laws and regulations');
 await page.click('button.chip:has-text("מקורות")');
 await page.click('button:has-text("שאלה ותשובה")');

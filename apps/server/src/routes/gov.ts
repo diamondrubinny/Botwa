@@ -6,13 +6,15 @@ import type { Db } from '../db.js';
 import { type GovImporter, validTitle } from '../kb/gov/importer.js';
 import { ATTRIBUTION, STANDARDS_ATTRIBUTION } from '../kb/gov/notes.js';
 import { DEFAULT_KEYWORDS, STANDARDS_DATASET_URL, type StandardsImporter } from '../kb/gov/standards.js';
+import { FIRE_DATASET_URL, type FireImporter } from '../kb/gov/fire.js';
+import { FIRE_ATTRIBUTION } from '../kb/gov/notes.js';
 import { DEFAULT_TITLES } from '../kb/gov/wikisource.js';
 
 /**
  * Automatic import of laws and regulations on safety at work into the knowledge base (stage 1: the Open Law Book on Wikisource).
  * Only staff who manage the knowledge base may change it or start an import; every change is audited.
  */
-export function govRoutes(app: FastifyInstance, db: Db, gov: GovImporter, std: StandardsImporter) {
+export function govRoutes(app: FastifyInstance, db: Db, gov: GovImporter, std: StandardsImporter, fire: FireImporter) {
   const manage = requireAuth(db, 'kb.manage');
 
   app.get('/kb/gov', { preHandler: manage }, async () => ({
@@ -89,6 +91,34 @@ export function govRoutes(app: FastifyInstance, db: Db, gov: GovImporter, std: S
     if (std.isRunning()) return reply.code(202).send({ started: false, running: true });
     void std.sync('manual', req.user!.id).catch((err) => req.log.error({ err }, 'standards import failed'));
     await audit(db, { actorId: req.user!.id, action: 'kb.gov.standards.sync', ip: req.ip });
+    return reply.code(202).send({ started: true, running: true });
+  });
+
+  // ---- stage 4: fire-safety requirements for business licensing (data.gov.il) ----
+  app.get('/kb/gov/fire', { preHandler: manage }, async () => ({
+    settings: await fire.settings(), attribution: FIRE_ATTRIBUTION, dataset: FIRE_DATASET_URL, running: fire.isRunning(), imported: await fire.imported(),
+  }));
+
+  app.put('/kb/gov/fire', { preHandler: manage, config: { rateLimit: { max: 30, timeWindow: '1 minute' } } }, async (req, reply) => {
+    const b = z.object({
+      enabled: z.boolean(),
+      audience: z.enum(['bot', 'staff', 'both']),
+      refreshDays: z.number().int().min(1).max(90),
+      selection: z.array(z.string().regex(/^\d{1,2}\.\d{2}$/)).max(150),   // business type numbers of the licensing order ("1.01")
+    }).safeParse(req.body);
+    if (!b.success) return reply.code(400).send({ error: 'bad_request' });
+    const selection = [...new Set(b.data.selection)];
+    await db.query(`UPDATE gov_sources SET enabled = $1, audience = $2, refresh_days = $3, selection = $4, updated_at = now() WHERE key = 'fire'`, [b.data.enabled, b.data.audience, b.data.refreshDays, selection]);
+    await db.query(`UPDATE kb_sources SET audience = $1 WHERE origin = 'gov:fire' AND NOT detached`, [b.data.audience]);
+    await audit(db, { actorId: req.user!.id, action: 'kb.gov.fire.update', ip: req.ip, meta: { enabled: b.data.enabled, audience: b.data.audience, types: selection.length } });
+    return { ok: true };
+  });
+
+  // Import now (also loads the list of business types the first time). A few seconds to a minute: about 22,000 rows in pages.
+  app.post('/kb/gov/fire/sync', { preHandler: manage, config: { rateLimit: { max: 6, timeWindow: '10 minutes' } } }, async (req, reply) => {
+    if (fire.isRunning()) return reply.code(202).send({ started: false, running: true });
+    void fire.sync('manual', req.user!.id).catch((err) => req.log.error({ err }, 'fire requirements import failed'));
+    await audit(db, { actorId: req.user!.id, action: 'kb.gov.fire.sync', ip: req.ip });
     return reply.code(202).send({ started: true, running: true });
   });
 }
