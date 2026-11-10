@@ -229,15 +229,23 @@ unset ADMIN_PASSWORD
 DOM="$(grep '^DOMAIN=' .env | cut -d= -f2-)"
 if [ -x scripts/smoke.sh ]; then DOMAIN="$DOM" bash scripts/smoke.sh || warn "Some smoke checks failed (HTTPS may need a minute after DNS is ready) - re-run: DOMAIN=$DOM ./scripts/smoke.sh"; fi
 
-KEY="$(grep '^ENCRYPTION_KEY=' .env | cut -d= -f2-)"
+# The key is shown once, when it was just created. An update keeps the same key: printing it again would only leave it in
+# terminal scroll-back, logs and screenshots.
+if [ "$EXISTING" = 1 ]; then
+  KEY_MSG="  ENCRYPTION_KEY unchanged (kept in $(pwd)/.env). It is not shown again; make sure it is in your password manager."
+else
+  KEY="$(grep '^ENCRYPTION_KEY=' .env | cut -d= -f2-)"
+  KEY_MSG="${b}${r}SAVE THIS NOW (password manager, NOT only on this server):${n}
+  ENCRYPTION_KEY=$KEY
+  Without it, linked WhatsApp/Telegram sessions and backups cannot be decrypted."
+  unset KEY
+fi
 cat <<MSG
 
 ${b}Installation finished.${n}
   Open:  https://$DOM      (log in as ${ADMIN_EMAIL:-your admin}; you will be asked to set up 2-step verification)
 
-${b}${r}SAVE THIS NOW (password manager, NOT only on this server):${n}
-  ENCRYPTION_KEY=$KEY
-  Without it, linked WhatsApp/Telegram sessions and backups cannot be decrypted.
+$KEY_MSG
 
 Next: Channels -> New channel -> "Link / start" -> scan the QR from the phone.
 Updates:  ./scripts/update.sh        Backups: Settings -> Backups (panel)

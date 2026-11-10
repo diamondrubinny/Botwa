@@ -9,7 +9,15 @@ bad() { printf 'FAIL  %s\n' "$1"; fail=1; }
 chk() { local name="$1"; shift; if "$@" >/dev/null 2>&1; then ok "$name"; else bad "$name"; fi; }
 
 hdrs="$(curl -sSI --max-time 15 "https://$DOMAIN/" 2>&1)"
-echo "$hdrs" | grep -qi '^HTTP/[0-9.]* 200' && ok "HTTPS serves the panel (200)" || bad "HTTPS did not return 200 (DNS / certificate / app?)"
+if echo "$hdrs" | grep -qi '^HTTP/[0-9.]* 200'; then ok "HTTPS serves the panel (200)"; else
+  bad "HTTPS did not return 200 (DNS / certificate / app?)"
+  # what this server reaches for the name, and which certificate answers there (a self-signed one = another vhost or /etc/hosts)
+  ip="$(getent hosts "$DOMAIN" | awk '{print $1; exit}')"
+  echo "      $DOMAIN resolves here to: ${ip:-nothing}$(grep -qE "^[^#]*[[:space:]]$DOMAIN([[:space:]]|$)" /etc/hosts 2>/dev/null && echo ' (set in /etc/hosts)')"
+  if command -v openssl >/dev/null 2>&1; then
+    echo | timeout 10 openssl s_client -connect "${ip:-$DOMAIN}:443" -servername "$DOMAIN" 2>/dev/null | openssl x509 -noout -subject -issuer -enddate 2>/dev/null | sed 's/^/      certificate /'
+  fi
+fi
 echo "$hdrs" | grep -qi '^strict-transport-security' && ok "HSTS header present" || bad "HSTS header missing"
 echo "$hdrs" | grep -qi '^content-security-policy' && ok "CSP header present" || bad "CSP header missing"
 curl -sS --max-time 15 "https://$DOMAIN/healthz" | grep -q '"ok":true' && ok "/healthz ok (app + database)" || bad "/healthz failed"
