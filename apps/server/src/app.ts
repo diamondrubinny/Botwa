@@ -17,6 +17,8 @@ import { backupRoutes } from './routes/backups.js';
 import { pushRoutes } from './routes/push.js';
 import { webhookRoutes } from './routes/webhooks.js';
 import { avatarRoutes } from './routes/avatars.js';
+import { Firewall } from './firewall.js';
+import { securityRoutes } from './routes/security.js';
 import { learningRoutes } from './routes/learning.js';
 import { scheduledRoutes } from './routes/scheduled.js';
 import { PushService } from './push.js';
@@ -65,6 +67,17 @@ export async function buildApp(cfg: Config, db: Db, mgr: ChannelManager, media: 
   await app.register(cookie);
   await app.register(multipart, { limits: { fileSize: media.maxBytes, files: 1, fields: 4, parts: 6 } });
   await app.register(rateLimit, { max: 300, timeWindow: '1 minute' });
+
+  // panel firewall: refused networks get nothing (before any other work); the chat widget and webhooks stay reachable
+  const fw = new Firewall(db, cfg.FIREWALL_DISABLE);
+  app.addHook('onRequest', async (req, reply) => {
+    const why = await fw.decide(req.ip, req.url);
+    if (!why) return;
+    reply.code(403).header('cache-control', 'no-store');
+    return (req.headers.accept ?? '').includes('text/html')
+      ? reply.type('text/html; charset=utf-8').send('<!doctype html><html lang="he" dir="rtl"><meta charset="utf-8"><title>הגישה חסומה</title><body style="font-family:system-ui;padding:2rem"><h1>הגישה מהרשת הזו אינה מורשית</h1><p>פנו למנהל המערכת.</p></body></html>')
+      : reply.send({ error: 'blocked_by_firewall' });
+  });
 
   const allowedOrigins = cfg.APP_ORIGIN.split(',').map((o) => o.trim().replace(/\/$/, ''));
   // CSRF defence in depth (cookie is already SameSite=Strict): mutating requests must come from our origin.
@@ -128,6 +141,7 @@ export async function buildApp(cfg: Config, db: Db, mgr: ChannelManager, media: 
   app.addHook('onClose', async () => { await kb.closeRenderer(); });
   kbRoutes(app, db, kb);
   learningRoutes(app, db, kb);
+  securityRoutes(app, db, cfg, fw, media);
   avatarRoutes(app, db, kb);
   flowRoutes(app, db, kb);
   safetyRoutes(app, db, kb);

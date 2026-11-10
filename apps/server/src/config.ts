@@ -21,6 +21,8 @@ const schema = z.object({
     .refine((v) => v.split(',').every((o) => z.string().url().safeParse(o.trim()).success), 'APP_ORIGIN must be one or more comma-separated URLs'),
   COOKIE_SECURE: bool('true'),
   TRUST_PROXY: bool('false'),
+  /** emergency switch: ignore the panel firewall (if you locked yourself out); set in .env and restart */
+  FIREWALL_DISABLE: bool('false'),
   /** how long a sign-in survives without activity (it is renewed while the panel is in use) */
   SESSION_TTL_HOURS: z.coerce.number().int().min(1).max(168).default(12),
   /** the same for "stay signed in on this device" */

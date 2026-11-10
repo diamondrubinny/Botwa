@@ -1,3 +1,4 @@
+import { sendAlert } from './alerts.js';
 import { sendDueScheduled } from './scheduled.js';
 import { buildApp } from './app.js';
 import { ChannelManager } from './channels/manager.js';
@@ -46,6 +47,8 @@ if (cfg.BACKUP_AUTO_HOUR !== undefined) {
   }, 60_000).unref();
 }
 // Retry attachments whose antivirus scan could not complete (scanner down/updating).
+// antivirus: every hour, files stored a week ago or more are checked again with the current signatures
+setInterval(() => void media.rescanClean(200).then((r) => { if (r.infected) void sendAlert(cfg, `🛡️ סריקה חוזרת מצאה ${r.infected} קבצים נגועים; הם נמחקו וסומנו.`); }).catch((err) => app.log.error({ err }, 'rescan failed')), 3600_000).unref();
 setInterval(() => void media.scanPending().catch((err) => app.log.error({ err }, 'scan retry failed')), 60_000).unref();
 
 for (const sig of ['SIGINT', 'SIGTERM'] as const) {

@@ -149,6 +149,34 @@ export class MediaService {
     return 'pending';
   }
 
+  /**
+   * Scan stored files again with the scanner's current signatures (new threats are found after a file was accepted).
+   * A file found infected now is deleted and marked, and reported. Oldest checks first; returns what happened.
+   */
+  async rescanClean(limit = 200, olderThanHours = 24 * 7): Promise<{ scanned: number; infected: number; errors: number }> {
+    const out = { scanned: 0, infected: 0, errors: 0 };
+    if (!this.cfg.CLAMAV_HOST) return out;
+    const { rows } = await this.db.query(
+      `SELECT id, storage_name FROM attachments WHERE status = 'clean' AND storage_name IS NOT NULL
+          AND (last_scanned_at IS NULL OR last_scanned_at < now() - make_interval(hours => $2)) ORDER BY last_scanned_at NULLS FIRST LIMIT $1`, [limit, olderThanHours]);
+    for (const r of rows) {
+      let buf: Buffer;
+      try { buf = await readFile(this.cleanPath(r.storage_name)); } catch { out.errors++; continue; }
+      const res = await this.scanBuffer(buf);
+      if (res.status === 'clean') { out.scanned++; await this.db.query('UPDATE attachments SET last_scanned_at = now() WHERE id = $1', [r.id]); continue; }
+      if (res.status === 'infected') {
+        out.scanned++; out.infected++;
+        await unlink(this.cleanPath(r.storage_name)).catch(() => undefined);
+        await this.db.query(`UPDATE attachments SET status = 'infected', detail = $2, storage_name = NULL, last_scanned_at = now() WHERE id = $1`, [r.id, res.detail]);
+        await audit(this.db, { action: 'media.infected_rescan', target: r.id, meta: { signature: res.detail } });
+        continue;
+      }
+      out.errors++;
+      break;   // the scanner is not answering: try again next round
+    }
+    return out;
+  }
+
   async scanPending(limit = 20): Promise<number> {
     if (!this.enabled) return 0;
     const { rows } = await this.db.query(`SELECT id FROM attachments WHERE status='pending' ORDER BY created_at LIMIT $1`, [limit]);

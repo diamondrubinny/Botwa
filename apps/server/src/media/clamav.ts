@@ -41,3 +41,20 @@ export function parseReply(raw: string): ScanResult {
   if (m) return { status: 'infected', detail: m[1]!.replace(/[^\w.\-/]/g, '').slice(0, 120) };
   return { status: 'error', detail: msg ? 'scanner_error' : 'empty_reply' };
 }
+
+/** The scanner's version and signature date, e.g. "ClamAV 1.4.1/27454/Mon Nov 10 08:30:02 2026". */
+export function clamVersion(opts: { host: string; port: number; timeoutMs?: number }): Promise<{ ok: true; engine: string; signatures: string; signatureDate: string | null } | { ok: false; detail: string }> {
+  return new Promise((resolve) => {
+    const sock = net.connect({ host: opts.host, port: opts.port });
+    let out = '', done = false;
+    const finish = (r: Parameters<typeof resolve>[0]) => { if (done) return; done = true; sock.destroy(); resolve(r); };
+    sock.setTimeout(opts.timeoutMs ?? 5000, () => finish({ ok: false, detail: 'timeout' }));
+    sock.on('error', (e: NodeJS.ErrnoException) => finish({ ok: false, detail: e.code ?? 'connection_error' }));
+    sock.on('data', (d) => { out += d.toString('utf8'); });
+    sock.on('close', () => {
+      const m = /^(ClamAV [^/]+)\/(\d+)\/(.+)$/.exec(out.replace(/\0/g, '').trim());
+      finish(m ? { ok: true, engine: m[1]!, signatures: m[2]!, signatureDate: m[3]!.trim() } : { ok: false, detail: out ? 'unexpected_reply' : 'empty_reply' });
+    });
+    sock.on('connect', () => { sock.write('zVERSION\0'); });
+  });
+}
