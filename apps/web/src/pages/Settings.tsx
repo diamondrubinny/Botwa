@@ -2,6 +2,7 @@ import { useState, type FormEvent } from 'react';
 import { api, ApiError, can, type BackupFile, type BusinessHours, type Me, type SendingCfg } from '../api';
 import { Branding } from '../components/Branding';
 import { SecurityPanel } from '../components/SecurityPanel';
+import { LegalDocs } from '../components/LegalDocs';
 import { ContactsCsv } from '../components/ContactsCsv';
 import { ForwardRules } from '../components/ForwardRules';
 import { ConfirmDialog } from '../components/ConfirmDialog';
@@ -215,6 +216,7 @@ export function Settings({ me }: { me: Me }) {
       {can(me, 'contacts.manage') && <ContactsCsv />}
       {canEdit && <ForwardRules />}
       {canEdit && <Branding />}
+      {canView && <LegalDocs canEdit={canEdit} />}
     </>
   );
 }

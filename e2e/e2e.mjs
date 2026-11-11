@@ -701,6 +701,11 @@ const overflow = await page.evaluate(() => document.documentElement.scrollWidth 
 check('no horizontal scroll at 375px', !overflow);
 await page.goto(BASE + '/#/accessibility'); await axe('a11y statement');
 await page.goto(BASE + '/#/privacy'); await axe('privacy page');
+for (const [p, name] of [['/legal/privacy', 'public privacy policy'], ['/legal/terms', 'public terms'], ['/legal/data-deletion', 'public data deletion']]) {
+  await page.goto(BASE + p);
+  check(`${name}: renders without scripts`, (await page.locator('h1').count()) === 1 && (await page.locator('script').count()) === 0);
+  await axe(name);
+}
 await page.screenshot({ path: '/tmp/botwa-e2e-shot.png', fullPage: true });
 
 // data erasure by admin (privacy request)

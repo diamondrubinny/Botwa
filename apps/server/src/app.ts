@@ -24,6 +24,7 @@ import { scheduledRoutes } from './routes/scheduled.js';
 import { PushService } from './push.js';
 import { KnowledgeBase } from './kb/service.js';
 import { kbRoutes } from './routes/kb.js';
+import { legalRoutes } from './routes/legal.js';
 import { govRoutes } from './routes/gov.js';
 import { GovImporter } from './kb/gov/importer.js';
 import { makeHttp } from './kb/gov/wikisource.js';
@@ -146,6 +147,7 @@ export async function buildApp(cfg: Config, db: Db, mgr: ChannelManager, media: 
   else if (cfg.BROWSER === 'local') kb.setRenderer(new BrowserRenderer({ path: cfg.BROWSER_PATH, noSandbox: cfg.BROWSER_NO_SANDBOX || undefined }));
   app.addHook('onClose', async () => { await kb.closeRenderer(); });
   kbRoutes(app, db, kb);
+  legalRoutes(app, db, cfg);
   const govUa = `BotwaGovImport/1.0 (self-hosted support inbox; ${cfg.GOV_IMPORT_CONTACT ?? cfg.APP_ORIGIN.split(',')[0]!.trim()})`;
   const pause = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
   const gov = new GovImporter(db, kb, { http: makeHttp(govUa), sleep: pause, gapMs: cfg.NODE_ENV === 'test' ? 0 : 1500 }, cfg.NODE_ENV === 'test' ? null : { http: makeHttp(govUa, KNESSET_HOST), sleep: pause });
