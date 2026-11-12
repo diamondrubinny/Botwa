@@ -739,3 +739,14 @@ details[open]:not(.more) > summary::before { transform: rotate(45deg) translateY
 
 /* the user card and sign-out stay visible at the bottom of the side menu however long the menu is (it scrolls above them) */
 .sidebar .side-foot { position: sticky; bottom: -1rem; z-index: 1; background: var(--surface); margin-inline: -.8rem; padding: .8rem .8rem 1rem; margin-bottom: -1rem; }
+
+/* the same person on other channels */
+.person-list li { display: flex; flex-wrap: wrap; align-items: center; gap: .35rem .5rem; padding: .35rem 0; border-bottom: 1px dashed var(--border); }
+.person-list li:last-child { border-bottom: 0; }
+.person-list .hint { flex-basis: 100%; margin: 0; }
+button.small { min-height: 36px; padding: 0 .7rem; font-size: .9rem; }
+button.linkish { min-height: 36px; padding: 0 .2rem; border: 0; background: none; color: var(--accent-text, var(--accent)); text-decoration: underline; text-underline-offset: 3px; font-weight: 600; }
+.person-sugs { margin-top: .6rem; padding: .6rem .8rem; border-radius: 12px; border: 1px solid color-mix(in srgb, var(--sun, #f5b700) 55%, var(--border)); background: color-mix(in srgb, var(--sun, #f5b700) 10%, var(--surface)); }
+.person-manual { margin-top: .6rem; }
+.person-manual summary { cursor: pointer; font-weight: 600; min-height: 36px; display: flex; align-items: center; }
+.mchip.person { background: color-mix(in srgb, var(--accent) 12%, var(--surface)); }

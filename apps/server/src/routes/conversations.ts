@@ -92,31 +92,6 @@ export function conversationRoutes(app: FastifyInstance, db: Db, mgr: ChannelMan
 
   // Same customer on other channels: contacts sharing a phone number (WhatsApp ids look like <digits>@s.whatsapp.net).
   // Only conversations the caller may access are returned.
-  app.get('/conversations/:id/related', { preHandler: any }, async (req, reply) => {
-    const p = idParam.safeParse(req.params);
-    if (!p.success) return reply.code(400).send({ error: 'bad_request' });
-    const u = req.user!;
-    if (!(await loadAccessible(db, u, p.data.id))) return reply.code(404).send({ error: 'not_found' });
-    const { rows } = await db.query(
-      `WITH me AS (
-         SELECT regexp_replace(split_part(ct.external_id, '@', 1), '\D', '', 'g') AS phone
-           FROM conversations c JOIN contacts ct ON ct.id = c.contact_id
-          WHERE c.id = $1 AND ct.external_id LIKE '%@s.whatsapp.net'
-       )
-       SELECT c.id, c.status, c.last_message_at AS "lastMessageAt", ch.label AS "channelLabel", ch.type AS "channelType",
-              ct.display_name AS "contactName", au.name AS "assignedName",
-              (SELECT COALESCE(NULLIF(m.body, ''), '[קובץ מצורף]') FROM messages m WHERE m.conversation_id = c.id ORDER BY m.created_at DESC LIMIT 1) AS "lastMessage"
-         FROM me, conversations c
-         JOIN contacts ct ON ct.id = c.contact_id JOIN channels ch ON ch.id = c.channel_id LEFT JOIN users au ON au.id = c.assigned_to
-        WHERE c.id <> $1 AND ct.external_id LIKE '%@s.whatsapp.net' AND me.phone <> ''
-          AND regexp_replace(split_part(ct.external_id, '@', 1), '\D', '', 'g') = me.phone
-          AND ($2::boolean OR c.assigned_to IS NULL OR c.assigned_to = $3)
-        ORDER BY c.last_message_at DESC LIMIT 20`,
-      [p.data.id, isManager(u), u.id],
-    );
-    return rows;
-  });
-
   app.post('/conversations/:id/read', { preHandler: any }, async (req, reply) => {
     const p = idParam.safeParse(req.params);
     if (!p.success) return reply.code(400).send({ error: 'bad_request' });
@@ -326,25 +301,34 @@ export function conversationRoutes(app: FastifyInstance, db: Db, mgr: ChannelMan
   app.get('/contacts/:id/export', { preHandler: adminOnly }, async (req, reply) => {
     const p = idParam.safeParse(req.params);
     if (!p.success) return reply.code(400).send({ error: 'bad_request' });
-    const c = await db.query('SELECT id, channel_id, external_id, display_name, profile, created_at FROM contacts WHERE id=$1', [p.data.id]);
+    const fields = 'id, channel_id, external_id, display_name, profile, claimed_phone, claimed_email, person_id, created_at';
+    const c = await db.query(`SELECT ${fields} FROM contacts WHERE id=$1`, [p.data.id]);
     if (!c.rows[0]) return reply.code(404).send({ error: 'not_found' });
-    const m = await db.query(
+    const msgs = async (contactId: string) => (await db.query(
       `SELECT m.direction, m.body, m.created_at, a.file_name AS "attachmentName", a.status AS "attachmentStatus"
          FROM messages m JOIN conversations v ON v.id = m.conversation_id LEFT JOIN attachments a ON a.message_id = m.id
         WHERE v.contact_id = $1 ORDER BY m.created_at`,
-      [p.data.id],
-    );
-    await audit(db, { actorId: req.user!.id, action: 'contact.export', target: p.data.id, ip: req.ip });
-    return { contact: c.rows[0], messages: m.rows };
+      [contactId],
+    )).rows;
+    // the same person on other channels (contacts staff linked): their data belongs in the same request
+    const linked = c.rows[0].person_id ? (await db.query(`SELECT ${fields} FROM contacts WHERE person_id = $1 AND id <> $2`, [c.rows[0].person_id, p.data.id])).rows : [];
+    await audit(db, { actorId: req.user!.id, action: 'contact.export', target: p.data.id, ip: req.ip, meta: { linked: linked.length } });
+    return { contact: c.rows[0], messages: await msgs(p.data.id), linkedContacts: await Promise.all(linked.map(async (l) => ({ contact: l, messages: await msgs(l.id) }))) };
   });
 
   app.delete('/contacts/:id', { preHandler: adminOnly }, async (req, reply) => {
     const p = idParam.safeParse(req.params);
     if (!p.success) return reply.code(400).send({ error: 'bad_request' });
-    await media.purgeFiles('v.contact_id = $1', [p.data.id]);
-    const r = await db.query('DELETE FROM contacts WHERE id=$1', [p.data.id]);
+    // ?linked=true: the same person on every linked channel too (one erasure request covers the person)
+    const withLinked = (req.query as { linked?: string }).linked === 'true';
+    const cur = (await db.query('SELECT person_id FROM contacts WHERE id = $1', [p.data.id])).rows[0];
+    if (!cur) return reply.code(404).send({ error: 'not_found' });
+    const ids: string[] = withLinked && cur.person_id ? (await db.query('SELECT id FROM contacts WHERE person_id = $1', [cur.person_id])).rows.map((r) => r.id) : [p.data.id];
+    await media.purgeFiles('v.contact_id = ANY($1::uuid[])', [ids]);
+    const r = await db.query('DELETE FROM contacts WHERE id = ANY($1::uuid[])', [ids]);
     if (!r.rowCount) return reply.code(404).send({ error: 'not_found' });
-    await audit(db, { actorId: req.user!.id, action: 'contact.erase', target: p.data.id, ip: req.ip });
-    return { ok: true };
+    if (cur.person_id && !withLinked) await db.query('UPDATE contacts SET person_id = NULL WHERE person_id = $1 AND (SELECT count(*) FROM contacts WHERE person_id = $1) = 1', [cur.person_id]);
+    await audit(db, { actorId: req.user!.id, action: 'contact.erase', target: p.data.id, ip: req.ip, meta: { contacts: ids.length } });
+    return { ok: true, erased: ids.length };
   });
 }

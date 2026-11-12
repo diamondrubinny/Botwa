@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto';
+import { SESSION_COOKIE } from './auth.js';
 import cookie from '@fastify/cookie';
 import helmet from '@fastify/helmet';
 import rateLimit from '@fastify/rate-limit';
@@ -16,6 +18,7 @@ import { roleRoutes } from './routes/roles.js';
 import { backupRoutes } from './routes/backups.js';
 import { pushRoutes } from './routes/push.js';
 import { webhookRoutes } from './routes/webhooks.js';
+import { peopleRoutes } from './routes/people.js';
 import { avatarRoutes } from './routes/avatars.js';
 import { Firewall } from './firewall.js';
 import { securityRoutes } from './routes/security.js';
@@ -54,6 +57,9 @@ import type { ChannelManager } from './channels/manager.js';
 import type { Config } from './config.js';
 import type { Db } from './db.js';
 
+/** what a real session token looks like (32 random bytes, base64url) */
+const SESSION_SHAPE = /^[A-Za-z0-9_-]{43}$/;
+
 export async function buildApp(cfg: Config, db: Db, mgr: ChannelManager, media: MediaService = new MediaService(db, cfg), webhookSender?: Sender): Promise<FastifyInstance> {
   const app = Fastify({
     logger: {
@@ -73,7 +79,24 @@ export async function buildApp(cfg: Config, db: Db, mgr: ChannelManager, media: 
   });
   await app.register(cookie);
   await app.register(multipart, { limits: { fileSize: media.maxBytes, files: 1, fields: 4, parts: 6 } });
-  await app.register(rateLimit, { max: 300, timeWindow: '1 minute' });
+  // General allowance per signed-in browser (a session cookie of the right shape), else per address. A whole office behind one
+  // address then does not share one allowance; made-up cookies cannot multiply it either: per address, at most 10x.
+  const ipCookieHits = new Map<string, { n: number; at: number }>();
+  app.addHook('onRequest', async (req, reply) => {
+    if (!SESSION_SHAPE.test(req.cookies?.[SESSION_COOKIE] ?? '')) return;
+    const now = Date.now(), cur = ipCookieHits.get(req.ip);
+    if (!cur || now - cur.at > 60_000) { if (ipCookieHits.size > 50_000) ipCookieHits.clear(); ipCookieHits.set(req.ip, { n: 1, at: now }); return; }
+    if (++cur.n > cfg.RATE_LIMIT_PER_MIN * 10) return reply.code(429).header('retry-after', '60').send({ error: 'rate_limited' });
+  });
+  await app.register(rateLimit, {
+    max: cfg.RATE_LIMIT_PER_MIN, timeWindow: '1 minute',
+    keyGenerator: (req) => {
+      // routes with their own (stricter) limit, e.g. sign-in, stay per address: a cookie must never buy a fresh allowance there
+      if ((req.routeOptions?.config as { rateLimit?: unknown } | undefined)?.rateLimit) return req.ip;
+      const sid = req.cookies?.[SESSION_COOKIE] ?? '';
+      return SESSION_SHAPE.test(sid) ? `s:${createHash('sha256').update(sid).digest('base64url').slice(0, 22)}` : req.ip;
+    },
+  });
 
   // panel firewall: refused networks get nothing (before any other work); the chat widget and webhooks stay reachable
   const fw = new Firewall(db, cfg.FIREWALL_DISABLE);
@@ -160,6 +183,7 @@ export async function buildApp(cfg: Config, db: Db, mgr: ChannelManager, media: 
   learningRoutes(app, db, kb);
   securityRoutes(app, db, cfg, fw, media);
   avatarRoutes(app, db, kb);
+  peopleRoutes(app, db);
   flowRoutes(app, db, kb);
   safetyRoutes(app, db, kb);
   brandingRoutes(app, db, kb);

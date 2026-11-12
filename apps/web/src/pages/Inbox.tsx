@@ -4,6 +4,7 @@ import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { api, ApiError, can, personLabel, upload, type Attachment, type Canned, type Conversation, type Me, type Message, type Note, type RelatedConv, type Tag, type UserRow } from '../api';
 import { EmojiPicker, GifPicker, motionOff, type GifItem } from '../components/Pickers';
 import { ConfirmDialog } from '../components/ConfirmDialog';
+import { PersonPanel } from '../components/PersonPanel';
 import { Icon } from '../components/Icon';
 import { usePoll } from '../hooks';
 import { useLive } from '../live';
@@ -81,6 +82,7 @@ export function Inbox({ me }: { me: Me }) {
   const [eraseOpen, setEraseOpen] = useState(false);
   const [msgQuery, setMsgQuery] = useState('');
   const [related, setRelated] = useState<RelatedConv[]>([]);
+  const [eraseAll, setEraseAll] = useState(false);
   const [pinned, setPinned] = useState<Conversation | null>(null);
   const [sugg, setSugg] = useState<{ sourceId: string; title: string; url: string | null; score: number; text: string }[]>([]);
   const [safety, setSafety] = useState<{ topics: string[]; hits: { topic: string; sourceId: string; title: string; reference: string | null; url: string | null; excerpt: string; instrument: string }[] }>({ topics: [], hits: [] });
@@ -369,6 +371,7 @@ export function Inbox({ me }: { me: Me }) {
                     <span className={`mchip ch-${sel.channelType}`}>{sel.channelLabel}</span>
                     <span className={`mchip${sel.assignedName ? '' : ' muted'}`}>{sel.assignedName ?? 'לא משויך'}</span>
                     {sel.status === 'closed' && <span className="mchip muted">סגורה</span>}
+                    {related.length > 0 && <span className="mchip person">עוד {related.length} {related.length === 1 ? 'ערוץ' : 'ערוצים'} של אותו אדם</span>}
                   </small>
                 </div>
               </div>
@@ -500,25 +503,15 @@ export function Inbox({ me }: { me: Me }) {
                     </form>
                   </section>
 
-                  {related.length > 0 && (
-                    <section aria-labelledby="rel-h">
-                      <h3 id="rel-h">שיחות נוספות של אותו לקוח (אותו מספר בערוצים אחרים)</h3>
-                      <ul style={{ paddingInlineStart: '1.2rem' }}>
-                        {related.map((r) => (
-                          <li key={r.id}>
-                            <button style={{ minHeight: 36 }} onClick={() => openRelated(r.id)}>{r.channelLabel}{r.contactName ? ` · ${r.contactName}` : ''}</button>{' '}
-                            <small className="hint">{r.status === 'open' ? 'פתוחה' : 'סגורה'} · {r.lastMessage ?? ''}</small>
-                          </li>
-                        ))}
-                      </ul>
-                    </section>
-                  )}
+                  <PersonPanel convId={sel.id} contactRowId={sel.contactRowId} related={related} onOpen={(id) => void openRelated(id)}
+                    onChanged={() => void api<RelatedConv[]>('GET', `/conversations/${sel.id}/related`).then(setRelated).catch(() => undefined)} />
 
                   {(canBlock || canPrivacy) && (
                     <div className="row">
                       {canBlock && !sel.blocked && <button className="danger" onClick={() => setBlockPanel(!blockPanel)} aria-expanded={blockPanel}>חסימת לקוח</button>}
                       {canPrivacy && <button onClick={() => exportContact(sel)}>ייצוא נתוני איש הקשר (JSON)</button>}
                       {canPrivacy && <button className="danger" onClick={() => setEraseOpen(true)}>מחיקת איש הקשר וכל הנתונים</button>}
+                      {canPrivacy && related.some((r) => r.reason === 'linked') && <button className="danger" onClick={() => setEraseAll(true)}>מחיקת האדם בכל הערוצים המקושרים</button>}
                     </div>
                   )}
                   {canBlock && !sel.blocked && blockPanel && (
@@ -658,6 +651,13 @@ export function Inbox({ me }: { me: Me }) {
         </section>
       </div>
 
+      <ConfirmDialog open={eraseAll} danger title="מחיקת האדם בכל הערוצים"
+        message="איש הקשר וכל אנשי הקשר המקושרים אליו בערוצים אחרים, עם כל ההודעות, ההערות והקבצים, יימחקו לצמיתות (גיבויים קיימים יישארו עד תום מחזור הגיבוי). לא ניתן לשחזר."
+        confirmLabel="מחיקה לצמיתות בכל הערוצים" onCancel={() => setEraseAll(false)}
+        onConfirm={() => {
+          const c = sel; setEraseAll(false);
+          if (c) void act(async () => { await api('DELETE', `/contacts/${c.contactRowId}?linked=true`); setSelId(null); });
+        }} />
       <ConfirmDialog open={eraseOpen} danger title="מחיקת איש קשר"
         message="איש הקשר, כל ההודעות, ההערות והקבצים שלו יימחקו לצמיתות מהמערכת (גיבויים קיימים יישארו עד תום מחזור הגיבוי). לא ניתן לשחזר."
         confirmLabel="מחיקה לצמיתות" onCancel={() => setEraseOpen(false)}

@@ -45,6 +45,8 @@ const schema = z.object({
   MEDIA_ALLOW_UNSCANNED: bool('false'), // development only: accept files without antivirus
   /** ffmpeg binary that turns GIFs into short silent MP4s, so WhatsApp plays them as animations. Empty = off (WhatsApp then gets a still picture). */
   FFMPEG_PATH: z.string().default('ffmpeg'),
+  /** general request allowance per minute, per signed-in browser (or per address before sign-in); sign-in and sending have their own, stricter limits */
+  RATE_LIMIT_PER_MIN: z.coerce.number().int().min(60).max(10_000).default(300),
   REPORT_TZ: z.string().default('Asia/Jerusalem'),
   /** Android app (android/ folder): its package and signing-certificate SHA-256 fingerprint(s), so the app opens the panel full-screen */
   ANDROID_APP_PACKAGE: z.string().regex(/^[a-zA-Z][\w]*(\.[a-zA-Z][\w]*)+$/).default('net.rubinny.botwa'),

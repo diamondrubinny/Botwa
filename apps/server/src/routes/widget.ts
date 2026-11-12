@@ -7,6 +7,7 @@ import type { Config } from '../config.js';
 import { isOpen } from '../business-hours.js';
 import { decrypt } from '../crypto.js';
 import type { Db } from '../db.js';
+import { normalizeEmail, normalizePhone } from '../contacts/identity.js';
 import { behaviorSchema, designSchema, originAllowed, socialUrl, textOn, verifyIdentity, type Behavior, type Design } from '../webchat/config.js';
 import { loadBusinessHours } from './settings.js';
 
@@ -151,6 +152,9 @@ export function widgetRoutes(app: FastifyInstance, db: Db, mgr: ChannelManager, 
     if (first && row) {
       const bits = [email && `אימייל: ${email}`, phone && `טלפון: ${phone}`, v.identity_id && `מזהה לקוח מאומת: ${v.identity_id}`, s.behavior.consentText && 'אישר את ההצהרה באתר'].filter(Boolean);
       if (bits.length) await db.query('INSERT INTO conversation_notes (conversation_id, body) VALUES ($1, $2)', [row.conversation_id, `פרטים מצ׳אט האתר: ${bits.join(' | ')}`]).catch(() => undefined);
+      // kept as typed-in (unverified) identifiers: staff are offered to link this visitor with the same person on other channels
+      const cp = normalizePhone(phone), ce = normalizeEmail(email);
+      if (cp || ce) await db.query('UPDATE contacts SET claimed_phone = COALESCE($2, claimed_phone), claimed_email = COALESCE($3, claimed_email) WHERE id = (SELECT contact_id FROM conversations WHERE id = $1)', [row.conversation_id, cp, ce]).catch(() => undefined);
     }
     return { ok: true, seq: row ? Number(row.seq) : undefined };
   });

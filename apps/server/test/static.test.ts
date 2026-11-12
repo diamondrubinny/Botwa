@@ -21,7 +21,7 @@ beforeAll(async () => {
   writeFileSync(path.join(os.tmpdir(), 'secret-outside-root.txt'), 'TOP SECRET');
   const cfg = loadConfig({
     NODE_ENV: 'test', DATABASE_URL: DB_URL, ENCRYPTION_KEY: randomBytes(32).toString('base64'), APP_ORIGIN: 'https://panel.test',
-    COOKIE_SECURE: 'false', WEB_DIST: root,
+    COOKIE_SECURE: 'false', WEB_DIST: root, FIREWALL_DISABLE: 'true',   // this file tests file serving, not the firewall (whose settings other files may have left in the shared database)
   });
   app = await buildApp(cfg, db, new ChannelManager(db, cfg));
 });

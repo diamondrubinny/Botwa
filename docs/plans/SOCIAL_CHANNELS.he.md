@@ -1,6 +1,6 @@
 # תוכנית: רשתות חברתיות, אימייל, SMS ואפשרויות נוספות
 
-סטטוס: **אושרה.** בוצעו שלב A (קישורים בווידג'ט) ושלב B (Messenger ו-Instagram, ראו `docs/MESSENGER_INSTAGRAM.he.md`).
+סטטוס: **אושרה.** בוצעו שלב A (קישורים בווידג'ט), שלב B (Messenger ו-Instagram, ראו `docs/MESSENGER_INSTAGRAM.he.md`) ושלב C (איש קשר מאוחד).
 
 ## מה נבחר
 - **ערוצים חדשים:**

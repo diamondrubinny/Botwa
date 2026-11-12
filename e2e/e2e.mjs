@@ -587,9 +587,9 @@ await page.waitForSelector('.msg:has-text("צריך עזרה")');
 check('in-conversation search narrows messages', true);
 await page.fill('#msgq', '');
 await page.waitForSelector('.msg:has-text("היי, צריך עזרה")');
-await page.waitForSelector('#rel-h');
-check('related conversation (same phone, other channel) listed', await page.isVisible('#rel-h ~ ul >> text=ערוץ שני'));
-await page.click('#rel-h ~ ul button');
+await page.waitForSelector('.person-list .mchip:has-text("אותו מספר ווצאפ")');
+check('related conversation (same phone, other channel) listed', await page.isVisible('.person-list >> text=ערוץ שני'));
+await page.click('.person-list button.linkish');
 await page.waitForSelector('.chat-pane h2:has-text("לקוח משני")');
 check('opening related conversation works', true);
 await page.click('.conv-list button:has-text("יוסי לקוח")');
@@ -632,6 +632,23 @@ await page.fill('#note', 'לקוח חשוב'); await page.click('button:has-text
 await page.waitForSelector('#notes-h ~ ul li:has-text("לקוח חשוב")');
 check('internal note added', true);
 await axe('inbox with notes + canned');
+// one person across channels: link this WhatsApp customer with the website visitor by hand, see it, undo it
+{
+  const chId = psql("SELECT channel_id FROM contacts WHERE display_name='יוסי לקוח'");
+  psql(`WITH c AS (INSERT INTO contacts (channel_id, external_id, display_name) VALUES ('${chId}', '972500000999@s.whatsapp.net', 'רונית לבדיקה') RETURNING id) INSERT INTO conversations (channel_id, contact_id) SELECT '${chId}', id FROM c`);
+}
+await page.click('summary:has-text("קישור ידני לאיש קשר אחר")');
+await page.fill('input[id^="ps-"]', 'רונית');
+await page.waitForSelector('ul[aria-label="תוצאות חיפוש"] li', { timeout: 8000 }).catch(() => undefined);
+await page.click('ul[aria-label="תוצאות חיפוש"] li >> button:has-text("קישור")');
+await page.click('dialog[open] button:has-text("קישור")');
+await page.waitForSelector('.person-list .mchip:has-text("קושר בידי הצוות")', { timeout: 8000 }).catch(() => undefined);
+check('contacts linked by hand appear as the same person', await page.isVisible('.person-list .mchip:has-text("קושר בידי הצוות")') && await page.isVisible('.head-meta .mchip.person'));
+await axe('inbox: same person on other channels');
+await page.click('.person-list button:has-text("ביטול קישור")');
+await page.click('dialog[open] button:has-text("ביטול הקישור")');
+await page.waitForSelector('text=הקישור בוטל', { timeout: 8000 }).catch(() => undefined);
+check('a link can be undone', await page.isVisible('text=הקישור בוטל') && !(await page.isVisible('.person-list .mchip:has-text("קושר בידי הצוות")')));
 check('waiting time shown in list', await page.isVisible('.conv-list >> text=ממתין'));
 await openMore();
 await page.selectOption('#addtag', { label: 'VIP' });
@@ -792,7 +809,7 @@ await page.click('button:has-text("מחיקת איש הקשר וכל הנתונ�
 await axe('erase confirm dialog');
 await page.click('dialog[open] button:has-text("מחיקה לצמיתות")');
 await page.waitForFunction(() => !document.body.innerText.includes('יוסי לקוח'), null, { timeout: 15000 });
-check('contact erased: its conversation and files gone, other customer untouched', psql('SELECT count(*) FROM conversations') === '1' && psql('SELECT count(*) FROM attachments') === '0');
+check('contact erased: its conversation and files gone, other customers untouched', psql("SELECT count(*) FROM contacts WHERE display_name = 'יוסי לקוח'") === '0' && psql("SELECT count(*) FROM conversations c JOIN contacts ct ON ct.id = c.contact_id WHERE ct.display_name IN ('לקוח משני', 'רונית לבדיקה')") === '2' && psql('SELECT count(*) FROM attachments') === '0');
 
 
 // ============ passkeys (virtual authenticator = a real WebAuthn ceremony in Chromium) ============

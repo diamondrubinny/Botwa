@@ -84,5 +84,7 @@ describe('public legal pages (for Meta and the public)', () => {
     expect(put.statusCode).toBe(200);
     expect((await app.inject({ method: 'GET', url: '/settings/legal', remoteAddress: '203.0.113.9', headers: { cookie: cookies.adm! } })).statusCode).toBe(403);   // the panel is closed to outsiders
     expect((await app.inject({ method: 'GET', url: '/legal/privacy', remoteAddress: '203.0.113.9' })).statusCode).toBe(200);                                     // the policy is not
+    // leave the shared test database as found: a firewall left on would refuse later test files' requests
+    await db.query(`DELETE FROM settings WHERE key = 'firewall'`);
   });
 });
