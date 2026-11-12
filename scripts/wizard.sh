@@ -24,11 +24,15 @@ port_busy() { # port_busy N  -> exit 0 if something listens on that TCP port (an
 }
 pick_port() { local p; for p in $(seq 3000 3040); do port_busy "$p" || { echo "$p"; return; }; done; die "No free port between 3000 and 3040 for Botwa"; }
 
+# Throw away keystrokes typed or pasted before a question appears (e.g. the Enter after a pasted command),
+# so they never answer it by accident.
+flush_input() { [ -t 0 ] || return 0; local _junk; while read -r -t 0.05 -n 4096 _junk 2>/dev/null; do :; done; }
+
 # ask VAR "Prompt" "default" [validator-regex] [error]   (non-interactive: takes WZ_<VAR>)
 ask() {
   local var="$1" prompt="$2" def="${3:-}" re="${4:-.*}" err="${5:-Invalid value}" val ev="WZ_$1"
   while true; do
-    if [ -n "$NI" ]; then val="${!ev:-$def}"; else read -rp "  $prompt${def:+ [$def]}: " val; val="${val:-$def}"; fi
+    if [ -n "$NI" ]; then val="${!ev:-$def}"; else flush_input; read -rp "  $prompt${def:+ [$def]}: " val; val="${val:-$def}"; fi
     if [[ "$val" =~ $re ]]; then printf -v "$var" '%s' "$val"; return; fi
     [ -n "$NI" ] && die "$err ($var='$val')"
     warn "$err"
@@ -36,13 +40,13 @@ ask() {
 }
 yesno() { # yesno VAR "Prompt" default(y|n)
   local var="$1" prompt="$2" def="$3" val ev="WZ_$1"
-  if [ -n "$NI" ]; then val="${!ev:-$def}"; else read -rp "  $prompt [$def]: " val; val="${val:-$def}"; fi
+  if [ -n "$NI" ]; then val="${!ev:-$def}"; else flush_input; read -rp "  $prompt [$def]: " val; val="${val:-$def}"; fi
   [[ "$val" =~ ^[Yy] ]] && printf -v "$var" y || printf -v "$var" n
 }
 secret() { # secret VAR "Prompt" minlen
   local var="$1" prompt="$2" min="$3" a c ev="WZ_$1"
   while true; do
-    if [ -n "$NI" ]; then a="${!ev:-}"; c="$a"; else read -rsp "  $prompt: " a; echo; read -rsp "  Repeat: " c; echo; fi
+    if [ -n "$NI" ]; then a="${!ev:-}"; c="$a"; else flush_input; read -rsp "  $prompt: " a; echo; read -rsp "  Repeat: " c; echo; fi
     if [ "$a" = "$c" ] && [ "${#a}" -ge "$min" ]; then printf -v "$var" '%s' "$a"; return; fi
     [ -n "$NI" ] && die "$var too short or mismatch"
     warn "Passwords must match and be at least $min characters"
@@ -149,11 +153,17 @@ if [ "$EXISTING" = 1 ]; then
     fi
   fi
   if [ -z "${ADMIN_EMAIL:-}" ]; then
-    yesno MKADMIN "Create the first administrator now?" "y"
+    # an existing install (update) normally has its administrators already: default to "no"
+    yesno MKADMIN "Create another administrator now? (not needed for an update)" "n"
     if [ "$MKADMIN" = y ]; then
-      ask ADMIN_EMAIL "Admin e-mail" "" '^[^@[:space:]]+@[^@[:space:]]+\.[^@[:space:]]+$' "Enter a valid e-mail"
-      ask ADMIN_NAME "Admin display name" "Admin" '^.{1,100}$' "1-100 characters"
-      secret ADMIN_PASSWORD "Admin password (min 12 chars; MFA will be required at first login)" 12
+      # "n" or "skip" here still backs out, in case the question was answered by accident
+      ask ADMIN_EMAIL "Admin e-mail (or n to skip)" "" '^([^@[:space:]]+@[^@[:space:]]+\.[^@[:space:]]+|[Nn]|[Nn]o|skip)$' "Enter a valid e-mail, or n to skip"
+      if [[ "$ADMIN_EMAIL" =~ ^([Nn]|[Nn]o|skip)$ ]]; then
+        ADMIN_EMAIL=""; ok "No new administrator"
+      else
+        ask ADMIN_NAME "Admin display name" "Admin" '^.{1,100}$' "1-100 characters"
+        secret ADMIN_PASSWORD "Admin password (min 12 chars; MFA will be required at first login)" 12
+      fi
     fi
   fi
 fi
