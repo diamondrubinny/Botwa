@@ -1,3 +1,4 @@
+import { EmptyState } from '../components/Illustration';
 import { useState } from 'react';
 import { api } from '../api';
 import { usePoll } from '../hooks';
@@ -124,7 +125,7 @@ export function Reports() {
               <caption className="sr-only">ביצועי נציגים בתקופה שנבחרה</caption>
               <thead><tr><th scope="col">נציג</th><th scope="col">הודעות שנשלחו</th><th scope="col">שיחות</th><th scope="col">זמן תגובה ממוצע</th><th scope="col">זמן תגובה חציוני</th></tr></thead>
               <tbody>
-                {data.agents.length === 0 && <tr><td colSpan={5}>אין נתונים.</td></tr>}
+                {data.agents.length === 0 && <tr><td colSpan={5}><EmptyState art="chart" title="אין עדיין נתונים לתקופה" size={150}>כשנציגים יענו ללקוחות, יופיעו כאן ההודעות וזמני התגובה שלהם.</EmptyState></td></tr>}
                 {data.agents.map((a) => (
                   <tr key={a.userId}><th scope="row">{a.name}</th><td>{a.messagesSent}</td><td>{a.conversations}</td><td>{fmtDuration(a.avgFirstResponseSeconds)}</td><td>{fmtDuration(a.medianFirstResponseSeconds)}</td></tr>
                 ))}

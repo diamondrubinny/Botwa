@@ -1,3 +1,4 @@
+import { Illustration } from '../components/Illustration';
 import { startAuthentication, browserSupportsWebAuthn } from '@simplewebauthn/browser';
 import { useState, type FormEvent } from 'react';
 import { api, ApiError } from '../api';
@@ -58,6 +59,7 @@ export function Login({ onDone }: { onDone: () => void }) {
     <div className="login-page">
       <div style={{ position: 'fixed', top: '.6rem', insetInlineStart: '.6rem' }}><ThemeMenu align="start" /></div>
       <main className="login" id="main">
+        <Illustration name="welcome" size={220} />
         <div className="brand">{brand.hasLogo ? <img className="brand-logo" src={logoSrc(brand)} alt="" /> : <span className="brand-mark"><Icon name="chat" /></span>}<h1 tabIndex={-1}>{brand.appName === 'Botwa' ? t.appName : brand.appName}</h1></div>
         <form className="card" onSubmit={submit} noValidate>
           {passkeys && (

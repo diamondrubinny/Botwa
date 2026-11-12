@@ -1,3 +1,4 @@
+import { EmptyState } from '../components/Illustration';
 import { avatarTone } from '../components/Avatar';
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { api, ApiError, can, personLabel, upload, type Attachment, type Canned, type Conversation, type Me, type Message, type Note, type RelatedConv, type Tag, type UserRow } from '../api';
@@ -294,7 +295,9 @@ export function Inbox({ me }: { me: Me }) {
             <label className="row" style={{ fontWeight: 400 }}><input type="checkbox" style={{ width: 'auto', minHeight: 'auto' }} checked={lp.waitingOnly} onChange={(e) => setPref({ waitingOnly: e.target.checked })} /> רק שממתינות לתשובה שלנו</label>
             {advActive && <button type="button" onClick={() => setPref({ sort: 'recent', channel: '', unreadOnly: false, waitingOnly: false })}>ניקוי הסינון המתקדם</button>}
           </details>
-          {view.length === 0 ? <p className="empty">{convs.length === 0 ? 'אין שיחות להצגה.' : 'אין שיחות שמתאימות לסינון המתקדם.'}</p> : (
+          {view.length === 0 ? (convs.length === 0
+            ? <EmptyState art="inbox" title="אין שיחות להצגה" size={170}>כשלקוח יכתוב בווצאפ, בטלגרם או בצ׳אט באתר, השיחה תופיע כאן.</EmptyState>
+            : <EmptyState art="search" title="אין שיחות שמתאימות לסינון המתקדם" size={150}>נסו לשנות או לנקות את הסינון.</EmptyState>) : (
             <ul className="conv-list">
               {view.map((c) => {
                 const w = waitLabel(c.waitingSince, sla);
@@ -324,7 +327,7 @@ export function Inbox({ me }: { me: Me }) {
         </section>
 
         <section className="card chat-pane" aria-label="שיחה">
-          {!sel ? <p className="empty">בחרו שיחה מהרשימה.</p> : (
+          {!sel ? <EmptyState art="pick" title="בחרו שיחה מהרשימה">ההודעות, פרטי הפונה והפעולות יופיעו כאן.</EmptyState> : (
             <>
               <div className="chat-head">
                 <button className="icon-btn back" onClick={() => setSelId(null)} aria-label="חזרה לרשימה"><Icon name="back" /></button>

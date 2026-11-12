@@ -1,3 +1,4 @@
+import { EmptyState } from '../components/Illustration';
 import { BotLearning } from '../components/BotLearning';
 import { GovSources } from '../components/GovSources';
 import { useEffect, useRef, useState, type FormEvent } from 'react';
@@ -89,7 +90,9 @@ function Sources() {
           <caption className="sr-only">מקורות המידע במאגר</caption>
           <thead><tr><th scope="col">שם</th><th scope="col">סוג</th><th scope="col">מצב</th><th scope="col">קהל</th><th scope="col">שימושים</th><th scope="col">פעולות</th></tr></thead>
           <tbody>
-            {shown.length === 0 && <tr><td colSpan={6}>אין עדיין מקורות. התחילו בשאלה ותשובה או בהעלאת מסמך.</td></tr>}
+            {shown.length === 0 && <tr><td colSpan={6}>{list.length === 0
+              ? <EmptyState art="knowledge" title="אין עדיין מקורות">התחילו בשאלה ותשובה או בהעלאת מסמך, והבוט והנציגים יוכלו לענות מהם.</EmptyState>
+              : <EmptyState art="search" title="אין מקורות בשם הזה" size={150}>נסו מילה אחרת בסינון.</EmptyState>}</td></tr>}
             {shown.map((s) => (
               <tr key={s.id}>
                 <th scope="row">
@@ -314,7 +317,7 @@ function Playground() {
       {res && (
         <div role="status">
           <p><strong className={res.wouldAnswer ? 'ok' : 'error'}>{res.wouldAnswer ? 'הבוט היה עונה.' : 'הבוט לא היה עונה (אין התאמה מספיק טובה).'}</strong> סף נוכחי: {Math.round(res.minScore * 100)}%.</p>
-          {res.hits.length === 0 && <p>לא נמצאו תוצאות.</p>}
+          {res.hits.length === 0 && <EmptyState art="search" title="לא נמצאו תוצאות" size={150}>נסו ניסוח אחר, או הוסיפו את התשובה למאגר.</EmptyState>}
           <ol>{res.hits.map((h) => (
             <li key={h.sourceId}>
               <strong>{h.title}</strong> · {Math.round(h.score * 100)}% · {h.matched}/{h.tokens} מילים{h.exact ? ' · התאמה מדויקת' : ''}{h.cos ? ` · משמעות ${Math.round((h.sem ?? 0) * 100)}%` : ''}

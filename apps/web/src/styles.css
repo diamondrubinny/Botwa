@@ -595,3 +595,26 @@ hr { border: 0; border-top: 1px solid var(--border); margin: 1.25rem 0; }
 
 /* mixed-direction text: each message lays out by its own language (English in a Hebrew panel, numbers, e-mail addresses) */
 .msg-text { text-align: start; unicode-bidi: plaintext; }
+
+/* ---------- Illustrations (components/Illustration.tsx): coloured by these classes, so they follow the palette and dark mode ---------- */
+.illustration { display: block; max-width: 100%; height: auto; }
+.illustration .il-accent { fill: var(--accent); } .illustration .il-accent-s { stroke: var(--accent); }
+.illustration .il-soft { fill: color-mix(in srgb, var(--accent) 18%, var(--surface)); }
+.illustration .il-card { fill: var(--surface); stroke: var(--border); stroke-width: 2; }
+.illustration .il-line-f { fill: color-mix(in srgb, var(--muted) 30%, var(--surface)); }
+.illustration .il-line-s { stroke: color-mix(in srgb, var(--muted) 45%, var(--surface)); }
+.illustration .il-on { fill: var(--on-accent); } .illustration .il-on-s { stroke: var(--on-accent); }
+.illustration .il-ok-s { stroke: var(--ok); }
+.illustration .il-shadow { fill: color-mix(in srgb, var(--accent) 12%, transparent); }
+.illustration .il-sun { fill: #ffd84d; } .illustration .il-mint { fill: #8fe3c4; } .illustration .il-sky { fill: #7cc8f5; } .illustration .il-peach { fill: #ffad80; }
+.illustration .il-sparkle { fill: #ffc93c; }
+:root[data-theme='dark'] .illustration .il-sun { fill: #e6bc2e; } :root[data-theme='dark'] .illustration .il-mint { fill: #3fbf95; }
+:root[data-theme='dark'] .illustration .il-sky { fill: #3f9bd1; } :root[data-theme='dark'] .illustration .il-peach { fill: #e08452; }
+:root[data-contrast='high'] .illustration { display: none; }   /* pictures add nothing there; the text says it all */
+
+.empty-state { display: flex; flex-direction: column; align-items: center; text-align: center; gap: .35rem; padding: 1.5rem 1rem; margin: auto; max-width: 30rem; }
+.empty-state .illustration { margin-bottom: .4rem; }
+.empty-state .empty-title { margin: 0; font-size: 1.1rem; font-weight: 800; }
+.empty-state .hint { margin: 0 0 .5rem; }
+@media (prefers-reduced-motion: no-preference) { :root:not([data-motion='off']) .empty-state .illustration { animation: float 5s ease-in-out infinite; } @keyframes float { 50% { transform: translateY(-5px); } } }
+.login .illustration { margin: 0 auto 1rem; }

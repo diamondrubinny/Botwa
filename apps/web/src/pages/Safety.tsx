@@ -1,3 +1,4 @@
+import { EmptyState } from '../components/Illustration';
 import { useEffect, useState, type FormEvent } from 'react';
 import { api, ApiError, can, personLabel, type Me } from '../api';
 import { errText } from '../strings';
@@ -112,7 +113,8 @@ export function Safety({ me }: { me: Me }) {
           </form>
           {res && (
             <div role="status">
-              <p>{res.total === 0 ? 'לא נמצאו סעיפים או תשובות מתאימים. נסו ניסוח אחר, או בחרו "כל הנושאים".' : `נמצאו ${res.total} תוצאות, מקובצות לפי מקור. התוצאות הראשונות הן המתאימות ביותר.`}</p>
+              {res.total === 0 && <EmptyState art="safety" title="לא נמצאו סעיפים מתאימים" size={150}>נסו ניסוח אחר, או בחרו "כל הנושאים".</EmptyState>}
+              {res.total > 0 && <p>{res.total === 0 ? 'לא נמצאו סעיפים או תשובות מתאימים. נסו ניסוח אחר, או בחרו "כל הנושאים".' : `נמצאו ${res.total} תוצאות, מקובצות לפי מקור. התוצאות הראשונות הן המתאימות ביותר.`}</p>}
               <Groups groups={res.groups} />
             </div>
           )}

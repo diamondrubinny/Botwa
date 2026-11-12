@@ -1,3 +1,4 @@
+import { EmptyState } from '../components/Illustration';
 import { useState, type FormEvent } from 'react';
 import { api, ApiError, can, type Canned as CannedT, type CannedVar, type Me, type Tag } from '../api';
 import { usePoll } from '../hooks';
@@ -72,7 +73,9 @@ export function CannedReplies({ me }: { me: Me }) {
             </div>
           </li>
         ))}
-        {shown.length === 0 && <li>{list.length === 0 ? 'אין תשובות מוכנות.' : 'לא נמצאו תשובות.'}</li>}
+        {shown.length === 0 && <li>{list.length === 0
+          ? <EmptyState art="canned" title="אין תשובות מוכנות">תשובה שכותבים פעם אחת ושולחים בלחיצה (או בהקלדת / בשיחה).</EmptyState>
+          : <EmptyState art="search" title="לא נמצאו תשובות" size={150}>נסו מילה אחרת.</EmptyState>}</li>}
       </ul>
       <form className="card" onSubmit={add}>
         <h2>{editId ? 'עריכת תשובה' : 'תשובה חדשה'}</h2>

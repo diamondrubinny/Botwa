@@ -1,3 +1,4 @@
+import { EmptyState } from '../components/Illustration';
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { api, ApiError, can, type Channel, type ChannelHealth, type Me } from '../api';
 import { ConfirmDialog } from '../components/ConfirmDialog';
@@ -140,7 +141,7 @@ export function Channels({ me }: { me: Me }) {
             {linking === ch.id && <LinkPanel channel={ch} onClose={() => setLinking(null)} />}
           </li>
         ))}
-        {list.length === 0 && <li>אין עדיין ערוצים.</li>}
+        {list.length === 0 && <li><EmptyState art="channels" title="אין עדיין ערוצים">חברו ווצאפ, טלגרם או צ׳אט לאתר בטופס "ערוץ חדש".</EmptyState></li>}
       </ul>
 
       {isAdmin && (
