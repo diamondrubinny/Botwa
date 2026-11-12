@@ -1,4 +1,4 @@
-import { EmptyState } from '../components/Illustration';
+import { EmptyState, PageTitle } from '../components/Illustration';
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { api, ApiError, can, type Channel, type ChannelHealth, type Me } from '../api';
 import { ConfirmDialog } from '../components/ConfirmDialog';
@@ -51,7 +51,7 @@ export function Channels({ me }: { me: Me }) {
 
   return (
     <>
-      <h1 tabIndex={-1}>ערוצים</h1>
+      <PageTitle art="channels" title="ערוצים" />
       <p role="alert" className="error">{msg}</p>
       <section className="card" aria-labelledby="health-h">
         <h2 id="health-h">בריאות ערוצים והגנה מחסימה</h2>

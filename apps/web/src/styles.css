@@ -618,3 +618,39 @@ hr { border: 0; border-top: 1px solid var(--border); margin: 1.25rem 0; }
 .empty-state .hint { margin: 0 0 .5rem; }
 @media (prefers-reduced-motion: no-preference) { :root:not([data-motion='off']) .empty-state .illustration { animation: float 5s ease-in-out infinite; } @keyframes float { 50% { transform: translateY(-5px); } } }
 .login .illustration { margin: 0 auto 1rem; }
+
+/* page title with its illustration */
+.page-head { display: flex; align-items: center; justify-content: space-between; gap: 1rem; margin-bottom: .6rem; animation: rise .28s var(--ease) backwards; }
+.page-head-text { min-width: 0; }
+.page-head h1 { font-size: clamp(1.6rem, 1.2rem + 1.2vw, 2.15rem); font-weight: 800; letter-spacing: -.015em; line-height: 1.2; margin: 0 0 .25rem; }
+.page-head .illustration { flex: none; width: 150px; height: auto; margin-block: -.6rem -.4rem; }
+.page-head + .hint { font-size: 1rem; max-width: 70ch; margin-top: 0; }
+@media (max-width: 700px) { .page-head .illustration { display: none; } }
+
+/* ---------- status messages: a clear banner with a mark (the words still say it; the mark is hidden from screen readers) ---------- */
+p[role='status'].ok:not(:empty), p[role='status'].error:not(:empty), p[role='alert'].error:not(:empty) {
+  display: flex; align-items: flex-start; gap: .55rem; padding: .6rem .85rem; border-radius: 12px; font-weight: 600; line-height: 1.45;
+}
+p[role='status'].ok:not(:empty) { background: color-mix(in srgb, var(--ok) 10%, var(--surface)); color: var(--ok); border: 1px solid color-mix(in srgb, var(--ok) 35%, transparent); }
+p[role='status'].error:not(:empty), p[role='alert'].error:not(:empty) { background: color-mix(in srgb, var(--danger) 8%, var(--surface)); color: var(--danger); border: 1px solid color-mix(in srgb, var(--danger) 35%, transparent); }
+p[role='status'].ok:not(:empty)::before, p[role='status'].error:not(:empty)::before, p[role='alert'].error:not(:empty)::before {
+  flex: none; width: 1.3em; height: 1.3em; border-radius: 50%; display: inline-grid; place-items: center; font-size: .85em; font-weight: 800; color: var(--surface);
+}
+p[role='status'].ok:not(:empty)::before { content: '✓' / ''; background: var(--ok); }
+p[role='status'].error:not(:empty)::before, p[role='alert'].error:not(:empty)::before { content: '!' / ''; background: var(--danger); }
+@media (prefers-reduced-motion: no-preference) { :root:not([data-motion='off']) p[role='status'].ok:not(:empty) { animation: rise .25s var(--ease) backwards; } }
+
+/* ---------- expandable sections: one chevron that turns, instead of the browser's triangle ---------- */
+details > summary { list-style: none; }
+details > summary::-webkit-details-marker { display: none; }
+details:not(.more) > summary::before { content: ''; display: inline-block; width: .5em; height: .5em; margin-inline-end: .55em; border: solid currentColor; border-width: 0 2px 2px 0; transform: rotate(135deg) translateY(-1px); transition: transform .15s var(--ease); vertical-align: middle; opacity: .75; }
+[dir='ltr'] details:not(.more) > summary::before { transform: rotate(-45deg); }
+details[open]:not(.more) > summary::before { transform: rotate(45deg) translateY(-1px); }
+
+/* ---------- conversation list ---------- */
+.conv-item { border-radius: 12px; border-bottom: 0; margin: 2px 4px; width: calc(100% - 8px); }
+.conv-list > li + li { border-top: 1px solid color-mix(in srgb, var(--border) 60%, transparent); }
+.conv-item[aria-current='true'] { box-shadow: inset -4px 0 0 var(--accent); }        /* the mark sits at the start of the line: right in Hebrew */
+[dir='ltr'] .conv-item[aria-current='true'] { box-shadow: inset 4px 0 0 var(--accent); }
+.conv-item .unread { box-shadow: 0 4px 10px -4px var(--accent); }
+.conv-name { font-size: 1rem; }

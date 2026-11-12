@@ -53,3 +53,14 @@ form.composer textarea { flex: 1; resize: none; max-height: 110px; min-height: 4
 form.composer textarea { text-align: start; unicode-bidi: plaintext; }
 .field input[dir=ltr] { text-align: left; }
 [dir=rtl] .field input[dir=ltr]::placeholder { text-align: right; }
+
+/* welcome picture (drawn for Botwa): the bot in the chat's own colour */
+.hello { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 6px 0 2px; }
+.hello-art { display: block; }
+.hello-art .a-c { fill: var(--c); } .hello-art .a-cs { stroke: var(--c); }
+.hello-art .a-face { fill: var(--bg); } .hello-art .a-mouth { stroke: var(--on); } .hello-art .a-shadow { fill: color-mix(in srgb, var(--c) 14%, transparent); }
+.hello-art .a-sun { fill: #ffd84d; } .hello-art .a-mint { fill: #8fe3c4; } .hello-art .a-peach { fill: #ffad80; }
+.hello-art .a-line { stroke: color-mix(in srgb, var(--muted) 55%, transparent); }
+.pre .hello { margin-bottom: 8px; }
+@media (max-height: 520px) { .hello-art { display: none; } }
+@media (prefers-color-scheme: dark) { .hello-art .a-sun { fill: #e6bc2e; } .hello-art .a-mint { fill: #3fbf95; } .hello-art .a-peach { fill: #e08452; } }

@@ -1,4 +1,4 @@
-import { EmptyState } from '../components/Illustration';
+import { EmptyState, PageTitle } from '../components/Illustration';
 import { useEffect, useState, type FormEvent } from 'react';
 import { api, ApiError, can, personLabel, type Me } from '../api';
 import { errText } from '../strings';
@@ -82,7 +82,7 @@ export function Safety({ me }: { me: Me }) {
 
   return (
     <>
-      <h1 tabIndex={-1}>לוח בטיחות</h1>
+      <PageTitle art="safety" title="לוח בטיחות" />
       <p className="hint" role="note">התשובות הן ציטוטים מהחוקים, התקנות והתשובות שנטענו למערכת, עם סימוכין. הלוח אינו מנסח מחדש ואינו ייעוץ משפטי: יש לוודא תמיד מול הנוסח המחייב.</p>
       <div className="field" style={{ maxWidth: 360 }}>
         <label htmlFor="sf-cat">נושא</label>

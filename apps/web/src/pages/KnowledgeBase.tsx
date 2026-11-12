@@ -1,4 +1,4 @@
-import { EmptyState } from '../components/Illustration';
+import { EmptyState, PageTitle } from '../components/Illustration';
 import { BotLearning } from '../components/BotLearning';
 import { GovSources } from '../components/GovSources';
 import { useEffect, useRef, useState, type FormEvent } from 'react';
@@ -33,7 +33,7 @@ export function KnowledgeBase() {
   const [tab, setTab] = useState<Tab>('sources');
   return (
     <>
-      <h1 tabIndex={-1}>מאגר ידע</h1>
+      <PageTitle art="knowledge" title="מאגר ידע" />
       <p className="hint">מסמכים, קישורים ושאלות ותשובות שהבוט והנציגים משתמשים בהם. החיפוש מתבצע בשרת שלכם בלבד, בלי בינה מלאכותית ובלי שליחת מידע החוצה.</p>
       <div className="chips" role="group" aria-label="חלקי המאגר">
         {TABS.map(([k, l]) => <button key={k} className="chip" aria-pressed={tab === k} onClick={() => setTab(k)}>{l}</button>)}

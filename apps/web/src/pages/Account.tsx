@@ -1,3 +1,4 @@
+import { PageTitle } from '../components/Illustration';
 import QRCode from 'qrcode';
 import { useState, type FormEvent } from 'react';
 import { startRegistration, browserSupportsWebAuthn } from '@simplewebauthn/browser';
@@ -78,7 +79,7 @@ export function Account({ me, onChanged }: { me: Me; onChanged: () => void }) {
 
   return (
     <>
-      <h1 tabIndex={-1}>החשבון שלי</h1>
+      <PageTitle art="team" title="החשבון שלי" />
       <p>{me.name} · {me.email} · {me.roleName}{me.username ? <> · שם משתמש: <bdi dir="ltr">@{me.username}</bdi></> : null}</p>
       <section className="card" aria-labelledby="av-h">
         <h2 id="av-h">תמונת פרופיל</h2>

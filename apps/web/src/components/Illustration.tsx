@@ -5,7 +5,7 @@ import type { ReactNode } from 'react';
  * Flat shapes coloured through CSS classes (.il-*), so they follow the palette and the dark theme. Always decorative:
  * the text next to them carries the meaning, so they are hidden from screen readers.
  */
-export type IllustrationName = 'inbox' | 'pick' | 'search' | 'knowledge' | 'channels' | 'canned' | 'safety' | 'welcome' | 'done' | 'chart';
+export type IllustrationName = 'inbox' | 'pick' | 'search' | 'knowledge' | 'channels' | 'canned' | 'safety' | 'welcome' | 'done' | 'chart' | 'team' | 'settings' | 'flow';
 
 const ART: Record<IllustrationName, ReactNode> = {
   // an empty tray with two chat bubbles floating above it
@@ -104,7 +104,7 @@ const ART: Record<IllustrationName, ReactNode> = {
       <circle className="il-peach" cx="120" cy="36" r="8" />
       <rect className="il-card" x="88" y="74" width="64" height="36" rx="16" />
       <circle className="il-accent" cx="106" cy="92" r="6" /><circle className="il-accent" cx="134" cy="92" r="6" />
-      <path className="il-accent-s" d="M108 120q12 8 24 0" fill="none" strokeWidth="5" strokeLinecap="round" />
+      <path className="il-on-s" d="M108 120q12 8 24 0" fill="none" strokeWidth="5" strokeLinecap="round" />
       <path className="il-line-s" d="M38 46h30M172 38h30" strokeWidth="5" strokeLinecap="round" />
     </>
   ),
@@ -130,11 +130,57 @@ const ART: Record<IllustrationName, ReactNode> = {
       <rect className="il-accent" x="152" y="44" width="18" height="72" rx="4" />
     </>
   ),
+  // three people side by side, the middle one in front
+  team: (
+    <>
+      <ellipse className="il-shadow" cx="120" cy="140" rx="84" ry="8" />
+      <circle className="il-sky" cx="70" cy="62" r="16" /><path className="il-sky" d="M42 122c0-20 12-34 28-34s28 14 28 34z" />
+      <circle className="il-mint" cx="170" cy="62" r="16" /><path className="il-mint" d="M142 122c0-20 12-34 28-34s28 14 28 34z" />
+      <circle className="il-peach" cx="120" cy="52" r="20" /><path className="il-accent" d="M84 132c0-26 16-44 36-44s36 18 36 44z" />
+      <path className="il-sparkle" d="M196 26l3 8 8 3-8 3-3 8-3-8-8-3 8-3z" />
+    </>
+  ),
+  // two meshing gears and a slider
+  settings: (
+    <>
+      <ellipse className="il-shadow" cx="120" cy="140" rx="74" ry="8" />
+      <circle className="il-accent" cx="98" cy="72" r="34" /><circle className="il-card" cx="98" cy="72" r="13" />
+      <path className="il-accent" d="M92 28h12l2 12h-16zM92 116h12l2-12h-16zM54 66v12l12 2v-16zM142 66v12l-12 2v-16z" />
+      <circle className="il-sun" cx="160" cy="98" r="22" /><circle className="il-card" cx="160" cy="98" r="8" />
+      <path className="il-sun" d="M156 70h8l1 9h-10zM156 126h8l1-9h-10zM132 94v8l9 1v-10zM188 94v8l-9 1v-10z" />
+      <rect className="il-line-f" x="58" y="124" width="70" height="6" rx="3" /><circle className="il-mint" cx="104" cy="127" r="8" />
+    </>
+  ),
+  // a small flow: start, a question, two branches
+  flow: (
+    <>
+      <ellipse className="il-shadow" cx="120" cy="142" rx="84" ry="7" />
+      <path className="il-line-s" d="M150 46h-30M120 46v24M120 70H82v22M120 70h38v22" fill="none" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round" />
+      <rect className="il-mint" x="150" y="32" width="56" height="28" rx="10" />
+      <rect className="il-accent" x="96" y="30" width="48" height="32" rx="10" />
+      <rect className="il-sun" x="52" y="92" width="60" height="30" rx="10" />
+      <rect className="il-sky" x="128" y="92" width="60" height="30" rx="10" />
+      <path className="il-on-s" d="M110 46h20" strokeWidth="4" strokeLinecap="round" />
+    </>
+  ),
 };
 
 export function Illustration({ name, size = 200 }: { name: IllustrationName; size?: number }) {
   return (
     <svg className="illustration" width={size} height={Math.round(size * 2 / 3)} viewBox="0 0 240 160" aria-hidden="true" focusable="false">{ART[name]}</svg>
+  );
+}
+
+/** A page title with its picture beside it (the picture hides on narrow screens; the title stays the page's h1). */
+export function PageTitle({ art, title, children }: { art: IllustrationName; title: string; children?: ReactNode }) {
+  return (
+    <header className="page-head">
+      <div className="page-head-text">
+        <h1 tabIndex={-1}>{title}</h1>
+        {children && <p className="hint">{children}</p>}
+      </div>
+      <Illustration name={art} size={150} />
+    </header>
   );
 }
 

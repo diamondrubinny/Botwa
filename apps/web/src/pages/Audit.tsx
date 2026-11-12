@@ -1,3 +1,4 @@
+import { PageTitle } from '../components/Illustration';
 import { useEffect, useState } from 'react';
 import { api, type AuditRow } from '../api';
 
@@ -30,7 +31,7 @@ export function Audit() {
 
   return (
     <>
-      <h1 tabIndex={-1}>יומן ביקורת</h1>
+      <PageTitle art="search" title="יומן ביקורת" />
       <div className="field" style={{ maxWidth: 280 }}>
         <label htmlFor="af">סוג פעולה</label>
         <select id="af" value={filter} onChange={(e) => setFilter(e.target.value)}>

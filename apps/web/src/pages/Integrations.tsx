@@ -1,3 +1,4 @@
+import { PageTitle } from '../components/Illustration';
 import { useState, type FormEvent } from 'react';
 import { api, ApiError } from '../api';
 import { ConfirmDialog } from '../components/ConfirmDialog';
@@ -29,7 +30,7 @@ export function Integrations() {
   const [tab, setTab] = useState<'keys' | 'hooks' | 'docs'>('keys');
   return (
     <>
-      <h1 tabIndex={-1}>אינטגרציות</h1>
+      <PageTitle art="channels" title="אינטגרציות" />
       <p className="hint">חיבור מערכות חיצוניות: מפתחות API לקריאה ושליחה, ו-Webhooks שמעדכנים מערכת אחרת על אירועים. כל פעולה נרשמת ביומן הביקורת.</p>
       <div className="chips" role="group" aria-label="חלקי האינטגרציות">
         {([['keys', 'מפתחות API'], ['hooks', 'Webhooks'], ['docs', 'תיעוד']] as const).map(([k, l]) => <button key={k} className="chip" aria-pressed={tab === k} onClick={() => setTab(k)}>{l}</button>)}

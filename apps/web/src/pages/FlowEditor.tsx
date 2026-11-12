@@ -1,3 +1,4 @@
+import { PageTitle } from '../components/Illustration';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { api, ApiError, can, personLabel, type Me } from '../api';
 import { autoLayout, FlowCanvas, type CanvasNode, type Pos } from '../components/FlowCanvas';
@@ -227,7 +228,7 @@ export function FlowEditor({ me }: { me: Me }) {
 
   return (
     <>
-      <h1 tabIndex={-1}>תרשים זרימה של הבוט</h1>
+      <PageTitle art="flow" title="תרשים זרימה של הבוט" />
       <p className="hint">בונים שיחה עם הלקוח כתרשים: הודעות, תפריטים, שאלות לאיסוף פרטים, תנאים (שעות פעילות, ערוץ), מענה ממאגר הידע, הפניה לווצאפ אישי, תגיות והעברה לנציג. הבוט מבין גם ניסוח חופשי ("אני צריך משהו עם פיגומים") ולא רק מספרים.</p>
       <div className="card">
         <div className="row">

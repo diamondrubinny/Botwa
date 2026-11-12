@@ -1,3 +1,4 @@
+import { PageTitle } from '../components/Illustration';
 import { useState, type FormEvent } from 'react';
 import { api, ApiError, type Me, type RoleRow } from '../api';
 import { ConfirmDialog } from '../components/ConfirmDialog';
@@ -29,7 +30,7 @@ export function Roles({ me }: { me: Me }) {
 
   return (
     <>
-      <h1 tabIndex={-1}>תפקידים והרשאות</h1>
+      <PageTitle art="safety" title="תפקידים והרשאות" />
       <p className="hint">תפקיד הוא קבוצת הרשאות. התפקידים המובנים (מנהל, מפקח, נציג) קבועים; אפשר ליצור תפקידים משלכם. אי אפשר להעניק הרשאה שאינה בידיכם.</p>
       <p role="alert" className="error">{msg}</p>
 

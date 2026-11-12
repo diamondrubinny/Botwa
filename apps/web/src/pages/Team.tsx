@@ -1,3 +1,4 @@
+import { PageTitle } from '../components/Illustration';
 import { Avatar, AvatarEditor, AvatarGalleryAdmin } from '../components/Avatar';
 import { useRef, useState, type FormEvent } from 'react';
 import { api, ApiError, can, type Me, type RoleRow, type UserRow } from '../api';
@@ -55,7 +56,7 @@ export function Team({ me }: { me: Me }) {
 
   return (
     <>
-      <h1 tabIndex={-1}>צוות</h1>
+      <PageTitle art="team" title="צוות" />
       <p role="alert" className="error">{msg}</p>
       <div className="card" style={{ overflowX: 'auto' }}>
         <table>

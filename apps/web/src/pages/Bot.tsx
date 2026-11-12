@@ -1,3 +1,4 @@
+import { PageTitle } from '../components/Illustration';
 import { useEffect, useState, type FormEvent } from 'react';
 import { api, ApiError, can, personLabel, type Me } from '../api';
 import { usePoll } from '../hooks';
@@ -45,7 +46,7 @@ export function Bot({ me }: { me: Me }) {
 
   return (
     <>
-      <h1 tabIndex={-1}>בוט תפריט</h1>
+      <PageTitle art="welcome" title="בוט תפריט" />
       {!canEdit && <p className="banner" role="note">צפייה בלבד. רק מנהל יכול לשנות את הבוט.</p>}
       <form className="card" onSubmit={save}>
         <p className="hint">הלקוח מקבל תפריט ממוספר ועונה במספר. אם אין התאמה, או שהוא מבקש נציג, השיחה עוברת לנציג (עם הודעה פנימית, שיוך אוטומטי אם הוגדר ניתוב, ו"מחוץ לשעות" אם הוגדרו שעות פעילות). אין שימוש בשירותי AI חיצוניים.</p>

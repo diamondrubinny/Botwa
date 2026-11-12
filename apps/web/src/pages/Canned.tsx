@@ -1,4 +1,4 @@
-import { EmptyState } from '../components/Illustration';
+import { EmptyState, PageTitle } from '../components/Illustration';
 import { useState, type FormEvent } from 'react';
 import { api, ApiError, can, type Canned as CannedT, type CannedVar, type Me, type Tag } from '../api';
 import { usePoll } from '../hooks';
@@ -38,7 +38,7 @@ export function CannedReplies({ me }: { me: Me }) {
   }
   return (
     <>
-      <h1 tabIndex={-1}>תשובות מוכנות ותגיות</h1>
+      <PageTitle art="canned" title="תשובות מוכנות ותגיות" />
       <p role="alert" className="error">{msg}</p>
       {canTags && <section className="card" aria-labelledby="tags-h">
         <h2 id="tags-h">תגיות לשיחות</h2>

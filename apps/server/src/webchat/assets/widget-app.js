@@ -38,6 +38,25 @@
     return svg;
   }
 
+  // a small welcome picture (drawn for Botwa; decorative, hidden from screen readers), coloured by the chat's own colour
+  function helloArt() {
+    var NS = 'http://www.w3.org/2000/svg';
+    var svg = document.createElementNS(NS, 'svg');
+    [['class', 'hello-art'], ['width', '150'], ['height', '100'], ['viewBox', '0 0 240 160'], ['aria-hidden', 'true'], ['focusable', 'false']].forEach(function (a) { svg.setAttribute(a[0], a[1]); });
+    [
+      ['ellipse', { class: 'a-shadow', cx: 120, cy: 146, rx: 72, ry: 7 }],
+      ['rect', { class: 'a-sun', x: 26, y: 30, width: 58, height: 34, rx: 14 }], ['path', { class: 'a-sun', d: 'M70 62l10 12-2-14z' }],
+      ['rect', { class: 'a-mint', x: 160, y: 24, width: 56, height: 30, rx: 13 }], ['path', { class: 'a-mint', d: 'M170 52l-8 12 16-10z' }],
+      ['rect', { class: 'a-c', x: 74, y: 56, width: 92, height: 76, rx: 26 }],
+      ['path', { class: 'a-cs', d: 'M120 56V40', 'stroke-width': 6, 'stroke-linecap': 'round' }], ['circle', { class: 'a-peach', cx: 120, cy: 36, r: 8 }],
+      ['rect', { class: 'a-face', x: 88, y: 74, width: 64, height: 36, rx: 16 }],
+      ['circle', { class: 'a-c', cx: 106, cy: 92, r: 6 }], ['circle', { class: 'a-c', cx: 134, cy: 92, r: 6 }],
+      ['path', { class: 'a-mouth', d: 'M108 120q12 8 24 0', fill: 'none', 'stroke-width': 5, 'stroke-linecap': 'round' }],
+      ['path', { class: 'a-line', d: 'M38 46h30M172 38h30', 'stroke-width': 5, 'stroke-linecap': 'round' }]
+    ].forEach(function (d) { var e = document.createElementNS(NS, d[0]); Object.keys(d[1]).forEach(function (k) { e.setAttribute(k, String(d[1][k])); }); svg.appendChild(e); });
+    return svg;
+  }
+
   function addMessage(m) {
     if (shown[m.seq]) return; shown[m.seq] = true; after = Math.max(after, m.seq);
     var mine = m.direction === 'in';
@@ -67,7 +86,9 @@
     var kids = [head];
     if (!cfg.online) kids.push(h('div', { class: 'offline', role: 'status', text: cfg.behavior.offlineMessage }));
     els.log = h('div', { class: 'log', role: 'log', 'aria-live': 'polite', 'aria-label': L.log });
-    if (cfg.design.welcome) els.log.appendChild(h('div', { class: 'notice', text: cfg.design.welcome }));
+    var hello = h('div', { class: 'hello' }); hello.appendChild(helloArt());
+    if (cfg.design.welcome) hello.appendChild(h('div', { class: 'notice', text: cfg.design.welcome }));
+    els.log.appendChild(hello);
     var ta = h('textarea', { rows: '1', dir: 'auto', maxlength: String(cfg.behavior.maxLength), placeholder: L.msg, 'aria-label': L.msgLabel });
     var btn = h('button', { type: 'submit', class: 'send', 'aria-label': L.send });
     btn.appendChild(sendIcon());
@@ -158,6 +179,7 @@
     close.addEventListener('click', function () { parent({ type: 'botwa:close' }); });
     app.appendChild(h('header', {}, [h('div', { class: 'grow' }, [h('h1', { text: cfg.design.title }), h('p', { text: cfg.design.subtitle })]), close]));
     var form = h('form', { class: 'pre', novalidate: 'novalidate' });
+    var hi = h('div', { class: 'hello' }); hi.appendChild(helloArt()); form.appendChild(hi);
     form.appendChild(h('p', { text: cfg.design.welcome }));
     [['name', 'askName', 'text'], ['email', 'askEmail', 'email'], ['phone', 'askPhone', 'tel']].forEach(function (d) {
       var mode = b[d[1]]; if (mode === 'off') return;

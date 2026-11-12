@@ -1,3 +1,4 @@
+import { PageTitle } from '../components/Illustration';
 import { useState, type FormEvent } from 'react';
 import { api, ApiError, can, type BackupFile, type BusinessHours, type Me, type SendingCfg } from '../api';
 import { Branding } from '../components/Branding';
@@ -61,7 +62,7 @@ export function Settings({ me }: { me: Me }) {
 
   return (
     <>
-      <h1 tabIndex={-1}>הגדרות</h1>
+      <PageTitle art="settings" title="הגדרות" />
       {canView && !canEdit && <p className="banner" role="note">צפייה בלבד. אין לכם הרשאה לשנות הגדרות.</p>}
       {canView && h && (
       <fieldset disabled={!canEdit} style={{ border: 0, padding: 0, margin: 0 }}>

@@ -1,4 +1,4 @@
-import { EmptyState } from '../components/Illustration';
+import { EmptyState, PageTitle } from '../components/Illustration';
 import { useState } from 'react';
 import { api } from '../api';
 import { usePoll } from '../hooks';
@@ -76,7 +76,7 @@ export function Reports() {
   const unit = bucket === 'day' ? 'יום' : bucket === 'week' ? 'שבוע (תחילת שבוע)' : 'חודש (תחילת חודש)';
   return (
     <>
-      <h1 tabIndex={-1}>דוחות</h1>
+      <PageTitle art="chart" title="דוחות" />
       <div className="toolbar">
       <div className="field">
         <label htmlFor="days">תקופה</label>
