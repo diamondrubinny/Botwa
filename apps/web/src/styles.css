@@ -678,3 +678,29 @@ details[open]:not(.more) > summary::before { transform: rotate(45deg) translateY
   .chips.tabs .chip[aria-pressed='true']:hover { background: var(--surface); border-color: var(--border); }
 }
 :root[data-contrast='high'] .chips.tabs .chip[aria-pressed='true'] { background: #ffeb3b; color: #000; }
+
+/* ---------- inbox: conversation items with small tags (the words carry the meaning; colours only help scanning) ---------- */
+.conv-meta { gap: .3rem; margin-top: .35rem; align-items: center; }
+.mchip { display: inline-flex; align-items: center; gap: .3rem; padding: .05rem .5rem; border-radius: 999px; font-size: .74rem; font-weight: 600; line-height: 1.6; background: var(--surface-2); color: var(--text); border: 1px solid color-mix(in srgb, var(--border) 70%, transparent); max-width: 12rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mchip.muted { color: var(--muted); background: transparent; }
+.mchip.ch-whatsapp, .mchip.ch-whatsapp_cloud { background: #dcfce7; color: #166534; border-color: #b7efc9; }
+.mchip.ch-telegram { background: #dbf1ff; color: #075985; border-color: #b9e3fb; }
+.mchip.ch-webchat { background: #ede9fe; color: #5b21b6; border-color: #d9cff7; }
+.mchip.bot { background: #fff4cc; color: #6b4e00; border-color: #f5d76e; }
+.mchip.tag { background: var(--accent-soft); color: var(--text); border-color: transparent; }
+.mchip.wait { color: var(--muted); background: transparent; }
+.mchip.wait.late { background: color-mix(in srgb, var(--danger) 10%, var(--surface)); color: var(--danger); border-color: color-mix(in srgb, var(--danger) 35%, transparent); }
+.mchip.wait.late::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: currentColor; flex: none; }
+:root[data-theme='dark'] .mchip.ch-whatsapp, :root[data-theme='dark'] .mchip.ch-whatsapp_cloud { background: #12402a; color: #c6f6d5; border-color: #1d5c3c; }
+:root[data-theme='dark'] .mchip.ch-telegram { background: #0c3550; color: #c8ebff; border-color: #154d72; }
+:root[data-theme='dark'] .mchip.ch-webchat { background: #2e1f66; color: #ddd3ff; border-color: #3f2d85; }
+:root[data-theme='dark'] .mchip.bot { background: #3a3113; color: #fde68a; border-color: #6b5a1e; }
+:root[data-contrast='high'] .mchip { background: #000 !important; color: #fff !important; border-color: #fff !important; }
+/* unread: bold name and preview, and a soft tint so it stands out in a long list */
+.conv-item.is-unread .conv-name { font-weight: 800; }
+.conv-item.is-unread .conv-last { color: var(--text); font-weight: 600; }
+.conv-item.is-unread:not([aria-current='true']) { background: color-mix(in srgb, var(--accent) 5%, transparent); }
+/* conversation header: the same tags under the name */
+.chat-head .head-meta { display: flex; flex-wrap: wrap; margin-top: .25rem; color: inherit; }
+.chat-head .avatar { width: 44px; height: 44px; font-size: 1.1rem; }
+.chat-head h2 { font-size: 1.15rem; }

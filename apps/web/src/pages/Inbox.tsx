@@ -303,7 +303,7 @@ export function Inbox({ me }: { me: Me }) {
                 const w = waitLabel(c.waitingSince, sla);
                 return (
                   <li key={c.id}>
-                    <button className="conv-item" aria-current={c.id === selId} onClick={() => open(c)}>
+                    <button className={`conv-item${c.unreadCount > 0 ? ' is-unread' : ''}`} aria-current={c.id === selId} onClick={() => open(c)}>
                       <span className={`avatar ${avatarTone(nameOf(c))}`} aria-hidden="true">{nameOf(c).slice(0, 1)}</span>
                       <span className="conv-body">
                         <span className="conv-top"><span className="conv-name">{nameOf(c)}</span><span className="conv-time">{shortTime(c.lastMessageAt)}</span></span>
@@ -312,10 +312,12 @@ export function Inbox({ me }: { me: Me }) {
                           {c.unreadCount > 0 && <span className="unread"><span className="sr-only">הודעות שלא נקראו: </span>{c.unreadCount}</span>}
                         </span>
                         <span className="conv-meta">
-                          <span>{c.channelLabel} · {c.assignedName ?? 'לא משויך'}</span>
-                          {c.botState === 'menu' && <span>🤖 הבוט מטפל</span>}
-                          {c.tags.length > 0 && <span>{c.tags.map((t) => t.name).join(', ')}</span>}
-                          {w && <span className={w.late ? 'late' : ''}>{w.late ? '⚠ ' : ''}{w.text}</span>}
+                          <span className={`mchip ch-${c.channelType}`}>{c.channelLabel}</span>
+                          <span className={`mchip${c.assignedName ? '' : ' muted'}`}>{c.assignedName ?? 'לא משויך'}</span>
+                          {c.botState === 'menu' && <span className="mchip bot">הבוט מטפל</span>}
+                          {c.tags.slice(0, 2).map((t) => <span key={t.id} className="mchip tag">{t.name}</span>)}
+                          {c.tags.length > 2 && <span className="mchip tag">+{c.tags.length - 2}<span className="sr-only"> תגיות נוספות</span></span>}
+                          {w && <span className={`mchip wait${w.late ? ' late' : ''}`}>{w.late && <span className="sr-only">חריגה מיעד המענה: </span>}{w.text}</span>}
                         </span>
                       </span>
                     </button>
@@ -334,7 +336,11 @@ export function Inbox({ me }: { me: Me }) {
                 <span className={`avatar ${avatarTone(nameOf(sel))}`} aria-hidden="true">{nameOf(sel).slice(0, 1)}</span>
                 <div style={{ minWidth: 0 }}>
                   <h2>{nameOf(sel)}</h2>
-                  <small>{sel.channelLabel} · {sel.assignedName ?? 'לא משויך'}{sel.status === 'closed' ? ' · סגורה' : ''}</small>
+                  <small className="conv-meta head-meta">
+                    <span className={`mchip ch-${sel.channelType}`}>{sel.channelLabel}</span>
+                    <span className={`mchip${sel.assignedName ? '' : ' muted'}`}>{sel.assignedName ?? 'לא משויך'}</span>
+                    {sel.status === 'closed' && <span className="mchip muted">סגורה</span>}
+                  </small>
                 </div>
               </div>
 
