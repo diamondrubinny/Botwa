@@ -48,7 +48,7 @@ export function ipMatches(ip: string, entries: string[]): boolean {
 }
 
 /** Paths customers' browsers and other services must always reach (the chat widget, platform webhooks, the health check). */
-const PUBLIC = [/^\/widget/, /^\/w\//, /^\/webhooks\//, /^\/healthz/, /^\/\.well-known\//, /^\/legal\//];   // /legal/: privacy policy etc. for Meta and the public
+const PUBLIC = [/^\/widget/, /^\/w\//, /^\/webhooks\//, /^\/healthz/, /^\/\.well-known\//, /^\/legal\//, /^\/branding\/(logo|bot-avatar)(\?|$)/];   // /legal/: privacy policy etc. for Meta and the public
 
 /** The panel "firewall": cached settings, the decision for one request, and a count of what was refused (for the security page). */
 export class Firewall {

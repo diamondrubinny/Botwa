@@ -4,8 +4,8 @@
   var key = decodeURIComponent((location.pathname.match(/^\/w\/([\w-]+)/) || [])[1] || '');
   var app = document.getElementById('app');
   var T = {
-    he: { sugLabel: 'שאלות נפוצות מתאימות', sugCount: ' שאלות נפוצות מתאימות. חצים למעלה ולמטה לבחירה, Enter לתשובה.', faq: 'תשובה מהמאגר', faqHint: 'לא מה שחיפשתם? כתבו לנו ונחזור אליכם.', loading: 'טוען…', send: 'שליחה', msg: 'כתבו הודעה…', msgLabel: 'ההודעה שלכם', start: 'התחלת שיחה', name: 'שם', email: 'אימייל', phone: 'טלפון', optional: ' (לא חובה)', close: 'סגירת הצ׳אט', you: 'אתם', team: 'הצוות', bot: 'הבוט', consent: 'יש לאשר כדי להמשיך.', required: 'שדה חובה', badEmail: 'כתובת אימייל לא תקינה', badPhone: 'מספר טלפון לא תקין', failed: 'השליחה נכשלה. נסו שוב.', offline: 'לא ניתן להתחבר כרגע. נסו שוב מאוחר יותר.', limit: 'שלחתם הרבה הודעות. נסו שוב בעוד רגע.', privacy: 'מדיניות הפרטיות', log: 'שיחה', newmsg: 'הודעה חדשה', social: 'אפשר גם לכתוב לנו ב:', ext: ' (נפתח מחוץ לצ׳אט)', nets: { whatsapp: 'WhatsApp', messenger: 'Messenger', instagram: 'Instagram', telegram: 'Telegram', email: 'אימייל', phone: 'טלפון' } },
-    en: { sugLabel: 'Matching common questions', sugCount: ' matching common questions. Use up and down arrows, Enter for the answer.', faq: 'Answer from our help center', faqHint: 'Not what you were looking for? Write to us and we will get back to you.', loading: 'Loading…', send: 'Send', msg: 'Type a message…', msgLabel: 'Your message', start: 'Start chat', name: 'Name', email: 'Email', phone: 'Phone', optional: ' (optional)', close: 'Close chat', you: 'You', team: 'Team', bot: 'Bot', consent: 'Please accept to continue.', required: 'Required', badEmail: 'Invalid email address', badPhone: 'Invalid phone number', failed: 'Sending failed. Please try again.', offline: 'Cannot connect right now. Please try again later.', limit: 'You are sending too fast. Try again in a moment.', privacy: 'Privacy policy', log: 'Conversation', newmsg: 'New message', social: 'You can also reach us on:', ext: ' (opens outside this chat)', nets: { whatsapp: 'WhatsApp', messenger: 'Messenger', instagram: 'Instagram', telegram: 'Telegram', email: 'Email', phone: 'Phone' } }
+    he: { sugLabel: 'שאלות נפוצות מתאימות', sugCount: ' שאלות נפוצות מתאימות. חצים למעלה ולמטה לבחירה, Enter לתשובה.', faq: 'תשובה מהמאגר', faqHint: 'לא מה שחיפשתם? כתבו לנו ונחזור אליכם.', loading: 'טוען…', send: 'שליחה', msg: 'כתבו הודעה…', msgLabel: 'ההודעה שלכם', start: 'התחלת שיחה', name: 'שם', email: 'אימייל', phone: 'טלפון', optional: ' (לא חובה)', close: 'סגירת הצ׳אט', you: 'אתם', team: 'הצוות', bot: 'הבוט', consent: 'יש לאשר כדי להמשיך.', required: 'שדה חובה', badEmail: 'כתובת אימייל לא תקינה', badPhone: 'מספר טלפון לא תקין', failed: 'השליחה נכשלה. נסו שוב.', offline: 'לא ניתן להתחבר כרגע. נסו שוב מאוחר יותר.', limit: 'שלחתם הרבה הודעות. נסו שוב בעוד רגע.', privacy: 'מדיניות הפרטיות', log: 'שיחה', newmsg: 'הודעה חדשה', social: 'אפשר גם לכתוב לנו ב:', botTag: 'בוט', ext: ' (נפתח מחוץ לצ׳אט)', nets: { whatsapp: 'WhatsApp', messenger: 'Messenger', instagram: 'Instagram', telegram: 'Telegram', email: 'אימייל', phone: 'טלפון' } },
+    en: { sugLabel: 'Matching common questions', sugCount: ' matching common questions. Use up and down arrows, Enter for the answer.', faq: 'Answer from our help center', faqHint: 'Not what you were looking for? Write to us and we will get back to you.', loading: 'Loading…', send: 'Send', msg: 'Type a message…', msgLabel: 'Your message', start: 'Start chat', name: 'Name', email: 'Email', phone: 'Phone', optional: ' (optional)', close: 'Close chat', you: 'You', team: 'Team', bot: 'Bot', consent: 'Please accept to continue.', required: 'Required', badEmail: 'Invalid email address', badPhone: 'Invalid phone number', failed: 'Sending failed. Please try again.', offline: 'Cannot connect right now. Please try again later.', limit: 'You are sending too fast. Try again in a moment.', privacy: 'Privacy policy', log: 'Conversation', newmsg: 'New message', social: 'You can also reach us on:', botTag: 'bot', ext: ' (opens outside this chat)', nets: { whatsapp: 'WhatsApp', messenger: 'Messenger', instagram: 'Instagram', telegram: 'Telegram', email: 'Email', phone: 'Phone' } }
   };
   var L = T.he, cfg = null, token = null, identity = null, after = 0, polling = false, shown = {}, started = false, formShownAt = Date.now();
   var els = {};
@@ -47,6 +47,23 @@
     return img;
   }
 
+  // the bot's identity (name + picture set by the organisation); the word "bot" is always shown with the name
+  function botName() { return cfg.bot && cfg.bot.name ? cfg.bot.name + ' · ' + L.botTag : L.bot; }
+  function botFace(size, cls) {
+    if (!cfg.bot || !cfg.bot.avatar || !/\/branding\/bot-avatar(\?v=\d+)?$/.test(cfg.bot.avatar)) return null;
+    var img = h('img', { class: cls, src: cfg.bot.avatar.replace(/^https?:\/\/[^/]+/, ''), alt: '', width: String(size), height: String(size) });
+    img.addEventListener('error', function () { img.remove(); });
+    return img;
+  }
+  /** the welcome picture: the bot's own face and name when it has one, else the drawn illustration */
+  function helloEl() {
+    var face = botFace(72, 'hello-face');
+    if (!face) return helloArt();
+    var who = h('div', { class: 'hello-who' }, [h('strong', { text: botName() })]);
+    if (cfg.bot.role) who.appendChild(h('span', { text: cfg.bot.role }));
+    return h('div', { class: 'hello-bot' }, [face, who]);
+  }
+
   function helloArt() {
     var NS = 'http://www.w3.org/2000/svg';
     var svg = document.createElementNS(NS, 'svg');
@@ -69,8 +86,12 @@
     if (shown[m.seq]) return; shown[m.seq] = true; after = Math.max(after, m.seq);
     var mine = m.direction === 'in';
     var box = h('div', { class: 'msg ' + (mine ? 'me' : 'them') });
-    var who = mine ? L.you : (m.auto ? L.bot : (m.sender || L.team));
-    box.appendChild(h('span', { class: 'who', text: who }));
+    var who = mine ? L.you : (m.auto ? botName() : (m.sender || L.team));
+    var whoEl = h('span', { class: 'who' });
+    var face = !mine && m.auto ? botFace(20, 'who-face') : null;
+    if (face) whoEl.appendChild(face);
+    whoEl.appendChild(document.createTextNode(who));
+    box.appendChild(whoEl);
     // each message takes its own direction: an English question in a Hebrew chat keeps its full stop at the end
     var body = h('div', { class: 'text', dir: 'auto' }); linkify(m.text, body); box.appendChild(body);
     els.log.appendChild(box);
@@ -108,7 +129,7 @@
     var kids = [head];
     if (!cfg.online) kids.push(h('div', { class: 'offline', role: 'status', text: cfg.behavior.offlineMessage }));
     els.log = h('div', { class: 'log', role: 'log', 'aria-live': 'polite', 'aria-label': L.log });
-    var hello = h('div', { class: 'hello' }); hello.appendChild(helloArt());
+    var hello = h('div', { class: 'hello' }); hello.appendChild(helloEl());
     if (cfg.design.welcome) hello.appendChild(h('div', { class: 'notice', text: cfg.design.welcome }));
     var soc = socialEl(); if (soc) hello.appendChild(soc);
     els.log.appendChild(hello);
@@ -202,7 +223,7 @@
     close.addEventListener('click', function () { parent({ type: 'botwa:close' }); });
     app.appendChild(h('header', {}, [logoEl(), h('div', { class: 'grow' }, [h('h1', { text: cfg.design.title }), h('p', { text: cfg.design.subtitle })]), close].filter(Boolean)));
     var form = h('form', { class: 'pre', novalidate: 'novalidate' });
-    var hi = h('div', { class: 'hello' }); hi.appendChild(helloArt()); form.appendChild(hi);
+    var hi = h('div', { class: 'hello' }); hi.appendChild(helloEl()); form.appendChild(hi);
     form.appendChild(h('p', { text: cfg.design.welcome }));
     var soc2 = socialEl(); if (soc2) form.appendChild(soc2);
     [['name', 'askName', 'text'], ['email', 'askEmail', 'email'], ['phone', 'askPhone', 'tel']].forEach(function (d) {

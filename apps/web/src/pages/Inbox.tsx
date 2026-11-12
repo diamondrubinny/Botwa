@@ -5,6 +5,7 @@ import { api, ApiError, can, personLabel, upload, type Attachment, type Canned, 
 import { EmojiPicker, GifPicker, motionOff, type GifItem } from '../components/Pickers';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { PersonPanel } from '../components/PersonPanel';
+import { botAvatarSrc, botLabel, useBrand } from '../brand';
 import { Icon } from '../components/Icon';
 import { usePoll } from '../hooks';
 import { useLive } from '../live';
@@ -83,6 +84,7 @@ export function Inbox({ me }: { me: Me }) {
   const [msgQuery, setMsgQuery] = useState('');
   const [related, setRelated] = useState<RelatedConv[]>([]);
   const [eraseAll, setEraseAll] = useState(false);
+  const brand = useBrand();
   const [pinned, setPinned] = useState<Conversation | null>(null);
   const [sugg, setSugg] = useState<{ sourceId: string; title: string; url: string | null; score: number; text: string }[]>([]);
   const [safety, setSafety] = useState<{ topics: string[]; hits: { topic: string; sourceId: string; title: string; reference: string | null; url: string | null; excerpt: string; instrument: string }[] }>({ topics: [], hits: [] });
@@ -532,7 +534,7 @@ export function Inbox({ me }: { me: Me }) {
                   <div key={m.id} className={`msg ${m.direction}${m.auto ? ' auto' : ''}`}>
                     {m.attachment && <AttachmentView a={m.attachment} />}
                     {m.body && <div className="msg-text" dir="auto">{m.body}</div>}
-                    <small>{m.direction === 'out' ? (m.auto ? 'בוט / מענה אוטומטי' : (m.senderName ?? 'צוות')) : 'לקוח'} · {fmt(m.createdAt)}</small>
+                    <small>{m.direction === 'out' && m.auto && botAvatarSrc(brand) && <img className="bot-face" src={botAvatarSrc(brand)!} alt="" width={20} height={20} />}{m.direction === 'out' ? (m.auto ? `${botLabel(brand)} / מענה אוטומטי` : (m.senderName ?? 'צוות')) : 'לקוח'} · {fmt(m.createdAt)}</small>
                   </div>
                 ))}
               </div>

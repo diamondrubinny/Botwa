@@ -8,6 +8,7 @@ import { isOpen } from '../business-hours.js';
 import { decrypt } from '../crypto.js';
 import type { Db } from '../db.js';
 import { normalizeEmail, normalizePhone } from '../contacts/identity.js';
+import { loadPersona } from './branding.js';
 import { behaviorSchema, designSchema, originAllowed, socialUrl, textOn, verifyIdentity, type Behavior, type Design } from '../webchat/config.js';
 import { loadBusinessHours } from './settings.js';
 
@@ -76,6 +77,7 @@ export function widgetRoutes(app: FastifyInstance, db: Db, mgr: ChannelManager, 
       design: s.design, textColor: text, logo: lg ? `${appOrigins[0]}/branding/logo?v=${Number(lg.v)}` : null, available: !!mgr.webchatAdapter(s.channelId)?.isActive(), online: !hours.enabled || isOpen(hours, new Date()),
       behavior: { askName: b.askName, askEmail: b.askEmail, askPhone: b.askPhone, popupText: b.popupText, popupDelaySec: b.popupDelaySec, autoOpenSec: b.autoOpenSec, consentText: b.consentText, consentLink: b.consentLink, offlineMessage: b.offlineMessage, maxLength: b.maxLength },
       social: b.socialLinks.map((l) => ({ network: l.network, url: socialUrl(l) })),
+      bot: await loadPersona(db).then((p) => ({ name: p.name, role: p.role, avatar: p.avatarV ? `${appOrigins[0]}/branding/bot-avatar?v=${p.avatarV}` : null })),
     };
   });
 

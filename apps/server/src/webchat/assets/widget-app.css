@@ -77,3 +77,9 @@ header .logo { width: 36px; height: 36px; border-radius: 50%; object-fit: cover;
 .net .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--c); flex: none; }
 .net-whatsapp .dot { background: #128c4b; } .net-messenger .dot { background: #0866ff; } .net-instagram .dot { background: #c13584; }
 .net-telegram .dot { background: #229ed9; } .net-email .dot { background: #5b5470; } .net-phone .dot { background: #0b7268; }
+/* the bot's own face and name (set by the organisation); always labelled as a bot */
+.hello-bot { display: flex; align-items: center; gap: 10px; justify-content: center; margin: 4px 0; }
+.hello-face { width: 72px; height: 72px; border-radius: 50%; object-fit: cover; border: 3px solid var(--c); background: var(--surface); }
+.hello-who { display: grid; text-align: start; line-height: 1.35; }
+.hello-who span { font-size: 13px; color: var(--muted); }
+.who-face { width: 20px; height: 20px; border-radius: 50%; object-fit: cover; vertical-align: middle; margin-inline-end: 5px; }

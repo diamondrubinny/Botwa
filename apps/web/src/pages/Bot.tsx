@@ -1,3 +1,4 @@
+import { BotPersona } from '../components/BotPersona';
 import { Loading } from '../components/Loading';
 import { PageTitle } from '../components/Illustration';
 import { useEffect, useState, type FormEvent } from 'react';
@@ -49,6 +50,7 @@ export function Bot({ me }: { me: Me }) {
     <>
       <PageTitle art="welcome" title="בוט תפריט" />
       {!canEdit && <p className="banner" role="note">צפייה בלבד. רק מנהל יכול לשנות את הבוט.</p>}
+      <BotPersona canEdit={can(me, 'settings.manage')} />
       <form className="card" onSubmit={save}>
         <p className="hint">הלקוח מקבל תפריט ממוספר ועונה במספר. אם אין התאמה, או שהוא מבקש נציג, השיחה עוברת לנציג (עם הודעה פנימית, שיוך אוטומטי אם הוגדר ניתוב, ו"מחוץ לשעות" אם הוגדרו שעות פעילות). אין שימוש בשירותי AI חיצוניים.</p>
         <fieldset disabled={!canEdit} style={{ border: 0, padding: 0, margin: 0 }}>

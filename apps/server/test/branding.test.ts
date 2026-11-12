@@ -39,7 +39,7 @@ afterAll(async () => { await mgr.stopAll(); await app.close(); await db.end(); }
 
 describe('branding API', () => {
   it('is readable without signing in, and only settings managers can change it', async () => {
-    expect((await call('GET', '/branding')).json()).toEqual({ appName: 'Botwa', color: null, hasLogo: false, v: 0 });
+    expect((await call('GET', '/branding')).json()).toEqual({ appName: 'Botwa', color: null, hasLogo: false, v: 0, bot: { name: '', role: '', avatarV: 0 } });
     expect((await call('PUT', '/branding', 'agent', { appName: 'x', color: null })).statusCode).toBe(403);
     expect((await call('PUT', '/branding', undefined, { appName: 'x', color: null })).statusCode).toBe(401);
     expect((await call('PUT', '/branding', 'admin', { appName: 'x', color: 'red' })).statusCode).toBe(400);
@@ -66,6 +66,31 @@ describe('branding API', () => {
     expect(got.rawPayload.equals(PNG)).toBe(true);
     expect(got.headers['cross-origin-resource-policy']).toBe('cross-origin');   // may show in the chat bubble on the organisation's website
     expect((await call('DELETE', '/branding/logo', 'admin')).json().hasLogo).toBe(false);
+  });
+
+  it('the bot identity: a ready preset (Betty), name rules, a public picture for the website chat, managers only', async () => {
+    expect((await call('POST', '/branding/bot/preset', 'agent', { preset: 'betty' })).statusCode).toBe(403);
+    expect((await call('POST', '/branding/bot/preset', 'admin', { preset: 'toString' })).statusCode).toBe(404);
+    expect((await call('POST', '/branding/bot/preset', 'admin', { preset: 'nope' })).statusCode).toBe(404);
+    const set = await call('POST', '/branding/bot/preset', 'admin', { preset: 'betty' });
+    expect(set.json()).toMatchObject({ name: 'בטי', role: 'הבוט של יחידת הבטיחות' });
+    expect(set.json().avatarV).toBeGreaterThan(0);
+    const pic = await call('GET', '/branding/bot-avatar');
+    expect(pic.statusCode).toBe(200);
+    expect(pic.headers['content-type']).toBe('image/jpeg');
+    expect(pic.headers['cross-origin-resource-policy']).toBe('cross-origin');
+    expect(pic.headers['content-security-policy']).toContain('sandbox');
+    expect((await call('GET', '/branding')).json().bot).toMatchObject({ name: 'בטי' });
+    expect((await db.query(`SELECT value->>'welcome' AS w FROM settings WHERE key = 'bot'`)).rows[0].w).toContain('אני בטי');   // the untouched default opening now introduces her
+    await db.query(`UPDATE settings SET value = jsonb_set(value, '{welcome}', '"שלום מהצוות"') WHERE key = 'bot'`);
+    await call('POST', '/branding/bot/preset', 'admin', { preset: 'betty' });
+    expect((await db.query(`SELECT value->>'welcome' AS w FROM settings WHERE key = 'bot'`)).rows[0].w).toBe('שלום מהצוות');           // a written one is kept
+    expect((await call('PUT', '/branding/bot', 'admin', { name: '<b>x</b>', role: '' })).json()).toEqual({ error: 'bad_bot_name' });
+    expect((await call('PUT', '/branding/bot', 'admin', { name: 'x'.repeat(31), role: '' })).statusCode).toBe(400);
+    expect((await call('PUT', '/branding/bot', 'admin', { name: 'בטי', role: 'יחידת הבטיחות, הטכניון' })).json()).toMatchObject({ role: 'יחידת הבטיחות, הטכניון' });
+    expect((await call('DELETE', '/branding/bot/avatar', 'admin')).json().avatarV).toBe(0);
+    expect((await call('GET', '/branding/bot-avatar')).statusCode).toBe(404);
+    expect((await db.query(`SELECT count(*)::int AS n FROM audit_log WHERE action LIKE 'settings.bot_%'`)).rows[0].n).toBe(4);
   });
 
   it('never fetches internal addresses for colours or a logo (SSRF)', async () => {

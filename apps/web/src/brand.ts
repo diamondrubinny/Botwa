@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 
-export interface Brand { appName: string; color: string | null; hasLogo: boolean; v: number }
+export interface BotPersona { name: string; role: string; avatarV: number }
+export interface Brand { appName: string; color: string | null; hasLogo: boolean; v: number; bot?: BotPersona }
 const DEFAULT: Brand = { appName: 'Botwa', color: null, hasLogo: false, v: 0 };
 
 let current: Brand = DEFAULT;
@@ -68,3 +69,6 @@ export function useBrand(): Brand {
   return b;
 }
 export const logoSrc = (b: Brand) => `/branding/logo?v=${b.v}`;
+/** how the bot is named everywhere: its name (if set) and always the word "בוט", so nobody takes it for a person */
+export const botLabel = (b: Brand) => (b.bot?.name ? `${b.bot.name} (בוט)` : 'בוט');
+export const botAvatarSrc = (b: Brand) => (b.bot?.avatarV ? `/branding/bot-avatar?v=${b.bot.avatarV}` : null);

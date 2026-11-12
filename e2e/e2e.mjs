@@ -179,6 +179,11 @@ await page.waitForSelector('pre:has-text("3. משלוחים")');
 await page.click('button:has-text("שמירה")');
 await page.waitForSelector('text=הבוט נשמר.');
 await axe('bot settings');
+// the bot's identity: Betty in one click; her picture and name are shown, always marked as a bot
+await page.click('button:has-text("בטי, הבוט של יחידת הבטיחות")');
+await page.waitForSelector('.persona-face img', { timeout: 15000 }).catch(() => undefined);
+check('bot identity: Betty is set with her picture and the word "בוט"', await page.isVisible('.persona-face img') && (await page.textContent('.persona-preview strong')) === 'בטי (בוט)');
+await axe('bot settings: identity');
 await page.reload();
 await page.waitForSelector('#bt2');
 check('bot settings persisted (3 items, enabled)', (await page.inputValue('#bt2')) === 'משלוחים' && (await page.isChecked('text=הפעלת הבוט')));
