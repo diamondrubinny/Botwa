@@ -99,6 +99,7 @@ export const t = {
     meta_phone_not_found: 'Meta לא מצאה את מזהה המספר עם האסימון הזה. בדקו שה-Phone number ID נכון, ושהאסימון שייך לאותו חשבון WhatsApp Business.',
     meta_permission_denied: 'לאסימון אין הרשאה למספר הזה. שייכו למשתמש המערכת את האפליקציה ואת חשבון ה-WhatsApp, וצרו אסימון עם ההרשאות הנדרשות.',
     meta_rate_limited: 'Meta מגבילה כרגע את מספר הבקשות. נסו שוב בעוד כמה דקות.',
+    webhook_needs_https: 'הכתובת של המערכת אינה HTTPS, ו-Meta מקבלת רק כתובות HTTPS.',
     comment_reply_mode_required: 'בחרו איך לענות על התגובה: בפרטי או בפומבי.',
     comment_not_found: 'לא נמצאה תגובה לענות עליה בשיחה הזו.',
     comment_hide_failed: 'Meta לא הסתירה את התגובה. ייתכן שחסרה הרשאה או שהתגובה נמחקה.',

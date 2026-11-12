@@ -45,11 +45,15 @@ describe('official WhatsApp channel', () => {
   const fakeFetch = async (url: string, init?: RequestInit): Promise<Response> => {
     calls.push({ url, init });
     if (init?.method === 'POST' && url.endsWith('/messages')) return sendResponse();
+    if (url.includes('fields=webhook_configuration')) return Response.json({ webhook_configuration: webhookConf, id: '1234567890' });
+    if (init?.method === 'POST' && /\/1234567890$/.test(url)) { routed.push(JSON.parse(init.body as string)); return Response.json({ success: true }); }
     if (url.includes('/subscribed_apps')) return init?.method === 'POST' ? subscribeResponse() : Response.json({ data: subscribedData });
     return infoResponse();
   };
   let subscribeResponse: () => Response = () => Response.json({ success: true });
   let subscribedData: unknown[] = [];
+  let webhookConf: Record<string, string> = { application: 'https://old-provider.example/hook' };
+  const routed: unknown[] = [];
   let infoResponse: () => Response = () => Response.json({ display_phone_number: '+972 50-000-0000', verified_name: 'Shop' });
   const cookies: Record<string, string> = {};
   let ip = 0;
@@ -130,12 +134,22 @@ describe('official WhatsApp channel', () => {
     // the check button: agents may not, admins get the result and whether an app is subscribed
     expect((await call('POST', `/channels/${channelId}/cloud/subscribe`, 'ag@t.io')).statusCode).toBe(403);
     subscribedData = [{ whatsapp_business_api_data: { id: '1', name: 'Botwa' } }];
-    expect((await call('POST', `/channels/${channelId}/cloud/subscribe`, 'adm@t.io')).json()).toEqual({ result: 'ok', subscribed: true });
+    const chk = (await call('POST', `/channels/${channelId}/cloud/subscribe`, 'adm@t.io')).json();
+    expect(chk).toMatchObject({ result: 'ok', subscribed: true, webhook: { effective: 'https://old-provider.example/hook', ours: `${ORIGIN}/webhooks/whatsapp/${channelId}`, matches: false } });
+    // an alternate callback URL on the number wins over the app's
+    webhookConf = { application: `${ORIGIN}/webhooks/whatsapp/${channelId}`, phone_number: 'https://other.example/x' };
+    expect((await call('POST', `/channels/${channelId}/cloud/subscribe`, 'adm@t.io')).json().webhook).toMatchObject({ effective: 'https://other.example/x', matches: false });
+    expect((await call('POST', `/channels/${channelId}/cloud/route-here`, 'ag@t.io')).statusCode).toBe(403);
+    expect((await call('POST', `/channels/${channelId}/cloud/route-here`, 'adm@t.io')).json()).toEqual({ result: 'ok' });
+    expect(routed.at(-1)).toEqual({ webhook_configuration: { override_callback_uri: `${ORIGIN}/webhooks/whatsapp/${channelId}`, verify_token: verifyToken } });
+    webhookConf = { application: `${ORIGIN}/webhooks/whatsapp/${channelId}` };
+    expect((await call('POST', `/channels/${channelId}/cloud/subscribe`, 'adm@t.io')).json().webhook).toMatchObject({ matches: true });
     subscribeResponse = () => Response.json({ error: { code: 200 } }, { status: 403 });
     subscribedData = [];
-    expect((await call('POST', `/channels/${channelId}/cloud/subscribe`, 'adm@t.io')).json()).toEqual({ result: 'meta_permission_denied', subscribed: false });
+    expect((await call('POST', `/channels/${channelId}/cloud/subscribe`, 'adm@t.io')).json()).toMatchObject({ result: 'meta_permission_denied', subscribed: false });
     subscribeResponse = () => Response.json({ success: true });
-    expect((await db.query(`SELECT 1 FROM audit_log WHERE action='channel.cloud_subscribe'`)).rowCount).toBe(2);
+    expect((await db.query(`SELECT 1 FROM audit_log WHERE action='channel.cloud_subscribe'`)).rowCount).toBe(4);
+    expect((await db.query(`SELECT 1 FROM audit_log WHERE action='channel.cloud_route_here'`)).rowCount).toBe(1);
     expect((await call('POST', `/channels/00000000-0000-4000-8000-000000000000/cloud/subscribe`, 'adm@t.io')).statusCode).toBe(404);
     expect((await call('GET', `/channels/${channelId}/cloud`, 'adm@t.io')).json().lastWebhookAt).toBeNull();
   });

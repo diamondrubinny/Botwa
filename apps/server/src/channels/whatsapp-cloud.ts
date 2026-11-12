@@ -126,6 +126,41 @@ export class WhatsAppCloudAdapter implements ChannelAdapter {
     } catch { return 'meta_unreachable'; }
   }
 
+  /**
+   * Where Meta actually delivers this number's webhooks: the app's callback URL, and alternate callback URLs set on the business
+   * account or on the number itself, which override the app's (GET /{phone-number-id}?fields=webhook_configuration, per Meta's
+   * "webhook overrides" docs; verify against the official reference). null when Meta does not say.
+   */
+  async webhookTargets(): Promise<{ application?: string; whatsapp_business_account?: string; phone_number?: string } | null> {
+    if (!this.creds) return null;
+    try {
+      const res = await this.fetchImpl(this.url(`${this.creds.phoneNumberId}?fields=webhook_configuration`), { headers: this.auth(), signal: AbortSignal.timeout(10_000) });
+      if (!res.ok) return null;
+      const j = (await res.json().catch(() => ({}))) as { webhook_configuration?: Record<string, unknown> };
+      const w = j.webhook_configuration;
+      if (!w || typeof w !== 'object') return null;
+      const pick = (k: string) => (typeof w[k] === 'string' && /^https?:\/\//.test(w[k] as string) ? (w[k] as string).slice(0, 500) : undefined);
+      return { application: pick('application'), whatsapp_business_account: pick('whatsapp_business_account'), phone_number: pick('phone_number') };
+    } catch { return null; }
+  }
+
+  /**
+   * Point this number's webhooks at `url` (an alternate callback URL on the number, which wins over any other setting).
+   * Meta verifies it at once with the GET handshake, so the verify token must be ours. Per Meta's "webhook overrides" docs; verify.
+   */
+  async routeWebhooksTo(url: string): Promise<string> {
+    if (!this.creds || !this.active) return 'channel_not_connected';
+    try {
+      const res = await this.fetchImpl(this.url(this.creds.phoneNumberId), {
+        method: 'POST', headers: { ...this.auth(), 'content-type': 'application/json' },
+        body: JSON.stringify({ webhook_configuration: { override_callback_uri: url, verify_token: this.creds.verifyToken } }), signal: AbortSignal.timeout(20_000),
+      });
+      const j = (await res.json().catch(() => ({}))) as { success?: boolean; error?: { code?: number } };
+      if (res.ok && j.success !== false) return 'ok';
+      return metaCheckError(res.status, j.error?.code);
+    } catch { return 'meta_unreachable'; }
+  }
+
   /** Is any app subscribed to the business account? null when it cannot be told (no account id, or Meta did not answer). */
   async subscribedApps(): Promise<boolean | null> {
     if (!this.creds?.wabaId) return null;

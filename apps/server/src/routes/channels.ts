@@ -118,7 +118,24 @@ export function channelRoutes(app: FastifyInstance, db: Db, mgr: ChannelManager,
     if (!a || !a.isActive()) return reply.code(409).send({ error: 'channel_not_connected' });
     const result = await a.subscribeApp();
     await audit(db, { actorId: req.user!.id, action: 'channel.cloud_subscribe', target: p.data.id, ip: req.ip, meta: { result } });
-    return { result, subscribed: await a.subscribedApps() };
+    // the address Meta really uses for this number: an alternate callback URL on the account or the number wins over the app's
+    const targets = await a.webhookTargets();
+    const effective = targets ? (targets.phone_number ?? targets.whatsapp_business_account ?? targets.application ?? null) : null;
+    const ours = cloudWebhook(p.data.id, cfg.APP_ORIGIN);
+    return { result, subscribed: await a.subscribedApps(), webhook: targets ? { ...targets, effective, ours, matches: effective === ours } : null };
+  });
+
+  // Send this number's webhooks here (Meta checks the address with the handshake before accepting it). Admin only, audited.
+  app.post('/channels/:id/cloud/route-here', { preHandler: adminOnly, config: { rateLimit: { max: 5, timeWindow: '1 minute' } } }, async (req, reply) => {
+    const p = idParam.safeParse(req.params);
+    if (!p.success || (await db.query(`SELECT 1 FROM channels WHERE id=$1 AND type='whatsapp_cloud'`, [p.data.id])).rowCount !== 1) return reply.code(404).send({ error: 'not_found' });
+    const a = mgr.cloudAdapter(p.data.id);
+    if (!a || !a.isActive()) return reply.code(409).send({ error: 'channel_not_connected' });
+    const url = cloudWebhook(p.data.id, cfg.APP_ORIGIN);
+    if (!url.startsWith('https://')) return reply.code(409).send({ error: 'webhook_needs_https' });
+    const result = await a.routeWebhooksTo(url);
+    await audit(db, { actorId: req.user!.id, action: 'channel.cloud_route_here', target: p.data.id, ip: req.ip, meta: { result } });
+    return { result };
   });
 
   app.put('/channels/:id/cloud', { preHandler: adminOnly, config: { rateLimit: { max: 10, timeWindow: '1 minute' } } }, async (req, reply) => {

@@ -485,10 +485,23 @@ function WebhookCheck({ channelId, connected, lastWebhookAt, lastAttempt, kind =
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState('');
   const [ok, setOk] = useState(false);
+  type Hook = { application?: string; whatsapp_business_account?: string; phone_number?: string; effective: string | null; ours: string; matches: boolean };
+  const [hook, setHook] = useState<Hook | null>(null);
+  const [routeMsg, setRouteMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const [confirmRoute, setConfirmRoute] = useState(false);
+  async function routeHere() {
+    setRouteMsg(null);
+    try {
+      const r = await api<{ result: string }>('POST', `/channels/${channelId}/cloud/route-here`);
+      setRouteMsg(r.result === 'ok' ? { ok: true, text: 'Meta אישרה: הודעות המספר יישלחו מעכשיו לשרת הזה. שלחו הודעת ניסיון מטלפון אחר.' } : { ok: false, text: errText(r.result) });
+      if (r.result === 'ok') void check();
+    } catch (er) { setRouteMsg({ ok: false, text: errText(er instanceof ApiError ? er.code : 'generic') }); }
+  }
   async function check() {
     setBusy(true); setMsg('');
     try {
-      const r = await api<{ result: string; subscribed: boolean | null }>('POST', `/channels/${channelId}/${kind}/subscribe`);
+      const r = await api<{ result: string; subscribed: boolean | null; webhook?: Hook | null }>('POST', `/channels/${channelId}/${kind}/subscribe`);
+      setHook(r.webhook ?? null);
       const good = r.result === 'ok' && r.subscribed !== false;
       setOk(good);
       setMsg(good ? (kind === 'meta' ? 'הדף רשום לאפליקציה. אם עדיין לא מגיעות הודעות, ודאו שבהגדרות ה-Webhook של האפליקציה מסומנים messages ו-messaging_postbacks.' : 'החשבון העסקי מחובר לאפליקציה. אם עדיין לא מגיעות הודעות, ודאו שהשדה messages מסומן ב-Subscribe בהגדרות ה-Webhook אצל Meta.') : errText(r.result === 'ok' ? 'meta_check_failed' : r.result));
@@ -512,6 +525,23 @@ function WebhookCheck({ channelId, connected, lastWebhookAt, lastAttempt, kind =
       <button type="button" onClick={() => void check()} disabled={busy || !connected} aria-describedby={connected ? undefined : `whn-${channelId}`}>חיבור ובדיקה</button>
       {!connected && <p id={`whn-${channelId}`} className="hint">זמין רק כשהערוץ מחובר.</p>}
       <p role="status" className={msg ? (ok ? 'ok' : 'error') : undefined}>{msg}</p>
+      {hook && (
+        <div className={hook.matches ? 'ok' : 'error'} role="status">
+          {hook.matches
+            ? <p><strong>Meta שולחת את הודעות המספר לשרת הזה.</strong></p>
+            : <>
+                <p><strong>{hook.effective ? 'Meta שולחת את הודעות המספר לכתובת אחרת:' : 'אצל Meta לא מוגדרת כתובת Webhook למספר הזה.'}</strong></p>
+                {hook.effective && <p dir="ltr"><code>{hook.effective}</code></p>}
+                <p className="hint">{hook.phone_number ? 'הכתובת מוגדרת על המספר עצמו (Override), למשל על ידי ספק אחר, והיא גוברת על הגדרת האפליקציה.' : hook.whatsapp_business_account ? 'הכתובת מוגדרת על החשבון העסקי (Override) וגוברת על הגדרת האפליקציה.' : 'זו הכתובת שמוגדרת באפליקציה (WhatsApp ← Configuration).'}</p>
+                <button type="button" className="primary" onClick={() => setConfirmRoute(true)}>להפנות את הודעות המספר לשרת הזה</button>
+              </>}
+        </div>
+      )}
+      {routeMsg && <p role="status" className={routeMsg.ok ? 'ok' : 'error'}>{routeMsg.text}</p>}
+      <ConfirmDialog open={confirmRoute} title="הפניית ההודעות לשרת הזה"
+        message={`Meta תשלח את הודעות המספר הזה לכתובת ${hook?.ours ?? ''} במקום ${hook?.effective ?? 'הכתובת הנוכחית'}. אם ספק אחר מקבל היום את ההודעות, הוא יפסיק לקבל אותן.`}
+        confirmLabel="הפניה לכאן" onCancel={() => setConfirmRoute(false)}
+        onConfirm={() => { setConfirmRoute(false); void routeHere(); }} />
     </section>
   );
 }
