@@ -561,6 +561,9 @@ function WebhookCheck({ channelId, connected, lastWebhookAt, lastAttempt, kind =
             {app.callbackUrl && !app.urlMatches && <p dir="ltr"><code>{app.callbackUrl}</code></p>}
             <button type="button" className="primary" onClick={() => void subscribeFields()}>רישום האפליקציה לשדה messages עם הכתובת של השרת הזה</button>
           </div>)}
+      {app && /^\d{5,32}$/.test(app.appId) && (
+        <p><a href={`https://developers.facebook.com/apps/${app.appId}/`} target="_blank" rel="noopener noreferrer">פתיחת לוח הבקרה של האפליקציה ב-Meta (App ID <span dir="ltr">{app.appId}</span>)<span className="sr-only"> (נפתח בחלון חדש)</span></a>. שם: WhatsApp ← Configuration ← Webhook fields ← messages.</p>
+      )}
       {fieldsMsg && <p role="status" className={fieldsMsg.ok ? 'ok' : 'error'}>{fieldsMsg.text}</p>}
       <ConfirmDialog open={confirmRoute} title="הפניית ההודעות לשרת הזה"
         message={`Meta תשלח את הודעות המספר הזה לכתובת ${hook?.ours ?? ''} במקום ${hook?.effective ?? 'הכתובת הנוכחית'}. אם ספק אחר מקבל היום את ההודעות, הוא יפסיק לקבל אותן.`}
