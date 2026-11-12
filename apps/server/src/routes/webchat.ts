@@ -53,6 +53,7 @@ export function webchatAdminRoutes(app: FastifyInstance, db: Db, mgr: ChannelMan
   app.put('/channels/:id/webchat', { preHandler: adminOnly, config: { rateLimit: { max: 20, timeWindow: '1 minute' } } }, async (req, reply) => {
     const p = idParam.safeParse(req.params);
     const b = z.object({ design: designSchema, behavior: behaviorSchema, allowedOrigins: z.array(z.string().max(120)).max(20), allowAnyOrigin: z.boolean() }).safeParse(req.body);
+    if (!b.success && b.error.issues.some((i) => i.path[0] === 'behavior' && i.path[1] === 'socialLinks')) return reply.code(400).send({ error: 'bad_social_handle' });
     if (!p.success || !b.success) return reply.code(400).send({ error: 'bad_request' });
     if (!(await isWebchat(p.data.id))) return reply.code(404).send({ error: 'not_found' });
     if (!textOn(b.data.design.color)) return reply.code(400).send({ error: 'bad_color' }); // neither white nor black text would be readable on it

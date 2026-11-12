@@ -15,6 +15,35 @@ export const designSchema = z.object({
   language: z.enum(['he', 'en']).default('he'),
 }).strict();
 
+/** "Continue on…" buttons in the widget: plain links to the networks' own deep links. Handles are validated so only safe URLs are built. */
+export const SOCIAL_NETWORKS = ['whatsapp', 'messenger', 'instagram', 'telegram', 'email', 'phone'] as const;
+export type SocialNetwork = (typeof SOCIAL_NETWORKS)[number];
+const HANDLE: Record<SocialNetwork, RegExp> = {
+  whatsapp: /^\d{8,15}$/,                                  // international number, digits only (wa.me format)
+  messenger: /^[A-Za-z0-9.]{5,50}$/,                        // Facebook page username
+  instagram: /^[A-Za-z0-9._]{1,30}$/,
+  telegram: /^[A-Za-z][A-Za-z0-9_]{4,31}$/,
+  email: /^[^@\s<>"']{1,64}@[A-Za-z0-9.-]{1,190}\.[A-Za-z]{2,}$/,
+  phone: /^\+?\d{7,15}$/,
+};
+export const socialLinkSchema = z.object({
+  network: z.enum(SOCIAL_NETWORKS),
+  handle: z.string().trim().max(200).transform((v) => v.replace(/^@/, '').replace(/[\s-]/g, '')),
+}).strict().refine((l) => HANDLE[l.network].test(l.handle), { message: 'bad_handle', path: ['handle'] });
+export type SocialLink = z.infer<typeof socialLinkSchema>;
+
+/** The URL a social button opens (deep links per the networks' public formats; verify ig.me against Instagram's documentation). */
+export function socialUrl(l: SocialLink): string {
+  switch (l.network) {
+    case 'whatsapp': return `https://wa.me/${l.handle}`;
+    case 'messenger': return `https://m.me/${encodeURIComponent(l.handle)}`;
+    case 'instagram': return `https://ig.me/m/${encodeURIComponent(l.handle)}`;
+    case 'telegram': return `https://t.me/${encodeURIComponent(l.handle)}`;
+    case 'email': return `mailto:${l.handle}`;
+    case 'phone': return `tel:${l.handle}`;
+  }
+}
+
 export const behaviorSchema = z.object({
   askName: level.default('optional'),
   askEmail: level.default('off'),
@@ -29,6 +58,8 @@ export const behaviorSchema = z.object({
   maxLength: z.number().int().min(100).max(4000).default(2000),
   /** while the visitor types, offer matching questions from the knowledge base with an instant answer */
   suggestions: z.boolean().default(true),
+  /** "continue on WhatsApp / Messenger / …" buttons shown in the widget's welcome area */
+  socialLinks: z.array(socialLinkSchema).max(6).default([]),
 }).strict();
 
 export type Design = z.infer<typeof designSchema>;

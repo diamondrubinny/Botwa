@@ -68,3 +68,12 @@ form.composer textarea { text-align: start; unicode-bidi: plaintext; }
 @media (prefers-color-scheme: dark) { .hello-art .a-sun { fill: #e6bc2e; } .hello-art .a-mint { fill: #3fbf95; } .hello-art .a-peach { fill: #e08452; } }
 
 header .logo { width: 36px; height: 36px; border-radius: 50%; object-fit: cover; background: #fff; flex: none; box-shadow: 0 0 0 2px rgba(255,255,255,.5); }
+/* "you can also reach us on" links: brand-neutral chips (a coloured dot plus the network's name; meaning never by colour alone) */
+.social-wrap { align-self: stretch; margin-top: 6px; text-align: center; }
+.social-h { margin: 0 0 6px; font-size: 13px; color: var(--muted); }
+.social { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; justify-content: center; }
+.net { display: inline-flex; align-items: center; gap: 6px; min-height: 36px; padding: 4px 12px; border-radius: 999px; border: 1px solid var(--border); background: var(--bg); color: var(--text); text-decoration: none; font-size: 14px; font-weight: 600; }
+.net:hover { border-color: var(--c); }
+.net .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--c); flex: none; }
+.net-whatsapp .dot { background: #128c4b; } .net-messenger .dot { background: #0866ff; } .net-instagram .dot { background: #c13584; }
+.net-telegram .dot { background: #229ed9; } .net-email .dot { background: #5b5470; } .net-phone .dot { background: #0b7268; }

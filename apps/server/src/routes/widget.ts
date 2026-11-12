@@ -7,7 +7,7 @@ import type { Config } from '../config.js';
 import { isOpen } from '../business-hours.js';
 import { decrypt } from '../crypto.js';
 import type { Db } from '../db.js';
-import { behaviorSchema, designSchema, originAllowed, textOn, verifyIdentity, type Behavior, type Design } from '../webchat/config.js';
+import { behaviorSchema, designSchema, originAllowed, socialUrl, textOn, verifyIdentity, type Behavior, type Design } from '../webchat/config.js';
 import { loadBusinessHours } from './settings.js';
 
 const asset = (name: string) => readFileSync(new URL(`../webchat/assets/${name}`, import.meta.url));
@@ -74,6 +74,7 @@ export function widgetRoutes(app: FastifyInstance, db: Db, mgr: ChannelManager, 
     return {
       design: s.design, textColor: text, logo: lg ? `${appOrigins[0]}/branding/logo?v=${Number(lg.v)}` : null, available: !!mgr.webchatAdapter(s.channelId)?.isActive(), online: !hours.enabled || isOpen(hours, new Date()),
       behavior: { askName: b.askName, askEmail: b.askEmail, askPhone: b.askPhone, popupText: b.popupText, popupDelaySec: b.popupDelaySec, autoOpenSec: b.autoOpenSec, consentText: b.consentText, consentLink: b.consentLink, offlineMessage: b.offlineMessage, maxLength: b.maxLength },
+      social: b.socialLinks.map((l) => ({ network: l.network, url: socialUrl(l) })),
     };
   });
 

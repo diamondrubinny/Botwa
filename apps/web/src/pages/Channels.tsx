@@ -366,10 +366,47 @@ function WebhookCheck({ channelId, connected, lastWebhookAt }: { channelId: stri
 type Level = 'off' | 'optional' | 'required';
 interface WebCfg {
   design: { title: string; subtitle: string; welcome: string; color: string; position: 'left' | 'right'; launcherLabel: string; launcherIcon: 'chat' | 'help' | 'message'; language: 'he' | 'en' };
-  behavior: { askName: Level; askEmail: Level; askPhone: Level; popupText: string; popupDelaySec: number; autoOpenSec: number; showAgentName: boolean; consentText: string; consentLink: string; offlineMessage: string; maxLength: number; suggestions?: boolean };
+  behavior: { askName: Level; askEmail: Level; askPhone: Level; popupText: string; popupDelaySec: number; autoOpenSec: number; showAgentName: boolean; consentText: string; consentLink: string; offlineMessage: string; maxLength: number; suggestions?: boolean; socialLinks?: SocialLink[] };
   allowedOrigins: string[]; allowAnyOrigin: boolean; publicKey: string; embedCode: string; previewUrl: string; status: string;
 }
 const LEVELS: [Level, string][] = [['off', 'לא לבקש'], ['optional', 'לא חובה'], ['required', 'חובה']];
+type SocialNet = 'whatsapp' | 'messenger' | 'instagram' | 'telegram' | 'email' | 'phone';
+interface SocialLink { network: SocialNet; handle: string }
+const NETS: { id: SocialNet; label: string; hint: string; ltr: boolean; placeholder: string }[] = [
+  { id: 'whatsapp', label: 'WhatsApp', hint: 'מספר בפורמט בינלאומי, ספרות בלבד', ltr: true, placeholder: '972501234567' },
+  { id: 'messenger', label: 'Messenger', hint: 'שם המשתמש של דף הפייסבוק', ltr: true, placeholder: 'mybusiness' },
+  { id: 'instagram', label: 'Instagram', hint: 'שם המשתמש באינסטגרם', ltr: true, placeholder: 'mybusiness' },
+  { id: 'telegram', label: 'Telegram', hint: 'שם משתמש או בוט, בלי @', ltr: true, placeholder: 'mybusiness_bot' },
+  { id: 'email', label: 'אימייל', hint: 'כתובת אימייל', ltr: true, placeholder: 'support@example.com' },
+  { id: 'phone', label: 'טלפון', hint: 'מספר טלפון', ltr: true, placeholder: '+97231234567' },
+];
+
+/** "You can also reach us on…" buttons in the widget. */
+function SocialLinksEditor({ links, onChange, idp }: { links: SocialLink[]; onChange: (l: SocialLink[]) => void; idp: string }) {
+  const set = (i: number, patch: Partial<SocialLink>) => onChange(links.map((l, j) => (j === i ? { ...l, ...patch } : l)));
+  return (
+    <fieldset>
+      <legend>כפתורי "אפשר גם לכתוב לנו ב…"</legend>
+      <p className="hint">מוצגים בפתיחת הצ׳אט, כקישורים רגילים לאפליקציות. אין סקריפט של צד שלישי ואין עוגיות. עד 6 כפתורים, בסדר שבו הם מופיעים כאן.</p>
+      {links.length === 0 && <p>אין כפתורים.</p>}
+      {links.map((l, i) => {
+        const n = NETS.find((x) => x.id === l.network)!;
+        return (
+          <div className="row" key={i} style={{ alignItems: 'flex-end' }}>
+            <div className="field" style={{ flex: '0 1 160px' }}><label htmlFor={`${idp}-sn-${i}`}>רשת {i + 1}</label>
+              <select id={`${idp}-sn-${i}`} value={l.network} onChange={(e) => set(i, { network: e.target.value as SocialNet })}>
+                {NETS.map((x) => <option key={x.id} value={x.id}>{x.label}</option>)}
+              </select></div>
+            <div className="field" style={{ flex: '1 1 200px' }}><label htmlFor={`${idp}-sh-${i}`}>{n.hint}</label>
+              <input id={`${idp}-sh-${i}`} required dir={n.ltr ? 'ltr' : 'auto'} maxLength={200} value={l.handle} placeholder={n.placeholder} onChange={(e) => set(i, { handle: e.target.value })} /></div>
+            <button type="button" onClick={() => onChange(links.filter((_, j) => j !== i))}>הסרה<span className="sr-only"> של {n.label}</span></button>
+          </div>
+        );
+      })}
+      <button type="button" disabled={links.length >= 6} onClick={() => onChange([...links, { network: links.some((l) => l.network === 'whatsapp') ? 'messenger' : 'whatsapp', handle: '' }])}>הוספת כפתור</button>
+    </fieldset>
+  );
+}
 
 /** Settings of a website-chat channel: look, behaviour, which sites may embed it, the embed code and the identity secret. */
 function WebChatPanel({ channel, onSaved }: { channel: Channel; onSaved: () => void }) {
@@ -448,6 +485,7 @@ function WebChatPanel({ channel, onSaved }: { channel: Channel; onSaved: () => v
         <div className="field"><label><input type="checkbox" style={{ width: 'auto', minHeight: 'auto' }} checked={c.behavior.showAgentName} onChange={(e) => b({ showAgentName: e.target.checked })} /> להציג לגולש את השם הפרטי של הנציג שעונה</label></div>
         <div className="field"><label><input type="checkbox" style={{ width: 'auto', minHeight: 'auto' }} checked={c.behavior.suggestions !== false} onChange={(e) => b({ suggestions: e.target.checked })} /> השלמה אוטומטית: בזמן שהגולש מקליד, להציע שאלות נפוצות ממאגר הידע עם תשובה מיידית</label>
           <p className="hint">מוצגות רק שאלות ותשובות (FAQ) שסומנו לבוט. התשובה מוצגת לגולש בלבד ולא נשלחת לתיבת השיחות; אם לא עזרה, הוא כותב כרגיל.</p></div>
+        <SocialLinksEditor idp={id('soc')} links={c.behavior.socialLinks ?? []} onChange={(socialLinks) => b({ socialLinks })} />
         <div className="field"><label htmlFor={id('off')}>הודעה מחוץ לשעות הפעילות</label><textarea id={id('off')} rows={2} maxLength={300} value={c.behavior.offlineMessage} onChange={(e) => b({ offlineMessage: e.target.value })} /></div>
         <div className="field"><label htmlFor={id('cons')}>הצהרת הסכמה לפני תחילת שיחה (אופציונלי)</label><input id={id('cons')} maxLength={300} value={c.behavior.consentText} onChange={(e) => b({ consentText: e.target.value })} placeholder="קראתי ואני מסכים/ה למדיניות הפרטיות" /><p className="hint">אם מוגדרת, הגולש חייב לסמן אותה, והאישור נרשם בשיחה. מומלץ לכלול קישור למדיניות. ניסוח ההצהרה דורש בדיקה משפטית.</p></div>
         <div className="field"><label htmlFor={id('cl')}>קישור למדיניות הפרטיות (https)</label><input id={id('cl')} dir="ltr" maxLength={300} value={c.behavior.consentLink} onChange={(e) => b({ consentLink: e.target.value })} placeholder="https://example.com/privacy" /></div>

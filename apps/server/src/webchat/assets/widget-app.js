@@ -4,8 +4,8 @@
   var key = decodeURIComponent((location.pathname.match(/^\/w\/([\w-]+)/) || [])[1] || '');
   var app = document.getElementById('app');
   var T = {
-    he: { sugLabel: 'שאלות נפוצות מתאימות', sugCount: ' שאלות נפוצות מתאימות. חצים למעלה ולמטה לבחירה, Enter לתשובה.', faq: 'תשובה מהמאגר', faqHint: 'לא מה שחיפשתם? כתבו לנו ונחזור אליכם.', loading: 'טוען…', send: 'שליחה', msg: 'כתבו הודעה…', msgLabel: 'ההודעה שלכם', start: 'התחלת שיחה', name: 'שם', email: 'אימייל', phone: 'טלפון', optional: ' (לא חובה)', close: 'סגירת הצ׳אט', you: 'אתם', team: 'הצוות', bot: 'הבוט', consent: 'יש לאשר כדי להמשיך.', required: 'שדה חובה', badEmail: 'כתובת אימייל לא תקינה', badPhone: 'מספר טלפון לא תקין', failed: 'השליחה נכשלה. נסו שוב.', offline: 'לא ניתן להתחבר כרגע. נסו שוב מאוחר יותר.', limit: 'שלחתם הרבה הודעות. נסו שוב בעוד רגע.', privacy: 'מדיניות הפרטיות', log: 'שיחה', newmsg: 'הודעה חדשה' },
-    en: { sugLabel: 'Matching common questions', sugCount: ' matching common questions. Use up and down arrows, Enter for the answer.', faq: 'Answer from our help center', faqHint: 'Not what you were looking for? Write to us and we will get back to you.', loading: 'Loading…', send: 'Send', msg: 'Type a message…', msgLabel: 'Your message', start: 'Start chat', name: 'Name', email: 'Email', phone: 'Phone', optional: ' (optional)', close: 'Close chat', you: 'You', team: 'Team', bot: 'Bot', consent: 'Please accept to continue.', required: 'Required', badEmail: 'Invalid email address', badPhone: 'Invalid phone number', failed: 'Sending failed. Please try again.', offline: 'Cannot connect right now. Please try again later.', limit: 'You are sending too fast. Try again in a moment.', privacy: 'Privacy policy', log: 'Conversation', newmsg: 'New message' }
+    he: { sugLabel: 'שאלות נפוצות מתאימות', sugCount: ' שאלות נפוצות מתאימות. חצים למעלה ולמטה לבחירה, Enter לתשובה.', faq: 'תשובה מהמאגר', faqHint: 'לא מה שחיפשתם? כתבו לנו ונחזור אליכם.', loading: 'טוען…', send: 'שליחה', msg: 'כתבו הודעה…', msgLabel: 'ההודעה שלכם', start: 'התחלת שיחה', name: 'שם', email: 'אימייל', phone: 'טלפון', optional: ' (לא חובה)', close: 'סגירת הצ׳אט', you: 'אתם', team: 'הצוות', bot: 'הבוט', consent: 'יש לאשר כדי להמשיך.', required: 'שדה חובה', badEmail: 'כתובת אימייל לא תקינה', badPhone: 'מספר טלפון לא תקין', failed: 'השליחה נכשלה. נסו שוב.', offline: 'לא ניתן להתחבר כרגע. נסו שוב מאוחר יותר.', limit: 'שלחתם הרבה הודעות. נסו שוב בעוד רגע.', privacy: 'מדיניות הפרטיות', log: 'שיחה', newmsg: 'הודעה חדשה', social: 'אפשר גם לכתוב לנו ב:', ext: ' (נפתח מחוץ לצ׳אט)', nets: { whatsapp: 'WhatsApp', messenger: 'Messenger', instagram: 'Instagram', telegram: 'Telegram', email: 'אימייל', phone: 'טלפון' } },
+    en: { sugLabel: 'Matching common questions', sugCount: ' matching common questions. Use up and down arrows, Enter for the answer.', faq: 'Answer from our help center', faqHint: 'Not what you were looking for? Write to us and we will get back to you.', loading: 'Loading…', send: 'Send', msg: 'Type a message…', msgLabel: 'Your message', start: 'Start chat', name: 'Name', email: 'Email', phone: 'Phone', optional: ' (optional)', close: 'Close chat', you: 'You', team: 'Team', bot: 'Bot', consent: 'Please accept to continue.', required: 'Required', badEmail: 'Invalid email address', badPhone: 'Invalid phone number', failed: 'Sending failed. Please try again.', offline: 'Cannot connect right now. Please try again later.', limit: 'You are sending too fast. Try again in a moment.', privacy: 'Privacy policy', log: 'Conversation', newmsg: 'New message', social: 'You can also reach us on:', ext: ' (opens outside this chat)', nets: { whatsapp: 'WhatsApp', messenger: 'Messenger', instagram: 'Instagram', telegram: 'Telegram', email: 'Email', phone: 'Phone' } }
   };
   var L = T.he, cfg = null, token = null, identity = null, after = 0, polling = false, shown = {}, started = false, formShownAt = Date.now();
   var els = {};
@@ -86,6 +86,20 @@
       .catch(function (e) { polling = false; if (e.status === 401) { store('token', null); token = null; return; } setTimeout(poll, 5000); });
   }
 
+  // "continue on…" links (URLs are built by the server from validated handles; only these schemes are ever used)
+  function socialEl() {
+    var list = (cfg.social || []).filter(function (l) { return /^(https:\/\/(wa\.me|m\.me|ig\.me|t\.me)\/|mailto:|tel:)/.test(l.url) && L.nets[l.network]; });
+    if (!list.length) return null;
+    var ul = h('ul', { class: 'social' });
+    list.forEach(function (l) {
+      var web = l.url.indexOf('https://') === 0;
+      var a = h('a', { href: l.url, class: 'net net-' + l.network, rel: 'noopener noreferrer' }, [h('span', { class: 'dot', 'aria-hidden': 'true' }), h('span', { text: L.nets[l.network] })]);
+      if (web) { a.setAttribute('target', '_blank'); a.appendChild(h('span', { class: 'sr-only', text: L.ext })); }
+      ul.appendChild(h('li', {}, [a]));
+    });
+    return h('nav', { class: 'social-wrap', 'aria-label': L.social }, [h('p', { class: 'social-h', text: L.social }), ul]);
+  }
+
   function showChat() {
     app.textContent = '';
     var close = h('button', { type: 'button', class: 'close', 'aria-label': L.close, text: '×' });
@@ -96,6 +110,7 @@
     els.log = h('div', { class: 'log', role: 'log', 'aria-live': 'polite', 'aria-label': L.log });
     var hello = h('div', { class: 'hello' }); hello.appendChild(helloArt());
     if (cfg.design.welcome) hello.appendChild(h('div', { class: 'notice', text: cfg.design.welcome }));
+    var soc = socialEl(); if (soc) hello.appendChild(soc);
     els.log.appendChild(hello);
     var ta = h('textarea', { rows: '1', dir: 'auto', maxlength: String(cfg.behavior.maxLength), placeholder: L.msg, 'aria-label': L.msgLabel });
     var btn = h('button', { type: 'submit', class: 'send', 'aria-label': L.send });
@@ -189,6 +204,7 @@
     var form = h('form', { class: 'pre', novalidate: 'novalidate' });
     var hi = h('div', { class: 'hello' }); hi.appendChild(helloArt()); form.appendChild(hi);
     form.appendChild(h('p', { text: cfg.design.welcome }));
+    var soc2 = socialEl(); if (soc2) form.appendChild(soc2);
     [['name', 'askName', 'text'], ['email', 'askEmail', 'email'], ['phone', 'askPhone', 'tel']].forEach(function (d) {
       var mode = b[d[1]]; if (mode === 'off') return;
       var id = 'f-' + d[0];

@@ -150,6 +150,31 @@ describe('website chat widget', () => {
     await db.query('DELETE FROM branding_logo');
     expect(JSON.stringify(j)).not.toMatch(/secret|identity/i);
     expect((await app.inject({ url: '/widget/config?key=nope' })).statusCode).toBe(404);
+    expect(j.social).toEqual([]);
+  });
+
+  it('"continue on…" links: only validated handles, turned into fixed safe URLs by the server', async () => {
+    const g = (await staff('GET', `/channels/${channelId}/webchat`, 'admin@t.io')).json();
+    const put = (socialLinks: unknown) => staff('PUT', `/channels/${channelId}/webchat`, 'admin@t.io', { design: g.design, behavior: { ...g.behavior, socialLinks }, allowedOrigins: g.allowedOrigins, allowAnyOrigin: g.allowAnyOrigin });
+    for (const bad of [
+      [{ network: 'whatsapp', handle: '050-abc' }],
+      [{ network: 'telegram', handle: 'a/../../x' }],
+      [{ network: 'instagram', handle: 'javascript:alert(1)' }],
+      [{ network: 'email', handle: 'x@y.com?bcc=all@z.com' }],
+      [{ network: 'myspace', handle: 'me' }],
+      Array.from({ length: 7 }, () => ({ network: 'phone', handle: '+97231234567' })),
+    ]) expect((await put(bad)).json()).toEqual({ error: 'bad_social_handle' });
+    expect((await put([
+      { network: 'whatsapp', handle: '972 50-123-4567' }, { network: 'messenger', handle: 'my.shop' }, { network: 'instagram', handle: '@my_shop' },
+      { network: 'telegram', handle: 'my_shop_bot' }, { network: 'email', handle: 'support@shop.example.com' }, { network: 'phone', handle: '+97231234567' },
+    ])).statusCode).toBe(200);
+    const j = (await app.inject({ url: `/widget/config?key=${key}`, headers: { origin: SITE } })).json();
+    expect(j.social).toEqual([
+      { network: 'whatsapp', url: 'https://wa.me/972501234567' }, { network: 'messenger', url: 'https://m.me/my.shop' },
+      { network: 'instagram', url: 'https://ig.me/m/my_shop' }, { network: 'telegram', url: 'https://t.me/my_shop_bot' },
+      { network: 'email', url: 'mailto:support@shop.example.com' }, { network: 'phone', url: 'tel:+97231234567' },
+    ]);
+    expect((await put([])).statusCode).toBe(200);
   });
 
   let token = '';
