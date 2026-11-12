@@ -279,7 +279,7 @@ function LinkPanel({ channel, onClose }: { channel: Channel; onClose: () => void
 
 /** Credentials for the official WhatsApp channel, plus the webhook details to paste into Meta's app dashboard. */
 function CloudPanel({ channel, onSaved }: { channel: Channel; onSaved: () => void }) {
-  const [info, setInfo] = useState<{ configured: boolean; phoneNumberId?: string; verifyToken?: string; wabaId?: string; webhookUrl: string } | null>(null);
+  const [info, setInfo] = useState<{ configured: boolean; phoneNumberId?: string; verifyToken?: string; wabaId?: string; webhookUrl: string; lastWebhookAt?: string | null } | null>(null);
   const [phoneNumberId, setPhoneNumberId] = useState('');
   const [wabaId, setWabaId] = useState('');
   const [accessToken, setAccessToken] = useState('');
@@ -292,9 +292,10 @@ function CloudPanel({ channel, onSaved }: { channel: Channel; onSaved: () => voi
     e.preventDefault();
     setBusy(true); setMsg('');
     try {
-      const r = await api<{ status: string; error?: string }>('PUT', `/channels/${channel.id}/cloud`, { phoneNumberId, accessToken, appSecret, ...(wabaId.trim() ? { wabaId: wabaId.trim() } : {}) });
+      const r = await api<{ status: string; error?: string; subscribe?: string | null }>('PUT', `/channels/${channel.id}/cloud`, { phoneNumberId, accessToken, appSecret, ...(wabaId.trim() ? { wabaId: wabaId.trim() } : {}) });
       setAccessToken(''); setAppSecret('');
-      setMsg(r.status === 'connected' ? 'החיבור הצליח.' : `הפרטים נשמרו, אבל החיבור ל-Meta נכשל: ${errText(r.error ?? 'meta_check_failed')}`);
+      const sub = r.subscribe === 'ok' ? ' החשבון חובר לאפליקציה לקבלת הודעות.' : r.subscribe ? ` שימו לב: ${errText(r.subscribe)}` : '';
+      setMsg(r.status === 'connected' ? `החיבור הצליח.${sub}` : `הפרטים נשמרו, אבל החיבור ל-Meta נכשל: ${errText(r.error ?? 'meta_check_failed')}`);
       onSaved();
     } catch (er) { setMsg(errText(er instanceof ApiError ? er.code : 'generic')); }
     setBusy(false);
@@ -327,8 +328,37 @@ function CloudPanel({ channel, onSaved }: { channel: Channel; onSaved: () => voi
         <button className="primary" type="submit" disabled={busy}>{info?.configured ? 'עדכון ופתיחת חיבור' : 'שמירה וחיבור'}</button>
         <p role="status" className={msg.startsWith('החיבור הצליח') ? 'ok' : 'error'}>{msg}</p>
       </form>
+      {info?.configured && <WebhookCheck channelId={channel.id} connected={channel.status === 'connected'} lastWebhookAt={info.lastWebhookAt ?? null} />}
       {info?.configured && <TemplatesPanel channelId={channel.id} hasWaba={!!info.wabaId} />}
     </div>
+  );
+}
+
+/** "No messages arrive": link the business account to the app again and show whether Meta delivers to us at all. */
+function WebhookCheck({ channelId, connected, lastWebhookAt }: { channelId: string; connected: boolean; lastWebhookAt: string | null }) {
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState('');
+  const [ok, setOk] = useState(false);
+  async function check() {
+    setBusy(true); setMsg('');
+    try {
+      const r = await api<{ result: string; subscribed: boolean | null }>('POST', `/channels/${channelId}/cloud/subscribe`);
+      const good = r.result === 'ok' && r.subscribed !== false;
+      setOk(good);
+      setMsg(good ? 'החשבון העסקי מחובר לאפליקציה. אם עדיין לא מגיעות הודעות, ודאו שהשדה messages מסומן ב-Subscribe בהגדרות ה-Webhook אצל Meta.' : errText(r.result === 'ok' ? 'meta_check_failed' : r.result));
+    } catch (er) { setOk(false); setMsg(errText(er instanceof ApiError ? er.code : 'generic')); }
+    setBusy(false);
+  }
+  const when = lastWebhookAt ? new Date(lastWebhookAt).toLocaleString('he-IL') : null;
+  return (
+    <section aria-labelledby={`whk-${channelId}`} className="fieldset">
+      <h4 id={`whk-${channelId}`}>קבלת הודעות מ-Meta</h4>
+      <p>{when ? <>ההודעה האחרונה מ-Meta התקבלה ב-<time dateTime={lastWebhookAt!}>{when}</time>.</> : 'עוד לא התקבלה הודעה מ-Meta מאז שהשרת עלה. שלחו הודעת ניסיון למספר העסקי מטלפון אחר.'}</p>
+      <p className="hint">כדי שהודעות יגיעו צריך שני דברים: (1) האפליקציה רשומה לחשבון העסקי (WABA). הכפתור עושה זאת. (2) ב-WhatsApp ← Configuration ← Webhook fields, השדה <span dir="ltr">messages</span> מסומן ב-Subscribe. עדכוני סטטוס (נשלח / נמסר / נקרא) מגיעים בתוך אותו שדה. יש לאמת מול התיעוד הרשמי.</p>
+      <button type="button" onClick={() => void check()} disabled={busy || !connected} aria-describedby={connected ? undefined : `whn-${channelId}`}>חיבור ובדיקה</button>
+      {!connected && <p id={`whn-${channelId}`} className="hint">זמין רק כשהערוץ מחובר.</p>}
+      <p role="status" className={msg ? (ok ? 'ok' : 'error') : undefined}>{msg}</p>
+    </section>
   );
 }
 

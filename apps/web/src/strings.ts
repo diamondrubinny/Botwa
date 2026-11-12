@@ -99,6 +99,8 @@ export const t = {
     meta_phone_not_found: 'Meta לא מצאה את מזהה המספר עם האסימון הזה. בדקו שה-Phone number ID נכון, ושהאסימון שייך לאותו חשבון WhatsApp Business.',
     meta_permission_denied: 'לאסימון אין הרשאה למספר הזה. שייכו למשתמש המערכת את האפליקציה ואת חשבון ה-WhatsApp, וצרו אסימון עם ההרשאות הנדרשות.',
     meta_rate_limited: 'Meta מגבילה כרגע את מספר הבקשות. נסו שוב בעוד כמה דקות.',
+    no_waba: 'לא הוזן WhatsApp Business Account ID, ולכן לא ניתן לחבר את החשבון לאפליקציה אוטומטית. הזינו אותו בטופס, או ודאו ידנית אצל Meta שהאפליקציה רשומה לחשבון.',
+    not_configured: 'הערוץ הרשמי עוד לא הוגדר.',
     meta_unreachable: 'השרת לא הצליח להתחבר ל-Meta (graph.facebook.com). בדקו שיש לשרת גישה יוצאת לאינטרנט ב-HTTPS.',
     meta_check_failed: 'Meta החזירה שגיאה בבדיקת הפרטים. בדקו את מזהה המספר ואת האסימון, ונסו שוב.',
     generic: 'אירעה שגיאה. נסו שוב.',

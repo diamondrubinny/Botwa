@@ -110,6 +110,33 @@ export class WhatsAppCloudAdapter implements ChannelAdapter {
   checkSignature(raw: Buffer, header: string | undefined): boolean { return !!this.creds && verifySignature(this.creds.appSecret, raw, header); }
 
   /** Turn a (signature-verified) webhook payload into inbound messages. Status callbacks and other events are ignored. */
+  /**
+   * Link the WhatsApp Business Account to this app (POST /{waba-id}/subscribed_apps). Without it Meta sends no webhooks even when the
+   * app's webhook fields are set. Returns 'ok', 'no_waba' (no account id saved) or the reason it failed. Per Meta's Graph API
+   * documentation; requires verification against the official reference, which changes.
+   */
+  async subscribeApp(): Promise<string> {
+    if (!this.creds) return 'not_configured';
+    if (!this.creds.wabaId) return 'no_waba';
+    try {
+      const res = await this.fetchImpl(this.url(`${this.creds.wabaId}/subscribed_apps`), { method: 'POST', headers: this.auth(), signal: AbortSignal.timeout(10_000) });
+      const j = (await res.json().catch(() => ({}))) as { success?: boolean; error?: { code?: number } };
+      if (res.ok && j.success !== false) return 'ok';
+      return metaCheckError(res.status, j.error?.code);
+    } catch { return 'meta_unreachable'; }
+  }
+
+  /** Is any app subscribed to the business account? null when it cannot be told (no account id, or Meta did not answer). */
+  async subscribedApps(): Promise<boolean | null> {
+    if (!this.creds?.wabaId) return null;
+    try {
+      const res = await this.fetchImpl(this.url(`${this.creds.wabaId}/subscribed_apps`), { headers: this.auth(), signal: AbortSignal.timeout(10_000) });
+      if (!res.ok) return null;
+      const j = (await res.json().catch(() => ({}))) as { data?: unknown[] };
+      return Array.isArray(j.data) ? j.data.length > 0 : null;
+    } catch { return null; }
+  }
+
   async handleWebhook(payload: WaWebhook): Promise<number> {
     let n = 0;
     for (const entry of payload.entry ?? []) {

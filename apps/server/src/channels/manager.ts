@@ -484,11 +484,15 @@ export class ChannelManager {
     this.emit({ channelId, type: 'message', conversationId, messageId });
   }
 
-  async getCloudConfig(channelId: string): Promise<{ configured: boolean; phoneNumberId?: string; verifyToken?: string; wabaId?: string }> {
+  /** When a signed webhook from Meta last arrived for each official channel (since this server started). */
+  private cloudWebhookAt = new Map<string, string>();
+  noteCloudWebhook(channelId: string): void { this.cloudWebhookAt.set(channelId, new Date().toISOString()); }
+
+  async getCloudConfig(channelId: string): Promise<{ configured: boolean; phoneNumberId?: string; verifyToken?: string; wabaId?: string; lastWebhookAt?: string | null }> {
     const raw = await createAuthStore(this.db, channelId, this.cfg.ENCRYPTION_KEY).get(CLOUD_CREDS_KEY);
     if (!raw) return { configured: false };
     const c = JSON.parse(raw) as CloudCreds;
-    return { configured: true, phoneNumberId: c.phoneNumberId, verifyToken: c.verifyToken, wabaId: c.wabaId };
+    return { configured: true, phoneNumberId: c.phoneNumberId, verifyToken: c.verifyToken, wabaId: c.wabaId, lastWebhookAt: this.cloudWebhookAt.get(channelId) ?? null };
   }
 
   /** Save the official-API credentials (encrypted at rest) and restart the channel so they take effect. The verify token is kept across edits. */

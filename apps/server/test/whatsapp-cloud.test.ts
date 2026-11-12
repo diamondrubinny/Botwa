@@ -45,8 +45,11 @@ describe('official WhatsApp channel', () => {
   const fakeFetch = async (url: string, init?: RequestInit): Promise<Response> => {
     calls.push({ url, init });
     if (init?.method === 'POST' && url.endsWith('/messages')) return sendResponse();
+    if (url.includes('/subscribed_apps')) return init?.method === 'POST' ? subscribeResponse() : Response.json({ data: subscribedData });
     return infoResponse();
   };
+  let subscribeResponse: () => Response = () => Response.json({ success: true });
+  let subscribedData: unknown[] = [];
   let infoResponse: () => Response = () => Response.json({ display_phone_number: '+972 50-000-0000', verified_name: 'Shop' });
   const cookies: Record<string, string> = {};
   let ip = 0;
@@ -114,7 +117,27 @@ describe('official WhatsApp channel', () => {
     infoResponse = () => { throw new TypeError('fetch failed'); };
     expect((await put()).json()).toMatchObject({ error: 'meta_unreachable' });
     infoResponse = () => Response.json({ display_phone_number: '+972 50-000-0000', verified_name: 'Shop' });
-    expect((await put()).json()).toEqual({ ok: true, status: 'connected' });
+    expect((await put()).json()).toEqual({ ok: true, status: 'connected', subscribe: 'no_waba' });
+  });
+
+  it('links the business account to the app on save and on demand, and shows when Meta last delivered', async () => {
+    const WABA = '9876543210';
+    const put = await call('PUT', `/channels/${channelId}/cloud`, 'adm@t.io', { phoneNumberId: '1234567890', accessToken: TOKEN, appSecret: SECRET, wabaId: WABA });
+    expect(put.json()).toEqual({ ok: true, status: 'connected', subscribe: 'ok' });
+    const sub = calls.filter((c) => c.url.includes(`/${WABA}/subscribed_apps`) && c.init?.method === 'POST');
+    expect(sub.length).toBe(1);
+    expect((sub[0]!.init!.headers as Record<string, string>).authorization).toBe(`Bearer ${TOKEN}`);
+    // the check button: agents may not, admins get the result and whether an app is subscribed
+    expect((await call('POST', `/channels/${channelId}/cloud/subscribe`, 'ag@t.io')).statusCode).toBe(403);
+    subscribedData = [{ whatsapp_business_api_data: { id: '1', name: 'Botwa' } }];
+    expect((await call('POST', `/channels/${channelId}/cloud/subscribe`, 'adm@t.io')).json()).toEqual({ result: 'ok', subscribed: true });
+    subscribeResponse = () => Response.json({ error: { code: 200 } }, { status: 403 });
+    subscribedData = [];
+    expect((await call('POST', `/channels/${channelId}/cloud/subscribe`, 'adm@t.io')).json()).toEqual({ result: 'meta_permission_denied', subscribed: false });
+    subscribeResponse = () => Response.json({ success: true });
+    expect((await db.query(`SELECT 1 FROM audit_log WHERE action='channel.cloud_subscribe'`)).rowCount).toBe(2);
+    expect((await call('POST', `/channels/00000000-0000-4000-8000-000000000000/cloud/subscribe`, 'adm@t.io')).statusCode).toBe(404);
+    expect((await call('GET', `/channels/${channelId}/cloud`, 'adm@t.io')).json().lastWebhookAt).toBeNull();
   });
 
   it('answers the webhook handshake only for the right verify token', async () => {
@@ -136,6 +159,12 @@ describe('official WhatsApp channel', () => {
     // status callbacks and unrelated fields are ignored without error
     expect((await hook({ object: 'whatsapp_business_account', entry: [{ changes: [{ field: 'messages', value: { statuses: [{ id: 'x', status: 'delivered' }] } }] }] })).statusCode).toBe(200);
     expect((await app.inject({ method: 'POST', url: `/webhooks/whatsapp/${channelId}`, payload: 'not json', headers: { 'content-type': 'application/json' } })).statusCode).toBe(403);
+  });
+
+  it('records when the last signed webhook arrived', async () => {
+    expect((await hook(msg('wamid.T1', 'ping'))).statusCode).toBe(200);
+    const at = (await call('GET', `/channels/${channelId}/cloud`, 'adm@t.io')).json().lastWebhookAt as string;
+    expect(Date.now() - Date.parse(at)).toBeLessThan(60_000);
   });
 
   it('sends replies through the Graph API; policy rejections are 409 and never pause the channel', async () => {

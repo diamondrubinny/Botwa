@@ -110,6 +110,17 @@ export function channelRoutes(app: FastifyInstance, db: Db, mgr: ChannelManager,
     const c = await mgr.getCloudConfig(p.data.id);
     return { ...c, webhookUrl: cloudWebhook(p.data.id, cfg.APP_ORIGIN) };
   });
+  // Link the business account to the app again and report whether it is linked (for "no messages arrive").
+  app.post('/channels/:id/cloud/subscribe', { preHandler: adminOnly, config: { rateLimit: { max: 10, timeWindow: '1 minute' } } }, async (req, reply) => {
+    const p = idParam.safeParse(req.params);
+    if (!p.success || (await db.query(`SELECT 1 FROM channels WHERE id=$1 AND type='whatsapp_cloud'`, [p.data.id])).rowCount !== 1) return reply.code(404).send({ error: 'not_found' });
+    const a = mgr.cloudAdapter(p.data.id);
+    if (!a || !a.isActive()) return reply.code(409).send({ error: 'channel_not_connected' });
+    const result = await a.subscribeApp();
+    await audit(db, { actorId: req.user!.id, action: 'channel.cloud_subscribe', target: p.data.id, ip: req.ip, meta: { result } });
+    return { result, subscribed: await a.subscribedApps() };
+  });
+
   app.put('/channels/:id/cloud', { preHandler: adminOnly, config: { rateLimit: { max: 10, timeWindow: '1 minute' } } }, async (req, reply) => {
     const p = idParam.safeParse(req.params);
     // a token copied together with "Bearer " (as Meta's examples show it) or with spaces around it is still the same token
@@ -138,8 +149,10 @@ export function channelRoutes(app: FastifyInstance, db: Db, mgr: ChannelManager,
     }
     await audit(db, { actorId: req.user!.id, action: 'channel.cloud_credentials', target: p.data.id, ip: req.ip }); // never logs the values
     const status = mgr.snapshot(p.data.id).status;
+    // connected: link the business account to the app, or Meta sends no webhooks at all
+    const subscribe = status === 'connected' ? await mgr.cloudAdapter(p.data.id)!.subscribeApp() : null;
     // saved either way; when Meta refused, say why (the screen explains each reason)
-    return { ok: true, status, ...(status === 'connected' ? {} : { error: mgr.cloudLastError(p.data.id) ?? 'meta_check_failed' }) };
+    return { ok: true, status, ...(status === 'connected' ? { subscribe } : { error: mgr.cloudLastError(p.data.id) ?? 'meta_check_failed' }) };
   });
 
   // Telegram two-step verification password during QR login. Not persisted, not logged.

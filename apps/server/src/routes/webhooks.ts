@@ -37,6 +37,7 @@ export function webhookRoutes(app: FastifyInstance, db: Db, mgr: ChannelManager)
       }
       let payload: WaWebhook;
       try { payload = JSON.parse(raw.toString('utf8')) as WaWebhook; } catch { return reply.code(400).send({ error: 'bad_request' }); }
+      mgr.noteCloudWebhook(p.data.channelId);   // a signed delivery arrived: the webhook works (shown on the channel's settings)
       try {
         await adapter.handleWebhook(payload);
       } catch (e) {

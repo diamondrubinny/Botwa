@@ -704,3 +704,7 @@ details[open]:not(.more) > summary::before { transform: rotate(45deg) translateY
 .chat-head .head-meta { display: flex; flex-wrap: wrap; margin-top: .25rem; color: inherit; }
 .chat-head .avatar { width: 44px; height: 44px; font-size: 1.1rem; }
 .chat-head h2 { font-size: 1.15rem; }
+
+/* a soft sub-panel inside a card, styled like a fieldset (official channel: "receiving messages from Meta") */
+.fieldset { border: 1px solid var(--border); border-radius: 16px; background: color-mix(in srgb, var(--surface-2) 45%, var(--surface)); padding: 1rem 1.1rem 1.1rem; margin: 1rem 0; }
+.fieldset > h4 { margin-top: 0; }
