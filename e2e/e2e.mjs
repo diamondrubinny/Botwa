@@ -89,6 +89,23 @@ await page.click('li.card:has-text("אינסטה") >> button:has-text("מחיק�
 await page.click('dialog[open] button:has-text("אישור")');
 await page.waitForFunction(() => ![...document.querySelectorAll('li.card strong')].some((e) => e.textContent === 'אינסטה'));
 check('Instagram channel can be removed', true);
+// e-mail channel: settings form is accessible; a wrong host is explained; nothing secret comes back
+await page.fill('#ch-label', 'תיבת שירות'); await page.selectOption('#ch-type', 'email'); await page.click('button:has-text("יצירה")');
+await page.waitForSelector('li.card:has-text("תיבת שירות")');
+await page.click('li.card:has-text("תיבת שירות") >> button:has-text("הגדרת תיבת הדואר")');
+await page.waitForSelector('input[id^="em-"][id$="-ih"]');
+await axe('channels: e-mail settings');
+await page.fill('input[id^="em-"][id$="-ih"]', 'https://mail.example.com');
+await page.fill('input[id^="em-"][id$="-sh"]', 'mail.example.com');
+await page.fill('input[id^="em-"][id$="-u"]', 'support@example.com');
+await page.fill('input[id^="em-"][id$="-pw"]', 'not-a-real-password');
+await page.fill('input[id^="em-"][id$="-fa"]', 'support@example.com');
+await page.click('li.card:has-text("תיבת שירות") >> button:has-text("שמירה וחיבור")');
+await page.waitForSelector('li.card:has-text("תיבת שירות") >> text=שם השרת לא תקין', { timeout: 8000 }).catch(() => undefined);
+check('e-mail: an invalid server name is explained', await page.isVisible('li.card:has-text("תיבת שירות") >> text=שם השרת לא תקין'));
+await page.click('li.card:has-text("תיבת שירות") >> button:has-text("מחיקת ערוץ")');
+await page.click('dialog[open] button:has-text("אישור")');
+await page.waitForFunction(() => ![...document.querySelectorAll('li.card strong')].some((e) => e.textContent === 'תיבת שירות'));
 
 check('emergency pause and resume work from the panel', true);
 await axe('channels');

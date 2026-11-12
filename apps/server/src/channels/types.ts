@@ -1,4 +1,4 @@
-export type ChannelType = 'whatsapp' | 'whatsapp_cloud' | 'telegram' | 'webchat' | 'messenger' | 'instagram';
+export type ChannelType = 'whatsapp' | 'whatsapp_cloud' | 'telegram' | 'webchat' | 'messenger' | 'instagram' | 'email';
 export type ChannelStatus = 'stopped' | 'connecting' | 'qr' | 'connected' | 'logged_out' | 'password' | 'restricted' | 'error';
 
 export interface InboundMedia {

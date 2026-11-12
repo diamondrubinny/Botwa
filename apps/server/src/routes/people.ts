@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { isManager, loadAccessible } from '../access.js';
 import { audit } from '../audit.js';
 import { requireAuth } from '../auth.js';
-import { PHONE_OF } from '../contacts/identity.js';
+import { EMAIL_OF, PHONE_OF } from '../contacts/identity.js';
 import type { Db } from '../db.js';
 
 const idParam = z.object({ id: z.string().uuid() });
@@ -58,14 +58,14 @@ export function peopleRoutes(app: FastifyInstance, db: Db) {
     const u = req.user!;
     if (!(await loadAccessible(db, u, p.data.id))) return reply.code(404).send({ error: 'not_found' });
     const { rows } = await db.query(
-      `WITH me AS (SELECT ct.id, ct.person_id, ${PHONE_OF('ct')} AS phone, lower(ct.claimed_email) AS email, ct.claimed_phone, ct.external_id
+      `WITH me AS (SELECT ct.id, ct.person_id, ${PHONE_OF('ct')} AS phone, ${EMAIL_OF('ct')} AS email, ct.claimed_phone, ct.external_id
                      FROM conversations c JOIN contacts ct ON ct.id = c.contact_id WHERE c.id = $1)
-       SELECT ${ROW}, CASE WHEN me.email IS NOT NULL AND lower(ct.claimed_email) = me.email THEN 'email' ELSE 'phone' END AS reason
+       SELECT ${ROW}, CASE WHEN me.email IS NOT NULL AND ${EMAIL_OF('ct')} = me.email THEN 'email' ELSE 'phone' END AS reason
          FROM me, conversations c ${JOINS}
         WHERE c.id <> $1 AND ct.id <> me.id AND ${VISIBLE('c')}
           AND (me.person_id IS NULL OR ct.person_id IS DISTINCT FROM me.person_id)
           AND NOT (me.external_id LIKE '%@s.whatsapp.net' AND ct.external_id LIKE '%@s.whatsapp.net' AND split_part(ct.external_id, '@', 1) = split_part(me.external_id, '@', 1))
-          AND ((me.email IS NOT NULL AND lower(ct.claimed_email) = me.email)
+          AND ((me.email IS NOT NULL AND ${EMAIL_OF('ct')} = me.email)
             OR (me.phone IS NOT NULL AND ${PHONE_OF('ct')} = me.phone AND (me.claimed_phone IS NOT NULL OR ct.claimed_phone IS NOT NULL)))
         ORDER BY c.last_message_at DESC LIMIT 10`,
       [p.data.id, isManager(u), u.id],
@@ -83,7 +83,7 @@ export function peopleRoutes(app: FastifyInstance, db: Db) {
     const { rows } = await db.query(
       `SELECT ${ROW} FROM conversations c ${JOINS}
         WHERE ${VISIBLE('c')} AND ($5::uuid IS NULL OR c.id <> $5)
-          AND (ct.display_name ILIKE $1 OR lower(ct.claimed_email) LIKE lower($1) OR ($4 <> '' AND length($4) >= 4 AND (${PHONE_OF('ct')} LIKE '%' || $4 || '%')))
+          AND (ct.display_name ILIKE $1 OR ${EMAIL_OF('ct')} LIKE lower($1) OR ($4 <> '' AND length($4) >= 4 AND (${PHONE_OF('ct')} LIKE '%' || $4 || '%')))
         ORDER BY c.last_message_at DESC LIMIT 15`,
       [like, isManager(u), u.id, digits, q.data.not ?? null],
     );

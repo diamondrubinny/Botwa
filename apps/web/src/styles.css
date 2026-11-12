@@ -750,3 +750,5 @@ button.linkish { min-height: 36px; padding: 0 .2rem; border: 0; background: none
 .person-manual { margin-top: .6rem; }
 .person-manual summary { cursor: pointer; font-weight: 600; min-height: 36px; display: flex; align-items: center; }
 .mchip.person { background: color-mix(in srgb, var(--accent) 12%, var(--surface)); }
+.mchip.ch-email { background: #fef3c7; color: #854d0e; border-color: #f6dd96; }
+:root[data-theme='dark'] .mchip.ch-email { background: #43300a; color: #fde9b0; border-color: #5e4510; }

@@ -7,7 +7,7 @@ const LABELS: Record<string, string> = {
   'password.change': 'שינוי סיסמה', 'mfa.enable': 'הפעלת אימות דו-שלבי', 'user.create': 'יצירת משתמש', 'user.update': 'עדכון משתמש', 'user.mfa_reset': 'איפוס אימות דו-שלבי',
   'channel.create': 'יצירת ערוץ', 'channel.start': 'הפעלת ערוץ', 'channel.stop': 'עצירת ערוץ', 'channel.logout': 'ניתוק חשבון ערוץ', 'channel.delete': 'מחיקת ערוץ',
   'channel.password_submitted': 'הזנת סיסמת טלגרם', 'conversation.assign': 'שיוך שיחה', 'contact.export': 'ייצוא נתוני איש קשר', 'contact.erase': 'מחיקת איש קשר',
-  'logout_all': 'התנתקות מכל המכשירים', 'channel.meta_credentials': 'עדכון פרטי Messenger/Instagram', 'channel.meta_subscribe': 'רישום דף לאפליקציית Meta', 'channel.cloud_subscribe': 'רישום חשבון ווצאפ לאפליקציה', 'channel.cloud_credentials': 'עדכון פרטי הווצאפ הרשמי',
+  'channel.email_settings': 'עדכון הגדרות תיבת הדואר', 'contact.link': 'קישור אנשי קשר', 'contact.unlink': 'ביטול קישור אנשי קשר', 'logout_all': 'התנתקות מכל המכשירים', 'channel.meta_credentials': 'עדכון פרטי Messenger/Instagram', 'channel.meta_subscribe': 'רישום דף לאפליקציית Meta', 'channel.cloud_subscribe': 'רישום חשבון ווצאפ לאפליקציה', 'channel.cloud_credentials': 'עדכון פרטי הווצאפ הרשמי',
   'gif.add': 'הוספת GIF לספרייה', 'gif.edit': 'עריכת GIF', 'gif.delete': 'מחיקת GIF', 'gif.upload_infected': 'ניסיון העלאת GIF נגוע',
   'media.infected': 'קובץ נגוע נחסם', 'media.upload_infected': 'ניסיון העלאת קובץ נגוע', 'media.sent': 'שליחת קובץ', 'settings.business_hours': 'עדכון שעות פעילות', 'tag.delete': 'מחיקת תגית',
 };

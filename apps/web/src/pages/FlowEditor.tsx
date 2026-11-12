@@ -6,7 +6,7 @@ import { errText } from '../strings';
 
 type Id = string | undefined;
 type Opt = { label: string; next?: string; examples: string[] };
-type Check = { kind: 'hours' } | { kind: 'variable'; name: string; contains: string } | { kind: 'has'; name: string } | { kind: 'channel'; is: 'whatsapp' | 'whatsapp_cloud' | 'telegram' | 'webchat' | 'messenger' | 'instagram' };
+type Check = { kind: 'hours' } | { kind: 'variable'; name: string; contains: string } | { kind: 'has'; name: string } | { kind: 'channel'; is: 'whatsapp' | 'whatsapp_cloud' | 'telegram' | 'webchat' | 'messenger' | 'instagram' | 'email' };
 type Node = { id: string; label?: string } & (
   | { type: 'message'; text: string; next?: Id }
   | { type: 'menu'; text: string; options: Opt[]; kbOnFreeText: boolean; save?: string }
@@ -447,7 +447,7 @@ function NodeForm({ n, flow, refs, canEdit, upd, del, makeStart }: { n: Node; fl
             <select id={f('ck')} value={n.check.kind} onChange={(e) => set({ check: e.target.value === 'hours' ? { kind: 'hours' } : e.target.value === 'channel' ? { kind: 'channel', is: 'whatsapp' } : e.target.value === 'has' ? { kind: 'has', name: varsOf(flow)[0] ?? 'fullName' } : { kind: 'variable', name: varsOf(flow)[0] ?? 'text', contains: '' } })}>
               <option value="hours">עכשיו בשעות הפעילות</option><option value="channel">הלקוח פנה דרך ערוץ מסוים</option><option value="variable">פרט שנאסף מכיל טקסט</option><option value="has">פרט כבר נאסף (למשל מפנייה קודמת)</option>
             </select></div>
-          {n.check.kind === 'channel' && <div className="field"><label htmlFor={f('ch')}>ערוץ</label><select id={f('ch')} value={n.check.is} onChange={(e) => set({ check: { kind: 'channel', is: e.target.value } })}><option value="whatsapp">ווצאפ (QR)</option><option value="whatsapp_cloud">ווצאפ רשמי</option><option value="telegram">טלגרם</option><option value="messenger">Messenger</option><option value="instagram">Instagram</option><option value="webchat">צ׳אט באתר</option></select></div>}
+          {n.check.kind === 'channel' && <div className="field"><label htmlFor={f('ch')}>ערוץ</label><select id={f('ch')} value={n.check.is} onChange={(e) => set({ check: { kind: 'channel', is: e.target.value } })}><option value="whatsapp">ווצאפ (QR)</option><option value="whatsapp_cloud">ווצאפ רשמי</option><option value="telegram">טלגרם</option><option value="messenger">Messenger</option><option value="instagram">Instagram</option><option value="webchat">צ׳אט באתר</option><option value="email">אימייל</option></select></div>}
           {n.check.kind === 'variable' && (
             <div className="row">
               <VarInput id={f('vn')} label="הפרט" value={n.check.name} onChange={(v) => set({ check: { ...(n.check as Extract<Check, { kind: 'variable' }>), name: v } })} flow={flow} />

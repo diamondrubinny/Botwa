@@ -27,6 +27,7 @@ export function Channels({ me }: { me: Me }) {
   const [label, setLabel] = useState('');
   const [type, setType] = useState<ChannelKind>('whatsapp');
   const [metaFor, setMetaFor] = useState<string | null>(null);
+  const [mailFor, setMailFor] = useState<string | null>(null);
   const [msg, setMsg] = useState('');
   const [linking, setLinking] = useState<string | null>(null);
   const [pending, setPending] = useState<Pending>(null);
@@ -110,6 +111,11 @@ export function Channels({ me }: { me: Me }) {
                     <button className="primary" onClick={() => setWebFor(webFor === ch.id ? null : ch.id)} aria-expanded={webFor === ch.id}>הגדרת הוויגיט וקוד ההטמעה</button>
                     <button onClick={() => run(() => api('POST', `/channels/${ch.id}/start`))}>הפעלה</button>
                   </>
+                ) : ch.type === 'email' ? (
+                  <>
+                    <button className="primary" onClick={() => setMailFor(mailFor === ch.id ? null : ch.id)} aria-expanded={mailFor === ch.id}>הגדרת תיבת הדואר</button>
+                    <button onClick={() => run(() => api('POST', `/channels/${ch.id}/start`))}>הפעלה</button>
+                  </>
                 ) : ch.type === 'messenger' || ch.type === 'instagram' ? (
                   <>
                     <button className="primary" onClick={() => setMetaFor(metaFor === ch.id ? null : ch.id)} aria-expanded={metaFor === ch.id}>הגדרת {ch.type === 'instagram' ? 'Instagram' : 'Messenger'}</button>
@@ -144,6 +150,7 @@ export function Channels({ me }: { me: Me }) {
               </form>
             )}
             {webFor === ch.id && <WebChatPanel channel={ch} onSaved={() => void reload()} />}
+            {mailFor === ch.id && <EmailPanel channel={ch} onSaved={() => void reload()} />}
             {metaFor === ch.id && <MetaPanel channel={ch} onSaved={() => void reload()} />}
             {cloudFor === ch.id && <CloudPanel channel={ch} onSaved={() => { setCloudFor(null); void reload(); }} />}
             {linking === ch.id && <LinkPanel channel={ch} onClose={() => setLinking(null)} />}
@@ -167,10 +174,12 @@ export function Channels({ me }: { me: Me }) {
               <option value="messenger">Messenger (דף פייסבוק, API רשמי של Meta)</option>
               <option value="instagram">Instagram (הודעות לחשבון עסקי, API רשמי של Meta)</option>
               <option value="webchat">צ׳אט באתר (ויגיט להטמעה באתרים)</option>
+              <option value="email">אימייל (תיבת דואר של השירות, IMAP/SMTP)</option>
               <option value="telegram">טלגרם (חשבון משתמש, סריקת QR)</option>
             </select>
             {type === 'webchat' && <p className="hint">ויגיט צ׳אט שמטמיעים באתר שלכם בשורת קוד אחת. הפניות נכנסות לתיבה כמו כל ערוץ, והבוט, תרשים הזרימה ומאגר הידע עובדים גם בו. אין סיכון חסימה, ואין תלות בפלטפורמה חיצונית.</p>}
             {(type === 'messenger' || type === 'instagram') && <p className="hint">הודעות פרטיות לדף הפייסבוק או לחשבון האינסטגרם העסקי, דרך אותה אפליקציית Meta של הווצאפ הרשמי. ללקוחות אמיתיים נדרש אישור של Meta להרשאות ההודעות (App Review). תשובה חופשית אפשרית עד 24 שעות מהודעת הלקוח האחרונה.</p>}
+            {type === 'email' && <p className="hint">תיבת דואר כמו support@ נכנסת לתיבת השיחות: כל שולח הוא שיחה, והתשובות יוצאות מאותה כתובת באותו שרשור. רק דואר שמגיע אחרי החיבור נקלט, ותשובות אוטומטיות (מענה חופשה, החזרות, רשימות תפוצה) לא נענות.</p>}
             {type === 'whatsapp_cloud' && <p className="hint">הדרך המותרת והיציבה: מספר עסקי מאומת אצל Meta, בלי סיכון חסימה בגלל ספרייה לא רשמית. דורשת חשבון Meta Business ועלולה לעלות כסף לפי שיחה. ניתן לשלוח טקסט חופשי רק עד 24 שעות מהודעת הלקוח האחרונה.</p>}
             <p className="hint">הערה: החיבור לווצאפ בסריקת QR נעשה באמצעות ספרייה לא רשמית וקיים סיכון לחסימת המספר. גם שליחה אוטומטית מחשבון טלגרם עלולה להוביל להגבלת החשבון.</p>
           </div>
@@ -340,6 +349,64 @@ function CloudPanel({ channel, onSaved }: { channel: Channel; onSaved: () => voi
       </form>
       {info?.configured && <WebhookCheck channelId={channel.id} connected={channel.status === 'connected'} lastWebhookAt={info.lastWebhookAt ?? null} />}
       {info?.configured && <TemplatesPanel channelId={channel.id} hasWaba={!!info.wabaId} />}
+    </div>
+  );
+}
+
+/** E-mail: mailbox settings (the password is write-only) and the result of the IMAP/SMTP check. */
+function EmailPanel({ channel, onSaved }: { channel: Channel; onSaved: () => void }) {
+  type Cfg = { configured: boolean; imapHost?: string; imapPort?: number; smtpHost?: string; smtpPort?: number; username?: string; fromAddress?: string; fromName?: string; mailbox?: string };
+  const [f, setF] = useState({ imapHost: '', imapPort: 993, smtpHost: '', smtpPort: 465, username: '', password: '', fromAddress: '', fromName: '', mailbox: 'INBOX' });
+  const [configured, setConfigured] = useState(false);
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    void api<Cfg>('GET', `/channels/${channel.id}/email`).then((d) => {
+      setConfigured(d.configured);
+      if (d.configured) setF((x) => ({ ...x, imapHost: d.imapHost ?? '', imapPort: d.imapPort ?? 993, smtpHost: d.smtpHost ?? '', smtpPort: d.smtpPort ?? 465, username: d.username ?? '', fromAddress: d.fromAddress ?? '', fromName: d.fromName ?? '', mailbox: d.mailbox ?? 'INBOX' }));
+    }).catch(() => undefined);
+  }, [channel.id]);
+  const set = (k: keyof typeof f) => (e: { target: { value: string } }) => setF({ ...f, [k]: k.endsWith('Port') ? Number(e.target.value) : e.target.value });
+  async function save(e: FormEvent) {
+    e.preventDefault();
+    setBusy(true); setMsg(null);
+    try {
+      const r = await api<{ status: string; error?: string }>('PUT', `/channels/${channel.id}/email`, { ...f, password: f.password || undefined });
+      setF((x) => ({ ...x, password: '' })); setConfigured(true);
+      setMsg(r.status === 'connected' ? { ok: true, text: 'החיבור הצליח: השרת קורא את התיבה ויכול לשלוח ממנה.' } : { ok: false, text: `הפרטים נשמרו, אבל החיבור נכשל: ${errText(r.error ?? 'mail_check_failed')}` });
+      onSaved();
+    } catch (er) { setMsg({ ok: false, text: errText(er instanceof ApiError ? er.code : 'generic') }); }
+    setBusy(false);
+  }
+  const p = `em-${channel.id}`;
+  return (
+    <div className="card">
+      <h3>הגדרת תיבת הדואר</h3>
+      <p className="hint">החיבור תמיד מוצפן (TLS) ותעודת השרת נבדקת. יש להשתמש בשם השרת שעל התעודה, למשל <span dir="ltr">mail.example.com</span>. ב-Gmail ו-Microsoft 365 נדרשת לרוב סיסמת אפליקציה (App password), אם הארגון מאפשר. יש לאמת מול התיעוד של ספק הדואר.</p>
+      <form onSubmit={save}>
+        <fieldset><legend>קבלת דואר (IMAP)</legend>
+          <div className="row">
+            <div className="field" style={{ flex: '2 1 220px' }}><label htmlFor={`${p}-ih`}>שרת IMAP</label><input id={`${p}-ih`} required dir="ltr" autoComplete="off" spellCheck={false} value={f.imapHost} onChange={set('imapHost')} placeholder="mail.example.com" /></div>
+            <div className="field" style={{ flex: '1 1 140px' }}><label htmlFor={`${p}-ip`}>פורט</label><select id={`${p}-ip`} value={f.imapPort} onChange={set('imapPort')}><option value={993}>993 (TLS)</option><option value={143}>143 (STARTTLS)</option></select></div>
+          </div>
+          <div className="field"><label htmlFor={`${p}-mb`}>תיקייה</label><input id={`${p}-mb`} dir="ltr" value={f.mailbox} onChange={set('mailbox')} /></div>
+        </fieldset>
+        <fieldset><legend>שליחת דואר (SMTP)</legend>
+          <div className="row">
+            <div className="field" style={{ flex: '2 1 220px' }}><label htmlFor={`${p}-sh`}>שרת SMTP</label><input id={`${p}-sh`} required dir="ltr" autoComplete="off" spellCheck={false} value={f.smtpHost} onChange={set('smtpHost')} placeholder="mail.example.com" /></div>
+            <div className="field" style={{ flex: '1 1 140px' }}><label htmlFor={`${p}-sp`}>פורט</label><select id={`${p}-sp`} value={f.smtpPort} onChange={set('smtpPort')}><option value={465}>465 (TLS)</option><option value={587}>587 (STARTTLS)</option></select></div>
+          </div>
+        </fieldset>
+        <fieldset><legend>חשבון ושולח</legend>
+          <div className="field"><label htmlFor={`${p}-u`}>שם משתמש</label><input id={`${p}-u`} required dir="ltr" autoComplete="off" spellCheck={false} value={f.username} onChange={set('username')} placeholder="support@example.com" /></div>
+          <div className="field"><label htmlFor={`${p}-pw`}>סיסמה{configured ? ' (השאירו ריק כדי לשמור את הקיימת)' : ''}</label><input id={`${p}-pw`} type="password" required={!configured} dir="ltr" autoComplete="new-password" data-lpignore="true" data-1p-ignore="true" data-form-type="other" value={f.password} onChange={set('password')} /></div>
+          <div className="field"><label htmlFor={`${p}-fa`}>כתובת השולח</label><input id={`${p}-fa`} required type="email" dir="ltr" value={f.fromAddress} onChange={set('fromAddress')} placeholder="support@example.com" /></div>
+          <div className="field"><label htmlFor={`${p}-fn`}>שם השולח (מה שהלקוח רואה)</label><input id={`${p}-fn`} maxLength={80} value={f.fromName} onChange={set('fromName')} placeholder="שירות הלקוחות" /></div>
+        </fieldset>
+        <p className="hint">הסיסמה נשמרת מוצפנת ולא מוצגת שוב.</p>
+        <button className="primary" type="submit" disabled={busy}>{busy ? 'בודק חיבור…' : configured ? 'עדכון ובדיקת חיבור' : 'שמירה וחיבור'}</button>
+        <p role="status" className={msg ? (msg.ok ? 'ok' : 'error') : undefined}>{msg?.text}</p>
+      </form>
     </div>
   );
 }

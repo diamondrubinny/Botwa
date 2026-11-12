@@ -59,7 +59,7 @@ export function channelRoutes(app: FastifyInstance, db: Db, mgr: ChannelManager,
       const pausedRow = (await db.query('SELECT paused FROM channels WHERE id = $1', [ch.id])).rows[0];
       const autoPausedUntil = mgr.isAutoPausedUntil(ch.id);
       const recentAutoPauses = (await db.query(`SELECT count(*)::int AS n FROM channel_events WHERE channel_id = $1 AND kind = 'auto_paused' AND created_at > now() - interval '24 hours'`, [ch.id])).rows[0].n as number;
-      const risk = ['whatsapp_cloud', 'webchat', 'messenger', 'instagram'].includes(ch.type) ? { level: 'low' as const, reasons: [] as string[] } : assessRisk({ status, day: u.day, cap, inbound24h: inb, ageDays: u.ageDays, recentAutoPauses });
+      const risk = ['whatsapp_cloud', 'webchat', 'messenger', 'instagram', 'email'].includes(ch.type) ? { level: 'low' as const, reasons: [] as string[] } : assessRisk({ status, day: u.day, cap, inbound24h: inb, ageDays: u.ageDays, recentAutoPauses });
       out.push({
         id: ch.id, label: ch.label, type: ch.type, status, sentLast24h: u.day, inboundLast24h: inb, sentLastMinute: u.minute, dailyCap: cap, ageDays: Math.floor(u.ageDays),
         paused: !!pausedRow?.paused, autoPausedUntil: autoPausedUntil > Date.now() ? new Date(autoPausedUntil).toISOString() : null,
@@ -70,7 +70,7 @@ export function channelRoutes(app: FastifyInstance, db: Db, mgr: ChannelManager,
   });
 
   app.post('/channels', { preHandler: adminOnly }, async (req, reply) => {
-    const b = z.object({ type: z.enum(['whatsapp', 'whatsapp_cloud', 'telegram', 'webchat', 'messenger', 'instagram']), label: z.string().min(1).max(80) }).safeParse(req.body);
+    const b = z.object({ type: z.enum(['whatsapp', 'whatsapp_cloud', 'telegram', 'webchat', 'messenger', 'instagram', 'email']), label: z.string().min(1).max(80) }).safeParse(req.body);
     if (!b.success) return reply.code(400).send({ error: 'bad_request' });
     if (!mgr.supports(b.data.type)) return reply.code(501).send({ error: 'unsupported_channel_type' });
     const { rows } = await db.query(
@@ -201,6 +201,39 @@ export function channelRoutes(app: FastifyInstance, db: Db, mgr: ChannelManager,
     const status = mgr.snapshot(p.data.id).status;
     const subscribe = status === 'connected' ? await mgr.metaAdapter(p.data.id)!.subscribeApp() : null;
     return { ok: true, status, ...(status === 'connected' ? { subscribe } : { error: mgr.cloudLastError(p.data.id) ?? 'meta_check_failed' }) };
+  });
+
+  // E-mail: mailbox settings (the password is write-only). Saving checks SMTP and IMAP and says which side failed and why.
+  const isEmail = async (id: string) => (await db.query(`SELECT 1 FROM channels WHERE id=$1 AND type = 'email'`, [id])).rowCount === 1;
+  const host = z.string().trim().toLowerCase().max(253).regex(/^(?=.{1,253}$)([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)*[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$|^\d{1,3}(\.\d{1,3}){3}$/);
+  const emailBody = z.object({
+    imapHost: host, imapPort: z.union([z.literal(993), z.literal(143)]),
+    smtpHost: host, smtpPort: z.union([z.literal(465), z.literal(587)]),
+    username: z.string().trim().min(1).max(254),
+    password: z.string().max(500).optional(),
+    fromAddress: z.string().trim().toLowerCase().max(254).regex(/^[^\s@<>"']{1,64}@[a-z0-9.-]{1,190}\.[a-z]{2,}$/),
+    fromName: z.string().trim().max(80).regex(/^[^<>"\r\n]*$/).default(''),
+    mailbox: z.string().trim().min(1).max(100).regex(/^[^\r\n*%"]+$/).default('INBOX'),
+  }).strict();
+  app.get('/channels/:id/email', { preHandler: adminOnly }, async (req, reply) => {
+    const p = idParam.safeParse(req.params);
+    if (!p.success || !(await isEmail(p.data.id))) return reply.code(404).send({ error: 'not_found' });
+    return mgr.getEmailConfig(p.data.id);
+  });
+  app.put('/channels/:id/email', { preHandler: adminOnly, config: { rateLimit: { max: 10, timeWindow: '1 minute' } } }, async (req, reply) => {
+    const p = idParam.safeParse(req.params);
+    const b = emailBody.safeParse(req.body);
+    if (!p.success) return reply.code(400).send({ error: 'bad_request' });
+    if (!b.success) {
+      const field = String(b.error.issues[0]?.path[0] ?? '');
+      const code = ({ imapHost: 'invalid_mail_host', smtpHost: 'invalid_mail_host', imapPort: 'invalid_mail_port', smtpPort: 'invalid_mail_port', fromAddress: 'invalid_from_address', username: 'invalid_mail_username', fromName: 'invalid_from_name', mailbox: 'invalid_mailbox' } as Record<string, string>)[field] ?? 'bad_request';
+      return reply.code(400).send({ error: code });
+    }
+    if (!(await isEmail(p.data.id))) return reply.code(404).send({ error: 'not_found' });
+    if (!(await mgr.setEmailCredentials(p.data.id, b.data))) return reply.code(400).send({ error: 'mail_password_required' });
+    await audit(db, { actorId: req.user!.id, action: 'channel.email_settings', target: p.data.id, ip: req.ip, meta: { imapHost: b.data.imapHost, smtpHost: b.data.smtpHost } });
+    const status = mgr.snapshot(p.data.id).status;
+    return { ok: true, status, ...(status === 'connected' ? {} : { error: mgr.cloudLastError(p.data.id) ?? 'mail_check_failed' }) };
   });
 
   // Telegram two-step verification password during QR login. Not persisted, not logged.

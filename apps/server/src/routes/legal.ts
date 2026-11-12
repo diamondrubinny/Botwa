@@ -30,7 +30,7 @@ nav ul{list-style:none;padding:0;display:flex;flex-wrap:wrap;gap:.4rem 1.2rem;ma
 section[lang=en]{border-top:1px solid var(--line);margin-top:2.5rem;padding-top:1rem}
 .skip{position:absolute;inset-inline-start:-999px}.skip:focus{inset-inline-start:1rem;top:1rem;background:var(--card);padding:.4rem .8rem}`;
 
-const CHANNEL_NAMES: Record<string, string> = { whatsapp_cloud: 'WhatsApp (WhatsApp Business Platform של Meta)', whatsapp: 'WhatsApp', telegram: 'Telegram', messenger: 'Facebook Messenger (Meta)', instagram: 'Instagram (Meta)', webchat: 'צ׳אט באתר' };
+const CHANNEL_NAMES: Record<string, string> = { whatsapp_cloud: 'WhatsApp (WhatsApp Business Platform של Meta)', whatsapp: 'WhatsApp', telegram: 'Telegram', messenger: 'Facebook Messenger (Meta)', instagram: 'Instagram (Meta)', email: 'דואר אלקטרוני', webchat: 'צ׳אט באתר' };
 
 function page(title: string, body: string, info: LegalInfo & { updatedAt: string | null }): string {
   const updated = info.updatedAt ? new Date(info.updatedAt).toLocaleDateString('he-IL', { timeZone: 'Asia/Jerusalem' }) : null;

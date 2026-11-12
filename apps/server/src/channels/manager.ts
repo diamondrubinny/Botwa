@@ -30,6 +30,7 @@ import { ChannelSender, loadSending as loadSendingRaw, SendError, TEST_SENDING, 
 import type { AdapterFactory, ChannelAdapter, ChannelStatus, ChannelType, OutboundMedia, StartOptions } from './types.js';
 import { TelegramAdapter } from './telegram.js';
 import { CLOUD_CREDS_KEY, newVerifyToken, WhatsAppCloudAdapter, type CloudCreds } from './whatsapp-cloud.js';
+import { EMAIL_CREDS_KEY, EmailAdapter, type EmailCreds } from './email.js';
 import { META_CREDS_KEY, MetaMessagingAdapter, type MetaCreds } from './meta-messaging.js';
 import { WebChatAdapter } from './webchat.js';
 import { WhatsAppAdapter } from './whatsapp.js';
@@ -45,6 +46,7 @@ export function createDefaultFactory(cfg: Config): AdapterFactory {
     if (type === 'whatsapp') return new WhatsAppAdapter(ctx);
     if (type === 'webchat') return new WebChatAdapter(ctx);
     if (type === 'whatsapp_cloud') return new WhatsAppCloudAdapter(ctx, undefined, cfg.WHATSAPP_GRAPH_VERSION);
+    if (type === 'email') return new EmailAdapter(ctx);
     if (type === 'messenger' || type === 'instagram') return new MetaMessagingAdapter(ctx, type, undefined, cfg.WHATSAPP_GRAPH_VERSION);
     if (type === 'telegram' && cfg.TELEGRAM_API_ID && cfg.TELEGRAM_API_HASH) {
       return new TelegramAdapter(ctx, { apiId: cfg.TELEGRAM_API_ID, apiHash: cfg.TELEGRAM_API_HASH });
@@ -266,7 +268,7 @@ export class ChannelManager {
     if (status === 'stopped' || status === 'logged_out' || status === 'error' || status === 'restricted') {
       // an official channel that failed its credentials check: keep the reason for the settings screen
       const a = this.adapters.get(channelId);
-      if (a instanceof WhatsAppCloudAdapter || a instanceof MetaMessagingAdapter) this.cloudErrors.set(channelId, a.lastError);
+      if (a instanceof WhatsAppCloudAdapter || a instanceof MetaMessagingAdapter || a instanceof EmailAdapter) this.cloudErrors.set(channelId, a.lastError);
       this.adapters.delete(channelId);
     }
     // never auto-reconnect an account the platform has restricted: it must be reviewed by a person first
@@ -461,14 +463,14 @@ export class ChannelManager {
 
   /** The official API needs no human-like pacing or warm-up (Meta enforces its own limits); the per-minute/day caps still apply. */
   private effective(channelId: string, s: SendingSettings): SendingSettings {
-    return ['whatsapp_cloud', 'webchat', 'messenger', 'instagram'].includes(this.types.get(channelId) ?? '') ? { ...s, warmup: false, typing: false, minDelayMs: 0, maxDelayMs: Math.min(s.maxDelayMs, 300) } : s;
+    return ['whatsapp_cloud', 'webchat', 'messenger', 'instagram', 'email'].includes(this.types.get(channelId) ?? '') ? { ...s, warmup: false, typing: false, minDelayMs: 0, maxDelayMs: Math.min(s.maxDelayMs, 300) } : s;
   }
 
   // ---- Official WhatsApp (Cloud API) -------------------------------------------------------------------------------
   /** The running official-API adapter for webhook handling (null when the channel is not started or is another type). */
   private cloudErrors = new Map<string, string | null>();
   /** Why the official channel's last credentials check failed (null when it did not fail or the reason is unknown). */
-  cloudLastError(channelId: string): string | null { return (this.cloudAdapter(channelId) ?? this.metaAdapter(channelId))?.lastError ?? this.cloudErrors.get(channelId) ?? null; }
+  cloudLastError(channelId: string): string | null { return (this.cloudAdapter(channelId) ?? this.metaAdapter(channelId) ?? this.emailAdapter(channelId))?.lastError ?? this.cloudErrors.get(channelId) ?? null; }
 
   cloudAdapter(channelId: string): WhatsAppCloudAdapter | null {
     const a = this.adapters.get(channelId);
@@ -532,6 +534,31 @@ export class ChannelManager {
     const a = this.adapters.get(channelId);
     if (a) await a.stop().catch(() => undefined);
     await this.start(channelId);
+  }
+
+  // ---- E-mail (IMAP/SMTP) -------------------------------------------------------------------------------------------------
+  emailAdapter(channelId: string): EmailAdapter | null {
+    const a = this.adapters.get(channelId);
+    return a instanceof EmailAdapter ? a : null;
+  }
+  /** the mailbox settings without the password */
+  async getEmailConfig(channelId: string): Promise<{ configured: boolean } & Partial<Omit<EmailCreds, 'password'>>> {
+    const raw = await createAuthStore(this.db, channelId, this.cfg.ENCRYPTION_KEY).get(EMAIL_CREDS_KEY);
+    if (!raw) return { configured: false };
+    const { password: _pw, ...rest } = JSON.parse(raw) as EmailCreds;
+    return { configured: true, ...rest };
+  }
+  /** Save (encrypted at rest) and reconnect. An empty password keeps the saved one, so other fields can be edited without retyping it. */
+  async setEmailCredentials(channelId: string, c: Omit<EmailCreds, 'password'> & { password?: string }): Promise<boolean> {
+    const store = createAuthStore(this.db, channelId, this.cfg.ENCRYPTION_KEY);
+    const prev = await store.get(EMAIL_CREDS_KEY);
+    const password = c.password || (prev ? (JSON.parse(prev) as EmailCreds).password : '');
+    if (!password) return false;
+    await store.set(EMAIL_CREDS_KEY, JSON.stringify({ ...c, password } satisfies EmailCreds));
+    const a = this.adapters.get(channelId);
+    if (a) await a.stop().catch(() => undefined);
+    await this.start(channelId);
+    return true;
   }
 
   private async assertNotPaused(channelId: string): Promise<void> {

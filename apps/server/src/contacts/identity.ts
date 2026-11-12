@@ -16,5 +16,8 @@ export function normalizeEmail(raw: string | null | undefined): string | null {
   return /^[^\s@<>"']{1,64}@[a-z0-9.-]{1,190}\.[a-z]{2,}$/.test(v) ? v : null;
 }
 
+/** SQL: the e-mail a contact row is known by: an e-mail channel's sender address, else what the customer typed (lower case). */
+export const EMAIL_OF = (t: string) => `COALESCE(lower(${t}.claimed_email), CASE WHEN ${t}.external_id ~ '^[^@\\s]+@[^@\\s]+\\.[A-Za-z]{2,}$' AND ${t}.external_id NOT LIKE '%@s.whatsapp.net' THEN lower(${t}.external_id) END)`;
+
 /** SQL: the phone a contact row is known by: the WhatsApp number in its id (verified), else what the customer typed. */
 export const PHONE_OF = (t: string) => `CASE WHEN ${t}.external_id LIKE '%@s.whatsapp.net' THEN split_part(${t}.external_id, '@', 1) ELSE ${t}.claimed_phone END`;
