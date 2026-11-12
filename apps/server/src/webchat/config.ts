@@ -8,7 +8,7 @@ export const designSchema = z.object({
   title: z.string().trim().min(1).max(40).default('צ׳אט עם הצוות'),
   subtitle: z.string().trim().max(80).default('בדרך כלל עונים תוך דקות'),
   welcome: z.string().trim().max(300).default('שלום! איך אפשר לעזור?'),
-  color: hex.default('#4338ca'),
+  color: hex.default('#6a3de8'),
   position: z.enum(['left', 'right']).default('left'),
   launcherLabel: z.string().trim().max(20).default(''),
   launcherIcon: z.enum(['chat', 'help', 'message']).default('chat'),

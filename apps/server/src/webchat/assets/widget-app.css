@@ -1,4 +1,4 @@
-:root { --c: #4338ca; --on: #ffffff; --bg: #ffffff; --surface: #f3f4f9; --text: #141824; --muted: #4a5266; --border: #dfe3ee; --danger: #b42318; }
+:root { --c: #6a3de8; --on: #ffffff; --bg: #ffffff; --surface: #f7f5ff; --text: #1b1530; --muted: #5b5470; --border: #e2dcf5; --danger: #b42318; }
 * { box-sizing: border-box; }
 html, body { height: 100%; margin: 0; }
 body { font-family: system-ui, -apple-system, 'Segoe UI', Roboto, 'Noto Sans Hebrew', Arial, sans-serif; color: var(--text); background: var(--bg); line-height: 1.5; font-size: 15px; }
@@ -15,7 +15,7 @@ header :focus-visible { outline-color: var(--on); }
 .log { flex: 1; overflow-y: auto; padding: 12px; display: flex; flex-direction: column; gap: 8px; background: var(--surface); }
 .msg { max-width: 82%; padding: 8px 12px; border-radius: 14px; white-space: pre-wrap; overflow-wrap: anywhere; background: var(--bg); border: 1px solid var(--border); }
 .msg.me { align-self: flex-end; background: var(--c); color: var(--on); border-color: var(--c); }
-.msg.them { align-self: flex-start; }
+.msg.them { align-self: flex-start; background: #fff4cc; border-color: #f5d76e; color: #4d3800; }   /* answers from the service: sunny */
 .msg a { color: inherit; text-decoration: underline; }
 .who { display: block; font-size: 12px; color: var(--muted); margin-bottom: 2px; }
 .msg.me .who { color: inherit; opacity: .9; }
@@ -37,7 +37,7 @@ form.composer textarea { flex: 1; resize: none; max-height: 110px; min-height: 4
 .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 .offline { background: #fff4d6; color: #5c3b00; padding: 8px 12px; font-size: 13px; border-bottom: 1px solid #f0d58a; }
 @media (prefers-reduced-motion: no-preference) { .msg { animation: pop .15s ease-out; } @keyframes pop { from { transform: translateY(4px); } } }
-@media (prefers-color-scheme: dark) { :root { --bg: #171b2d; --surface: #0e1120; --text: #eef0fa; --muted: #aab2cc; --border: #2b3250; } .msg.them { background: #1f2438; } .offline { background: #3a2c00; color: #ffe29a; border-color: #5c4600; } .field input[type=text], .field input[type=email], .field input[type=tel], form.composer textarea { border-color: #8b94b0; } }
+@media (prefers-color-scheme: dark) { :root { --bg: #1a152c; --surface: #110d1e; --text: #f2effa; --muted: #bab2d4; --border: #362d57; } .msg.them { background: #3a3113; border-color: #7a6420; color: #fde68a; } .offline { background: #3a2c00; color: #ffe29a; border-color: #5c4600; } .field input[type=text], .field input[type=email], .field input[type=tel], form.composer textarea { border-color: #9b92bd; } }
 
 /* question suggestions while typing */
 .sug { list-style: none; margin: 0; padding: 4px; border-top: 1px solid var(--border); background: var(--bg); max-height: 40%; overflow-y: auto; }

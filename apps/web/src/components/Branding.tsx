@@ -102,7 +102,7 @@ export function Branding() {
           <div className="row">
             <input id="br-color" dir="ltr" maxLength={7} value={color} onChange={(e) => setColor(e.target.value.trim())} placeholder="#0f766e" aria-invalid={color !== '' && !valid} style={{ maxWidth: 160 }} />
             <label htmlFor="br-picker" className="sr-only">בוחר צבע</label>
-            <input id="br-picker" type="color" value={valid ? color : '#4338ca'} onChange={(e) => setColor(e.target.value)} style={{ width: 56, minHeight: 44, padding: 2 }} />
+            <input id="br-picker" type="color" value={valid ? color : '#6a3de8'} onChange={(e) => setColor(e.target.value)} style={{ width: 56, minHeight: 44, padding: 2 }} />
           </div>
           {color !== '' && !valid && <p className="error">נדרש צבע בפורמט #rrggbb.</p>}
           {ad && (

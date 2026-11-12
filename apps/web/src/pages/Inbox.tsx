@@ -1,3 +1,4 @@
+import { avatarTone } from '../components/Avatar';
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { api, ApiError, can, personLabel, upload, type Attachment, type Canned, type Conversation, type Me, type Message, type Note, type RelatedConv, type Tag, type UserRow } from '../api';
 import { ConfirmDialog } from '../components/ConfirmDialog';
@@ -300,7 +301,7 @@ export function Inbox({ me }: { me: Me }) {
                 return (
                   <li key={c.id}>
                     <button className="conv-item" aria-current={c.id === selId} onClick={() => open(c)}>
-                      <span className="avatar" aria-hidden="true">{nameOf(c).slice(0, 1)}</span>
+                      <span className={`avatar ${avatarTone(nameOf(c))}`} aria-hidden="true">{nameOf(c).slice(0, 1)}</span>
                       <span className="conv-body">
                         <span className="conv-top"><span className="conv-name">{nameOf(c)}</span><span className="conv-time">{shortTime(c.lastMessageAt)}</span></span>
                         <span className="conv-top">
@@ -327,7 +328,7 @@ export function Inbox({ me }: { me: Me }) {
             <>
               <div className="chat-head">
                 <button className="icon-btn back" onClick={() => setSelId(null)} aria-label="חזרה לרשימה"><Icon name="back" /></button>
-                <span className="avatar" aria-hidden="true">{nameOf(sel).slice(0, 1)}</span>
+                <span className={`avatar ${avatarTone(nameOf(sel))}`} aria-hidden="true">{nameOf(sel).slice(0, 1)}</span>
                 <div style={{ minWidth: 0 }}>
                   <h2>{nameOf(sel)}</h2>
                   <small>{sel.channelLabel} · {sel.assignedName ?? 'לא משויך'}{sel.status === 'closed' ? ' · סגורה' : ''}</small>
@@ -450,7 +451,7 @@ export function Inbox({ me }: { me: Me }) {
                   <section aria-labelledby="notes-h">
                     <h3 id="notes-h">הערות פנימיות (לא נשלחות ללקוח)</h3>
                     {notes.length === 0 ? <p className="hint">אין הערות.</p> : (
-                      <ul style={{ paddingInlineStart: '1.2rem' }}>
+                      <ul className="notes-list">
                         {notes.map((n) => <li key={n.id}>{n.body} <small className="hint">— {n.authorName ?? 'מערכת (בוט)'}, {fmt(n.createdAt)}</small></li>)}
                       </ul>
                     )}

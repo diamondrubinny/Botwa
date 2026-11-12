@@ -1,12 +1,19 @@
 import { useEffect, useState } from 'react';
 import { api, ApiError } from '../api';
 
+/** One of six pastel tones, always the same for the same name (decorative: the name is shown next to it). */
+export function avatarTone(name: string): string {
+  let h = 0;
+  for (const ch of name) h = (h * 31 + ch.codePointAt(0)!) >>> 0;
+  return `tone-${h % 6}`;
+}
+
 /** A person's picture, or the first letter of their name. Decorative: the name is always shown next to it. */
 export function Avatar({ userId, name, v, size = 36 }: { userId: string; name: string; v?: number | null; size?: number }) {
   const [broken, setBroken] = useState(false);
   const style = { width: size, height: size, minWidth: size, fontSize: Math.round(size * 0.42) };
   if (v && !broken) return <img className="avatar avatar-img" src={`/users/${userId}/avatar?v=${v}`} alt="" aria-hidden="true" width={size} height={size} style={style} onError={() => setBroken(true)} />;
-  return <span className="avatar" aria-hidden="true" style={style}>{name.slice(0, 1)}</span>;
+  return <span className={`avatar ${avatarTone(name)}`} aria-hidden="true" style={style}>{name.slice(0, 1)}</span>;
 }
 
 /** Square-crop and shrink a chosen photo in the browser (256px JPEG): small upload, and the original's metadata never leaves the device. */

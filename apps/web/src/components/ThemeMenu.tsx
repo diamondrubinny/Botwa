@@ -6,7 +6,7 @@ import { ACCENTS, FONTS, useTheme, type ThemeMode } from '../theme';
 import { notifyEnabled, setNotifyEnabled } from '../live';
 
 const MODES: [ThemeMode, string][] = [['system', 'לפי המכשיר'], ['soft', 'רך'], ['light', 'בהיר'], ['dark', 'כהה']];
-const SWATCH: Record<string, string> = { indigo: '#4a4a9e', teal: '#1b6860', rose: '#a02548', amber: '#8a4107', slate: '#3a4659' };
+const SWATCH: Record<string, string> = { grape: '#6a3de8', indigo: '#4a4a9e', teal: '#1b6860', rose: '#a02548', amber: '#8a4107', slate: '#3a4659' };
 
 /** Appearance picker: light / dark / follow device, and the accent colour. Choices are kept in this browser only. */
 export function ThemeMenu({ align = 'end' }: { align?: 'start' | 'end' }) {
@@ -74,7 +74,7 @@ export function ThemeMenu({ align = 'end' }: { align?: 'start' | 'end' }) {
             <p className="pop-title">צבע מותאם אישית</p>
             <div className="row">
               <label htmlFor="th-color" className="sr-only">בחירת צבע</label>
-              <input id="th-color" type="color" value={custom ?? '#4338ca'} style={{ width: 52, minHeight: 40, padding: 2 }} onChange={(e) => { setCustom(e.target.value); setUserColor(e.target.value); }} />
+              <input id="th-color" type="color" value={custom ?? '#6a3de8'} style={{ width: 52, minHeight: 40, padding: 2 }} onChange={(e) => { setCustom(e.target.value); setUserColor(e.target.value); }} />
               <label htmlFor="th-hex" className="sr-only">קוד צבע</label>
               <input id="th-hex" dir="ltr" maxLength={7} placeholder="#0f766e" value={custom ?? ''} style={{ width: 110 }} aria-invalid={!!custom && !/^#[0-9a-f]{6}$/i.test(custom)}
                 onChange={(e) => { const v = e.target.value.trim(); setCustom(v || null); if (/^#[0-9a-f]{6}$/i.test(v)) setUserColor(v); else if (!v) setUserColor(null); }} />

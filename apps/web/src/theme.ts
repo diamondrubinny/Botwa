@@ -3,6 +3,7 @@ import { applyBrand, setUserColor } from './brand';
 
 export type ThemeMode = 'system' | 'soft' | 'light' | 'dark';
 export const ACCENTS = [
+  { key: 'grape', label: 'סגול שמח' },
   { key: 'indigo', label: 'אינדיגו' },
   { key: 'teal', label: 'טורקיז' },
   { key: 'rose', label: 'ורוד' },
@@ -23,7 +24,7 @@ const read = (k: string): string | null => { try { return localStorage.getItem(k
 const write = (k: string, v: string) => { try { localStorage.setItem(k, v); } catch { /* storage unavailable */ } };
 
 export const getMode = (): ThemeMode => (['system', 'soft', 'light', 'dark'] as const).find((m) => m === read(MODE_KEY)) ?? 'system';
-export const getAccent = (): Accent => ACCENTS.find((a) => a.key === read(ACCENT_KEY))?.key ?? 'indigo';
+export const getAccent = (): Accent => ACCENTS.find((a) => a.key === read(ACCENT_KEY))?.key ?? 'grape';
 
 export const getDensity = (): Density => (read(DENSITY_KEY) === 'compact' ? 'compact' : 'comfortable');
 export const getFont = (): FontScale => FONTS.find(([k]) => k === read(FONT_KEY))?.[0] ?? 'm';
@@ -38,7 +39,7 @@ export function applyTheme(mode: ThemeMode, accent: Accent): void {
   applyBrand();
   // keep the browser chrome (address bar / PWA title bar) in tune with the theme
   const meta = document.querySelector('meta[name="theme-color"]');
-  meta?.setAttribute('content', getComputedStyle(r).getPropertyValue('--accent').trim() || '#4338ca');
+  meta?.setAttribute('content', getComputedStyle(r).getPropertyValue('--accent').trim() || '#6a3de8');
 }
 
 /** Theme state shared through localStorage; follows the OS setting while mode = "system". */
@@ -61,6 +62,6 @@ export function useTheme() {
     setAccent: (a: Accent) => { write(ACCENT_KEY, a); setAccentState(a); },
     setDensity: (d: Density) => { write(DENSITY_KEY, d); setDensityState(d); },
     setFont: (f: FontScale) => { write(FONT_KEY, f); setFontState(f); },
-    reset: () => { for (const k of [MODE_KEY, ACCENT_KEY, DENSITY_KEY, FONT_KEY]) { try { localStorage.removeItem(k); } catch { /* ignore */ } } setUserColor(null); setModeState('system'); setAccentState('indigo'); setDensityState('comfortable'); setFontState('m'); },
+    reset: () => { for (const k of [MODE_KEY, ACCENT_KEY, DENSITY_KEY, FONT_KEY]) { try { localStorage.removeItem(k); } catch { /* ignore */ } } setUserColor(null); setModeState('system'); setAccentState('grape'); setDensityState('comfortable'); setFontState('m'); },
   };
 }
