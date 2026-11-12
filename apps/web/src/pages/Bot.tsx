@@ -1,3 +1,4 @@
+import { Loading } from '../components/Loading';
 import { PageTitle } from '../components/Illustration';
 import { useEffect, useState, type FormEvent } from 'react';
 import { api, ApiError, can, personLabel, type Me } from '../api';
@@ -23,7 +24,7 @@ export function Bot({ me }: { me: Me }) {
   const [people, setPeople] = useState<{ id: string; name: string; username?: string }[]>([]);
   useEffect(() => { void api<{ id: string; name: string; username?: string }[]>('GET', '/settings/bot/assignees').then(setPeople).catch(() => undefined); }, []);
   usePoll(async () => { if (!b) setB(await api<BotCfg>('GET', '/settings/bot').catch(() => null)); }, 60000);
-  if (!b) return <><h1 tabIndex={-1}>בוט</h1><p role="status">טוען…</p></>;
+  if (!b) return <><h1 tabIndex={-1}>בוט</h1><Loading card lines={5} /></>;
 
   const set = (patch: Partial<BotCfg>) => setB({ ...b, ...patch });
   const setItem = (i: number, patch: Partial<BotCfg['items'][number]>) => set({ items: b.items.map((it, k) => (k === i ? { ...it, ...patch } : it)) });
@@ -234,7 +235,7 @@ function ReactionDiagnostics() {
   return (
     <details onToggle={(e) => { if ((e.target as HTMLDetailsElement).open) void load(); }}>
       <summary>למה אין תגובות? בדיקה</summary>
-      {!d ? <p className="hint">טוען…</p> : (
+      {!d ? <Loading lines={2} /> : (
         <>
           <p>מה שמור בשרת: הבוט {d.enabled ? 'פעיל' : 'כבוי'}, תגובות {d.reactionsEnabled ? 'פעילות' : 'כבויות'}, "להגיב על כל הודעה" {d.ackAll ? 'פעיל' : 'כבוי'}, מצב {d.mode === 'flow' ? 'תרשים' : 'תפריט'}, חיפוש במאגר הידע {d.searches ? 'מתבצע' : 'לא מתבצע'}.</p>
           {d.hints.length > 0 ? <ul>{d.hints.map((h) => <li key={h}>{h}</li>)}</ul> : <p className="ok">לא נמצאה סיבה בהגדרות.</p>}

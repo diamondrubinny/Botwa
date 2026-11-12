@@ -1,3 +1,4 @@
+import { Loading } from './Loading';
 import { useMemo, useState } from 'react';
 import { api, ApiError } from '../api';
 import { usePoll } from '../hooks';
@@ -45,7 +46,7 @@ export function GovSources() {
     return [...all].sort((a, b) => a.localeCompare(b, 'he')).filter((t) => !q || t.includes(q.trim()));
   }, [st, form, q]);
 
-  if (!st || !form) return <p role="status">טוען…</p>;
+  if (!st || !form) return <Loading card lines={4} />;
   const act = async (fn: () => Promise<unknown>, ok: string) => {
     setMsg(null); setBusy(true);
     try { await fn(); setMsg({ ok: true, text: ok }); await load(); } catch (e) { setMsg({ ok: false, text: errText(e instanceof ApiError ? e.code : 'generic') }); } finally { setBusy(false); }

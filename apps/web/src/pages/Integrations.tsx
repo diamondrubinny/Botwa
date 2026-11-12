@@ -32,7 +32,7 @@ export function Integrations() {
     <>
       <PageTitle art="channels" title="אינטגרציות" />
       <p className="hint">חיבור מערכות חיצוניות: מפתחות API לקריאה ושליחה, ו-Webhooks שמעדכנים מערכת אחרת על אירועים. כל פעולה נרשמת ביומן הביקורת.</p>
-      <div className="chips" role="group" aria-label="חלקי האינטגרציות">
+      <div className="chips tabs" role="group" aria-label="חלקי האינטגרציות">
         {([['keys', 'מפתחות API'], ['hooks', 'Webhooks'], ['docs', 'תיעוד']] as const).map(([k, l]) => <button key={k} className="chip" aria-pressed={tab === k} onClick={() => setTab(k)}>{l}</button>)}
       </div>
       {tab === 'keys' && <Keys />}

@@ -1,3 +1,4 @@
+import { Loading } from '../components/Loading';
 import { EmptyState, PageTitle } from '../components/Illustration';
 import { useState } from 'react';
 import { api } from '../api';
@@ -100,7 +101,7 @@ export function Reports() {
       </p>
       </div>
       {failed && <p role="alert" className="error">טעינת הדוח נכשלה.</p>}
-      {!data ? <p role="status">טוען…</p> : (
+      {!data ? <Loading card lines={6} /> : (
         <>
           <section className="card" aria-labelledby="sum-h">
             <h2 id="sum-h">סיכום</h2>

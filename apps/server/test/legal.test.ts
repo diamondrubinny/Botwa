@@ -41,7 +41,7 @@ describe('public legal pages (for Meta and the public)', () => {
       expect(r.headers['content-type']).toContain('text/html');
       expect(r.body).toMatch(/^<!doctype html>\n<html lang="he" dir="rtl">/);
       expect(r.body).not.toContain('<script');
-      expect(String(r.headers['content-security-policy'])).toBe("default-src 'none'; style-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'");
+      expect(String(r.headers['content-security-policy'])).toBe("default-src 'none'; style-src 'self'; font-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'");
       expect(r.body).toContain('lang="en" dir="ltr"');                                   // English summary for reviewers
       expect(r.body).toContain('[פרטי קשר: יש להשלים בהגדרות המערכת]');              // not filled yet
     }

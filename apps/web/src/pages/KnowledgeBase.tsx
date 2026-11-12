@@ -1,3 +1,4 @@
+import { Loading } from '../components/Loading';
 import { EmptyState, PageTitle } from '../components/Illustration';
 import { BotLearning } from '../components/BotLearning';
 import { GovSources } from '../components/GovSources';
@@ -35,7 +36,7 @@ export function KnowledgeBase() {
     <>
       <PageTitle art="knowledge" title="מאגר ידע" />
       <p className="hint">מסמכים, קישורים ושאלות ותשובות שהבוט והנציגים משתמשים בהם. החיפוש מתבצע בשרת שלכם בלבד, בלי בינה מלאכותית ובלי שליחת מידע החוצה.</p>
-      <div className="chips" role="group" aria-label="חלקי המאגר">
+      <div className="chips tabs" role="group" aria-label="חלקי המאגר">
         {TABS.map(([k, l]) => <button key={k} className="chip" aria-pressed={tab === k} onClick={() => setTab(k)}>{l}</button>)}
       </div>
       {tab === 'sources' && <Sources />}
@@ -239,7 +240,7 @@ function EditForm({ id, onDone }: { id: string; onDone: () => void }) {
   const [variants, setVariants] = useState('');
   const [msg, setMsg] = useState('');
   useEffect(() => { void api<Source>('GET', `/kb/sources/${id}`).then((d) => { setS(d); setVariants(d.variants.join('\n')); }).catch(() => undefined); }, [id]);
-  if (!s) return <p role="status">טוען…</p>;
+  if (!s) return <Loading lines={4} />;
   return (
     <form onSubmit={async (e) => {
       e.preventDefault();
@@ -398,7 +399,7 @@ function Synonyms() {
 function StatsView() {
   const [s, setS] = useState<Stats | null>(null);
   usePoll(async () => setS(await api<Stats>('GET', '/kb/stats').catch(() => null)), 30000);
-  if (!s) return <p role="status">טוען…</p>;
+  if (!s) return <Loading lines={4} />;
   const pct = (a: number, b: number) => (b ? `${Math.round((a / b) * 100)}%` : '—');
   return (
     <section className="card" aria-labelledby="st-h">
@@ -491,7 +492,7 @@ function Health() {
   const load = async () => { setH(await api<Health>('GET', '/kb/health').catch(() => null)); setDups(await api<DupGroup[]>('GET', '/kb/duplicates').catch(() => [])); };
   useEffect(() => { void load(); }, []);
   const act = async (fn: () => Promise<unknown>, ok: string) => { setMsg(null); try { await fn(); setMsg({ ok: true, text: ok }); await load(); } catch (e) { setMsg({ ok: false, text: errText(e instanceof ApiError ? e.code : 'generic') }); } };
-  if (!h) return <p role="status">טוען…</p>;
+  if (!h) return <Loading card lines={4} />;
   const n = (s: string) => h.byStatus.find((x) => x.status === s)?.n ?? 0;
   return (
     <>

@@ -243,7 +243,7 @@ export function FlowEditor({ me }: { me: Me }) {
         )}
         <p className="hint">הבוט עצמו מופעל ב<a href="#/bot">עמוד הבוט</a>. כדי להפעיל את התרשים יש לשמור אותו קודם ושיהיה תקין.</p>
       </div>
-      <div className="chips" role="group" aria-label="תצוגה">
+      <div className="chips tabs" role="group" aria-label="תצוגה">
         <button className="chip" aria-pressed={tab === 'edit'} onClick={() => setTab('edit')}>תרשים ועריכה</button>
         <button className="chip" aria-pressed={tab === 'test'} onClick={() => setTab('test')}>בדיקה בשיחה</button>
       </div>

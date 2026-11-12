@@ -53,7 +53,7 @@ export function widgetRoutes(app: FastifyInstance, db: Db, mgr: ChannelManager, 
     const ancestors = s.anyOrigin ? '*' : [...s.origins, ...appOrigins].join(' ');
     reply.removeHeader('x-frame-options');
     reply
-      .header('content-security-policy', `default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data:; base-uri 'none'; form-action 'none'; frame-ancestors ${ancestors}`)
+      .header('content-security-policy', `default-src 'none'; script-src 'self'; style-src 'self'; font-src 'self'; connect-src 'self'; img-src 'self' data:; base-uri 'none'; form-action 'none'; frame-ancestors ${ancestors}`)
       .header('content-type', 'text/html; charset=utf-8').header('cache-control', 'no-cache').header('referrer-policy', 'no-referrer').header('x-content-type-options', 'nosniff');
     return reply.send(files.html);
   });

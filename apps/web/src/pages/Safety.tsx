@@ -1,3 +1,4 @@
+import { Loading } from '../components/Loading';
 import { EmptyState, PageTitle } from '../components/Illustration';
 import { useEffect, useState, type FormEvent } from 'react';
 import { api, ApiError, can, personLabel, type Me } from '../api';
@@ -96,7 +97,7 @@ export function Safety({ me }: { me: Me }) {
           ) : cats.map((c) => <option key={c.id} value={c.id}>{c.name} ({c.count})</option>)}
         </select>
       </div>
-      <div className="chips" role="group" aria-label="תצוגה">
+      <div className="chips tabs" role="group" aria-label="תצוגה">
         <button className="chip" aria-pressed={tab === 'ask'} onClick={() => setTab('ask')}>שאלה בטקסט חופשי</button>
         <button className="chip" aria-pressed={tab === 'all'} onClick={() => setTab('all')} disabled={!cat} title={cat ? '' : 'בחרו נושא'}>כל הסעיפים בנושא</button>
       </div>
@@ -123,7 +124,7 @@ export function Safety({ me }: { me: Me }) {
 
       {tab === 'all' && cat && (
         <section aria-live="polite">
-          {!all ? <p role="status">טוען…</p> : <><p>{all.total} רשומות בנושא {selected?.name}, לפי מקור וסימוכין.</p>{all.total === 0 && <p>עוד לא נטענו מקורות לנושא הזה.</p>}<Groups groups={all.groups} /></>}
+          {!all ? <Loading lines={5} /> : <><p>{all.total} רשומות בנושא {selected?.name}, לפי מקור וסימוכין.</p>{all.total === 0 && <p>עוד לא נטענו מקורות לנושא הזה.</p>}<Groups groups={all.groups} /></>}
         </section>
       )}
 

@@ -1,3 +1,4 @@
+import { Loading } from '../components/Loading';
 import { PageTitle } from '../components/Illustration';
 import { useState, type FormEvent } from 'react';
 import { api, ApiError, can, type BackupFile, type BusinessHours, type Me, type SendingCfg } from '../api';
@@ -41,7 +42,7 @@ export function Settings({ me }: { me: Me }) {
   const [slaMsg, setSlaMsg] = useState('');
   usePoll(async () => { if (!sla && canView) setSla(await api<{ enabled: boolean; targetMinutes: number }>('GET', '/settings/sla').catch(() => null)); }, 60000);
 
-  if (canView && !h) return <><h1 tabIndex={-1}>הגדרות</h1><p role="status">טוען…</p></>;
+  if (canView && !h) return <><h1 tabIndex={-1}>הגדרות</h1><Loading card lines={5} /></>;
 
   async function saveSla(e: FormEvent) {
     e.preventDefault(); setSlaMsg('');

@@ -1,3 +1,4 @@
+import { Loading } from '../components/Loading';
 import { EmptyState, PageTitle } from '../components/Illustration';
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { api, ApiError, can, type Channel, type ChannelHealth, type Me } from '../api';
@@ -349,7 +350,7 @@ function WebChatPanel({ channel, onSaved }: { channel: Channel; onSaved: () => v
   const [preview, setPreview] = useState(0);
   const [busy, setBusy] = useState(false);
   useEffect(() => { void api<WebCfg>('GET', `/channels/${channel.id}/webchat`).then((d) => { setC(d); setOrigins(d.allowedOrigins.join('\n')); }).catch(() => undefined); }, [channel.id]);
-  if (!c) return <p role="status">טוען…</p>;
+  if (!c) return <Loading lines={4} />;
   const d = (p: Partial<WebCfg['design']>) => setC({ ...c, design: { ...c.design, ...p } });
   const b = (p: Partial<WebCfg['behavior']>) => setC({ ...c, behavior: { ...c.behavior, ...p } });
   const id = (k: string) => `wc-${k}-${channel.id}`;

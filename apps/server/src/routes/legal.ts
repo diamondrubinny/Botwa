@@ -20,9 +20,9 @@ export async function loadLegal(db: Db): Promise<LegalInfo & { updatedAt: string
 }
 
 const esc = (s: string) => s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
-const CSS = `:root{color-scheme:light dark;--fg:#1d2230;--muted:#5a6275;--bg:#faf8f4;--card:#fff;--line:#e3dfd6;--accent:#3f46a8}
+const CSS = `@font-face { font-family: 'Heebo'; font-style: normal; font-weight: 100 900; font-display: swap; src: url('/fonts/heebo-hebrew.woff2') format('woff2'); unicode-range: U+0307-0308, U+0590-05FF, U+200C-2010, U+20AA, U+25CC, U+FB1D-FB4F; } @font-face { font-family: 'Heebo'; font-style: normal; font-weight: 100 900; font-display: swap; src: url('/fonts/heebo-latin.woff2') format('woff2'); unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD; } :root{color-scheme:light dark;--fg:#1d2230;--muted:#5a6275;--bg:#faf8f4;--card:#fff;--line:#e3dfd6;--accent:#3f46a8}
 @media (prefers-color-scheme:dark){:root{--fg:#ecebe7;--muted:#b4b7c2;--bg:#16181f;--card:#1f222b;--line:#343846;--accent:#aab0ff}}
-*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:17px/1.7 system-ui,-apple-system,"Segoe UI",Arial,sans-serif}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:17px/1.7 Heebo,system-ui,-apple-system,"Segoe UI",Arial,sans-serif}
 main{max-width:52rem;margin:0 auto;padding:1.5rem 1rem 3rem}h1{font-size:1.9rem;line-height:1.3;margin:.5rem 0 1rem}h2{font-size:1.25rem;margin:2rem 0 .5rem}
 h3{font-size:1.05rem;margin:1.2rem 0 .3rem}a{color:var(--accent)}a:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
 .meta,.note{color:var(--muted);font-size:.95rem}.note{border:1px solid var(--line);background:var(--card);padding:.6rem .9rem;border-radius:8px}
@@ -180,7 +180,7 @@ export function legalRoutes(app: FastifyInstance, db: Db, cfg: Config) {
     .header('content-type', 'text/html; charset=utf-8')
     .header('cache-control', 'public, max-age=300')
     // plain document: no scripts at all, only our stylesheet
-    .header('content-security-policy', "default-src 'none'; style-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'")
+    .header('content-security-policy', "default-src 'none'; style-src 'self'; font-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'")
     .send(html);
   const channels = async () => (await db.query(`SELECT DISTINCT type FROM channels ORDER BY type`)).rows.map((r) => r.type as string);
   const limit = { rateLimit: { max: 120, timeWindow: '1 minute' } };
