@@ -671,6 +671,23 @@ await page.click('.person-list button:has-text("ביטול קישור")');
 await page.click('dialog[open] button:has-text("ביטול הקישור")');
 await page.waitForSelector('text=הקישור בוטל', { timeout: 8000 }).catch(() => undefined);
 check('a link can be undone', await page.isVisible('text=הקישור בוטל') && !(await page.isVisible('.person-list .mchip:has-text("קושר בידי הצוות")')));
+// a public comment thread: the reply needs an explicit choice; a public answer shows a warning
+{
+  const chId = psql("SELECT channel_id FROM contacts WHERE display_name='יוסי לקוח'");
+  psql(`WITH c AS (INSERT INTO contacts (channel_id, external_id, display_name) VALUES ('${chId}', '8880001@fbcomment', 'מגיב בפוסט') RETURNING id),
+        v AS (INSERT INTO conversations (channel_id, contact_id) SELECT '${chId}', id FROM c RETURNING id)
+        INSERT INTO messages (conversation_id, direction, body, external_id) SELECT id, 'in', 'כמה זה עולה?', '111_2' FROM v`);
+}
+await page.click('.conv-list button:has-text("מגיב בפוסט")');
+await page.waitForSelector('.reply-mode');
+await page.fill('#reply', 'שלחנו לך הודעה פרטית');
+check('comment reply: sending waits for a public/private choice', await page.isDisabled('button.send'));
+await page.check('input[name="comment-reply"] >> nth=1');
+check('comment reply: a public answer shows a warning', await page.isVisible('.reply-warn') && !(await page.isDisabled('button.send')));
+await axe('inbox: replying to a public comment');
+await page.fill('#reply', '');
+await page.click('.conv-list button:has-text("יוסי לקוח")');
+await page.waitForSelector('.chat-pane h2:has-text("יוסי לקוח")');
 check('waiting time shown in list', await page.isVisible('.conv-list >> text=ממתין'));
 await openMore();
 await page.selectOption('#addtag', { label: 'VIP' });
@@ -962,7 +979,7 @@ await page.keyboard.press('Escape');
 psql(`INSERT INTO messages (conversation_id, direction, body, external_id) SELECT id, 'in', 'שאלה מהטלפון', 'ph1' FROM conversations WHERE contact_id=(SELECT id FROM contacts WHERE display_name='לקוח משני')`);
 await page.reload();
 await page.waitForSelector('.conv-list button');
-await page.click('.conv-list button >> nth=0');
+await page.click('.conv-list button:has-text("לקוח משני")');
 await page.waitForSelector('.composer');
 const geo = await page.evaluate(() => {
   const chat = document.querySelector('.chat-pane').getBoundingClientRect();
@@ -977,6 +994,12 @@ check('phone: bottom nav hidden behind the open chat', await page.evaluate(() =>
 await axe('phone: open conversation');
 await page.fill('#reply', 'תשובה מהטלפון');
 check('phone: send enabled after typing', !(await page.isDisabled('.composer .send')));
+// the comment thread's taller composer (public / private choice) still fits on a phone, pinned at the bottom
+await page.click('button[aria-label="חזרה לרשימה"]');
+await page.click('.conv-list button:has-text("מגיב בפוסט")');
+await page.waitForSelector('.reply-mode');
+const cgeo = await page.evaluate(() => { const c = document.querySelector('.composer').getBoundingClientRect(); const s = document.querySelector('.composer .send').getBoundingClientRect(); return { bottom: c.bottom, top: c.top, vh: innerHeight, sendBottom: s.bottom }; });
+check('phone: comment reply composer fits and stays at the bottom', Math.abs(cgeo.bottom - cgeo.vh) < 4 && cgeo.sendBottom <= cgeo.vh && cgeo.top > cgeo.vh * 0.35, JSON.stringify(cgeo));
 await page.click('button[aria-label="חזרה לרשימה"]');
 await page.waitForSelector('.list-pane');
 const small = await page.evaluate(() => [...document.querySelectorAll('.chip, .bn-item, .conv-item')].filter((e) => { const r = e.getBoundingClientRect(); return r.width > 0 && Math.min(r.width, r.height) < 44; }).map((e) => e.className));

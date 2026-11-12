@@ -31,7 +31,7 @@ import type { AdapterFactory, ChannelAdapter, ChannelStatus, ChannelType, Outbou
 import { TelegramAdapter } from './telegram.js';
 import { CLOUD_CREDS_KEY, newVerifyToken, WhatsAppCloudAdapter, type CloudCreds } from './whatsapp-cloud.js';
 import { EMAIL_CREDS_KEY, EmailAdapter, type EmailCreds } from './email.js';
-import { META_CREDS_KEY, MetaMessagingAdapter, type MetaCreds } from './meta-messaging.js';
+import { isCommentContact, META_CREDS_KEY, MetaMessagingAdapter, type CommentReplyMode, type MetaCreds } from './meta-messaging.js';
 import { WebChatAdapter } from './webchat.js';
 import { WhatsAppAdapter } from './whatsapp.js';
 
@@ -332,6 +332,9 @@ export class ChannelManager {
           if (r.messageId && stop) {
             // customer said stop: no bot, no away reply - a person decides what happens next
             if (r.needsRouting) await autoAssign(this.db, r.conversationId).catch(() => null);
+          } else if (r.messageId && isCommentContact(m.externalContactId)) {
+            // a public comment: never answered automatically (no bot, no away reply); a person decides, in public or in private
+            if (r.needsRouting) { const to = await autoAssign(this.db, r.conversationId).catch(() => null); if (to) this.onAssigned?.(r.conversationId, to); }
           } else if (r.messageId && bot?.enabled) {
             // the menu bot owns new conversations; people are assigned only at hand-over
             await this.attemptBot(channelId, r.conversationId, m.externalContactId, bot, { text: m.text, media: !!m.media, ext: m.externalMessageId }, true);
@@ -518,15 +521,23 @@ export class ChannelManager {
     return a instanceof MetaMessagingAdapter ? a : null;
   }
 
-  async getMetaConfig(channelId: string): Promise<{ configured: boolean; pageId?: string; igAccountId?: string; verifyToken?: string; lastWebhookAt?: string | null }> {
+  /** Reply to a comment (public or private) through the channel's sending limits. */
+  async replyComment(channelId: string, commentId: string, text: string, mode: CommentReplyMode) {
+    const a = this.metaAdapter(channelId);
+    if (!a || this.statuses.get(channelId) !== 'connected') throw new Error('channel_not_connected');
+    await this.assertNotPaused(channelId);
+    return this.sender.run(channelId, this.effective(channelId, await this.loadSending()), () => a.replyComment(commentId, text, mode), { maxWaitMs: 8_000 });
+  }
+
+  async getMetaConfig(channelId: string): Promise<{ configured: boolean; pageId?: string; igAccountId?: string; verifyToken?: string; lastWebhookAt?: string | null; comments?: boolean }> {
     const raw = await createAuthStore(this.db, channelId, this.cfg.ENCRYPTION_KEY).get(META_CREDS_KEY);
     if (!raw) return { configured: false };
     const c = JSON.parse(raw) as MetaCreds;
-    return { configured: true, pageId: c.pageId, igAccountId: c.igAccountId, verifyToken: c.verifyToken, lastWebhookAt: this.cloudWebhookAt.get(channelId) ?? null };
+    return { configured: true, pageId: c.pageId, igAccountId: c.igAccountId, verifyToken: c.verifyToken, lastWebhookAt: this.cloudWebhookAt.get(channelId) ?? null, comments: !!c.comments };
   }
 
   /** Save Page credentials (encrypted at rest) and restart the channel. The verify token is kept across edits. */
-  async setMetaCredentials(channelId: string, c: { pageId: string; pageAccessToken: string; appSecret: string; igAccountId?: string }): Promise<void> {
+  async setMetaCredentials(channelId: string, c: { pageId: string; pageAccessToken: string; appSecret: string; igAccountId?: string; comments?: boolean }): Promise<void> {
     const store = createAuthStore(this.db, channelId, this.cfg.ENCRYPTION_KEY);
     const prev = await store.get(META_CREDS_KEY);
     const old = prev ? (JSON.parse(prev) as MetaCreds) : null;

@@ -39,8 +39,9 @@ export type SendBlock = 'contact_blocked' | 'contact_opted_out' | 'outside_reply
 export async function sendBlock(db: Db, conv: AccessibleConversation, replyWindowHours: number): Promise<SendBlock | null> {
   if (conv.blocked) return 'contact_blocked';
   if (conv.opted_out) return 'contact_opted_out';
-  // The official API only allows free-form messages within 24h of the customer's last message (verify against Meta's docs).
-  // Meta's official channels allow free-form replies only within 24 hours of the customer's last message (verify against Meta's docs)
+  // Meta's official channels allow free-form replies only within 24 hours of the customer's last message (verify against Meta's docs).
+  // A public comment thread has no such window (Meta decides about a late private reply itself).
+  if (/@(fb|ig)comment$/.test(conv.external_id)) return null;
   if (['whatsapp_cloud', 'messenger', 'instagram'].includes(conv.channel_type ?? '')) replyWindowHours = replyWindowHours > 0 ? Math.min(replyWindowHours, 24) : 24;
   if (replyWindowHours > 0) {
     const { rows } = await db.query(

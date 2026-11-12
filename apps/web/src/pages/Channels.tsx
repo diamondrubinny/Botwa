@@ -414,21 +414,22 @@ function EmailPanel({ channel, onSaved }: { channel: Channel; onSaved: () => voi
 /** Messenger / Instagram: Page credentials, the webhook details for Meta's dashboard and the receive check. */
 function MetaPanel({ channel, onSaved }: { channel: Channel; onSaved: () => void }) {
   const ig = channel.type === 'instagram';
-  const [info, setInfo] = useState<{ configured: boolean; pageId?: string; igAccountId?: string; verifyToken?: string; webhookUrl: string; lastWebhookAt?: string | null } | null>(null);
+  const [info, setInfo] = useState<{ configured: boolean; pageId?: string; igAccountId?: string; verifyToken?: string; webhookUrl: string; lastWebhookAt?: string | null; comments?: boolean } | null>(null);
+  const [comments, setComments] = useState(false);
   const [pageId, setPageId] = useState('');
   const [igId, setIgId] = useState('');
   const [token, setToken] = useState('');
   const [secret, setSecret] = useState('');
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [busy, setBusy] = useState(false);
-  const load = () => api<NonNullable<typeof info>>('GET', `/channels/${channel.id}/meta`).then((d) => { setInfo(d); if (d.pageId) setPageId(d.pageId); if (d.igAccountId) setIgId(d.igAccountId); }).catch(() => undefined);
+  const load = () => api<NonNullable<typeof info>>('GET', `/channels/${channel.id}/meta`).then((d) => { setInfo(d); if (d.pageId) setPageId(d.pageId); if (d.igAccountId) setIgId(d.igAccountId); setComments(!!d.comments); }).catch(() => undefined);
   useEffect(() => { void load(); }, [channel.id]);
   const copy = (v: string) => void navigator.clipboard?.writeText(v).catch(() => undefined);
   async function save(e: FormEvent) {
     e.preventDefault();
     setBusy(true); setMsg(null);
     try {
-      const r = await api<{ status: string; error?: string; subscribe?: string | null }>('PUT', `/channels/${channel.id}/meta`, { pageId, pageAccessToken: token, appSecret: secret, ...(ig ? { igAccountId: igId } : {}) });
+      const r = await api<{ status: string; error?: string; subscribe?: string | null }>('PUT', `/channels/${channel.id}/meta`, { pageId, pageAccessToken: token, appSecret: secret, comments, ...(ig ? { igAccountId: igId } : {}) });
       setToken(''); setSecret('');
       const sub = r.subscribe === 'ok' ? ' הדף נרשם לאפליקציה לקבלת הודעות.' : r.subscribe ? ` שימו לב: ${errText(r.subscribe)}` : '';
       setMsg(r.status === 'connected' ? { ok: true, text: `החיבור הצליח.${sub}` } : { ok: false, text: `הפרטים נשמרו, אבל החיבור ל-Meta נכשל: ${errText(r.error ?? 'meta_check_failed')}` });
@@ -460,6 +461,8 @@ function MetaPanel({ channel, onSaved }: { channel: Channel; onSaved: () => void
         {ig && <div className="field"><label htmlFor={`${p}-ig`}>Instagram account ID</label><input id={`${p}-ig`} required inputMode="numeric" dir="ltr" pattern="\d{5,32}" value={igId} onChange={(e) => setIgId(e.target.value.replace(/\D/g, ''))} /></div>}
         <div className="field"><label htmlFor={`${p}-tk`}>Page access token</label><input id={`${p}-tk`} required type="password" autoComplete="new-password" data-lpignore="true" data-1p-ignore="true" data-form-type="other" spellCheck={false} dir="ltr" minLength={20} value={token} onChange={(e) => setToken(e.target.value.trim())} /></div>
         <div className="field"><label htmlFor={`${p}-as`}>App secret</label><input id={`${p}-as`} required type="password" autoComplete="new-password" data-lpignore="true" data-1p-ignore="true" data-form-type="other" spellCheck={false} dir="ltr" minLength={16} value={secret} onChange={(e) => setSecret(e.target.value.trim())} /></div>
+        <div className="field"><label><input type="checkbox" role="switch" checked={comments} onChange={(e) => setComments(e.target.checked)} aria-describedby={`${p}-cmh`} /> קליטת תגובות על פוסטים</label>
+          <p id={`${p}-cmh`} className="hint">תגובות על הפוסטים נכנסות לתיבה כשיחה נפרדת לכל כותב/ת. הבוט לא עונה עליהן. הנציג/ה בוחר/ת בכל פעם אם לענות בפרטי או בפומבי, ויכול/ה להסתיר תגובה. דורש הרשאות נוספות ב-App Review ({ig ? <span dir="ltr">instagram_manage_comments</span> : <><span dir="ltr">pages_read_user_content</span>, <span dir="ltr">pages_manage_engagement</span></>}) ואת שדה ה-Webhook {ig ? <span dir="ltr">comments</span> : <span dir="ltr">feed</span>}. יש לאמת מול התיעוד הרשמי.</p></div>
         <p className="hint">הערכים נשמרים מוצפנים ולא יוצגו שוב.</p>
         <button className="primary" type="submit" disabled={busy}>{info?.configured ? 'עדכון ופתיחת חיבור' : 'שמירה וחיבור'}</button>
         <p role="status" className={msg ? (msg.ok ? 'ok' : 'error') : undefined}>{msg?.text}</p>

@@ -10,6 +10,7 @@ import type { ChannelManager } from '../channels/manager.js';
 import { loadSending, PolicyRejected, SendError } from '../channels/sender.js';
 import type { Db } from '../db.js';
 import { MediaService } from '../media/store.js';
+import { isCommentContact } from '../channels/meta-messaging.js';
 
 const idParam = z.object({ id: z.string().uuid() });
 export function conversationRoutes(app: FastifyInstance, db: Db, mgr: ChannelManager, media: MediaService) {
@@ -78,7 +79,7 @@ export function conversationRoutes(app: FastifyInstance, db: Db, mgr: ChannelMan
     if (!p.success || !q.success) return reply.code(400).send({ error: 'bad_request' });
     if (!(await loadAccessible(db, req.user!, p.data.id))) return reply.code(404).send({ error: 'not_found' });
     const { rows } = await db.query(
-      `SELECT m.id, m.direction, m.body, m.sender_user_id AS "senderUserId", u.name AS "senderName", m.created_at AS "createdAt", m.auto,
+      `SELECT m.id, m.direction, m.body, m.sender_user_id AS "senderUserId", u.name AS "senderName", m.created_at AS "createdAt", m.auto, m.reply_mode AS "replyMode",
               CASE WHEN a.id IS NULL THEN NULL ELSE json_build_object('id', a.id, 'kind', a.kind, 'mime', a.mime, 'size', a.size,
                 'fileName', a.file_name, 'status', a.status, 'detail', a.detail) END AS attachment
          FROM messages m LEFT JOIN users u ON u.id = m.sender_user_id LEFT JOIN attachments a ON a.message_id = m.id
@@ -104,16 +105,26 @@ export function conversationRoutes(app: FastifyInstance, db: Db, mgr: ChannelMan
 
   app.post('/conversations/:id/messages', { preHandler: any, config: { rateLimit: { max: 60, timeWindow: '1 minute' } } }, async (req, reply) => {
     const p = idParam.safeParse(req.params);
-    const b = z.object({ text: z.string().trim().min(1).max(4000) }).safeParse(req.body);
+    const b = z.object({ text: z.string().trim().min(1).max(4000), commentReply: z.enum(['public', 'private']).optional() }).safeParse(req.body);
     if (!p.success || !b.success) return reply.code(400).send({ error: 'bad_request' });
     const u = req.user!;
     const conv = await loadAccessible(db, u, p.data.id);
     if (!conv) return reply.code(404).send({ error: 'not_found' });
+    // a public comment thread: the person must choose, every time, whether the answer is public or private
+    const comment = isCommentContact(conv.external_id);
+    if (comment && !b.data.commentReply) return reply.code(400).send({ error: 'comment_reply_mode_required' });
     const blockedBy = await sendBlock(db, conv, (await loadSending(db)).replyWindowHours);
     if (blockedBy) return reply.code(409).send({ error: blockedBy });
     let sent: { externalMessageId?: string };
     try {
-      sent = await mgr.sendText(conv.channel_id, conv.external_id, b.data.text);
+      if (comment) {
+        const target = (await db.query(`SELECT external_id FROM messages WHERE conversation_id = $1 AND direction = 'in' AND external_id IS NOT NULL ORDER BY created_at DESC LIMIT 1`, [conv.id])).rows[0]?.external_id as string | undefined;
+        if (!target) return reply.code(409).send({ error: 'comment_not_found' });
+        sent = await mgr.replyComment(conv.channel_id, target, b.data.text, b.data.commentReply!);
+        await audit(db, { actorId: u.id, action: `comment.reply_${b.data.commentReply}`, target: conv.id, ip: req.ip });
+      } else {
+        sent = await mgr.sendText(conv.channel_id, conv.external_id, b.data.text);
+      }
     } catch (e) {
       if ((e as Error).message === 'channel_not_connected') return reply.code(409).send({ error: 'channel_not_connected' });
       if (e instanceof SendError) return reply.code(429).send({ error: e.code });
@@ -122,19 +133,34 @@ export function conversationRoutes(app: FastifyInstance, db: Db, mgr: ChannelMan
       return reply.code(502).send({ error: 'send_failed' });
     }
     const { rows } = await db.query(
-      `INSERT INTO messages (conversation_id, direction, body, external_id, sender_user_id) VALUES ($1,'out',$2,$3,$4)
-       RETURNING id, direction, body, created_at AS "createdAt"`,
-      [conv.id, b.data.text, sent.externalMessageId ?? null, u.id],
+      `INSERT INTO messages (conversation_id, direction, body, external_id, sender_user_id, reply_mode) VALUES ($1,'out',$2,$3,$4,$5)
+       RETURNING id, direction, body, created_at AS "createdAt", reply_mode AS "replyMode"`,
+      [conv.id, b.data.text, sent.externalMessageId ?? null, u.id, comment ? b.data.commentReply : null],
     );
     mgr.notifyMessage(conv.channel_id, conv.id, rows[0].id);
     mgr.hookMessage('message.sent', conv.id, rows[0].id);
-    void learnFromStaff(db, mgr.kb, conv.id, b.data.text).catch(() => undefined);   // a question the bot could not answer: a draft FAQ for approval
+    if (!comment) void learnFromStaff(db, mgr.kb, conv.id, b.data.text).catch(() => undefined);   // a question the bot could not answer: a draft FAQ for approval
     // Replying claims an unassigned conversation.
     await db.query(
       `UPDATE conversations SET last_message_at = now(), assigned_to = COALESCE(assigned_to, $2), bot_state = 'human' WHERE id = $1`,
       [conv.id, u.id],
     );
     return reply.code(201).send(rows[0]);
+  });
+
+  // Hide the customer's latest comment from the public (e.g. it exposes personal details). Audited.
+  app.post('/conversations/:id/comment/hide', { preHandler: any, config: { rateLimit: { max: 20, timeWindow: '1 minute' } } }, async (req, reply) => {
+    const p = idParam.safeParse(req.params);
+    if (!p.success) return reply.code(400).send({ error: 'bad_request' });
+    const conv = await loadAccessible(db, req.user!, p.data.id);
+    if (!conv || !isCommentContact(conv.external_id)) return reply.code(404).send({ error: 'not_found' });
+    const target = (await db.query(`SELECT external_id FROM messages WHERE conversation_id = $1 AND direction = 'in' AND external_id IS NOT NULL ORDER BY created_at DESC LIMIT 1`, [conv.id])).rows[0]?.external_id as string | undefined;
+    const a = mgr.metaAdapter(conv.channel_id);
+    if (!target || !a) return reply.code(409).send({ error: !a ? 'channel_not_connected' : 'comment_not_found' });
+    try { await a.hideComment(target); } catch { return reply.code(502).send({ error: 'comment_hide_failed' }); }
+    await db.query(`INSERT INTO conversation_notes (conversation_id, author_id, body) VALUES ($1, $2, 'התגובה הוסתרה מהציבור.')`, [conv.id, req.user!.id]).catch(() => undefined);
+    await audit(db, { actorId: req.user!.id, action: 'comment.hide', target: conv.id, ip: req.ip });
+    return { ok: true };
   });
 
   // Colleagues a conversation can be handed to (id + name only; the full user list needs users.view).

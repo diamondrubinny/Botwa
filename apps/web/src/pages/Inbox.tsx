@@ -85,6 +85,8 @@ export function Inbox({ me }: { me: Me }) {
   const [related, setRelated] = useState<RelatedConv[]>([]);
   const [eraseAll, setEraseAll] = useState(false);
   const brand = useBrand();
+  const [commentReply, setCommentReply] = useState<'public' | 'private' | null>(null);
+  const [hideOpen, setHideOpen] = useState(false);
   const [pinned, setPinned] = useState<Conversation | null>(null);
   const [sugg, setSugg] = useState<{ sourceId: string; title: string; url: string | null; score: number; text: string }[]>([]);
   const [safety, setSafety] = useState<{ topics: string[]; hits: { topic: string; sourceId: string; title: string; reference: string | null; url: string | null; excerpt: string; instrument: string }[] }>({ topics: [], hits: [] });
@@ -116,6 +118,9 @@ export function Inbox({ me }: { me: Me }) {
     return () => { live = false; };
   }, [selId]); // eslint-disable-line react-hooks/exhaustive-deps
   const sel = convs.find((c) => c.id === selId) ?? (pinned && pinned.id === selId ? pinned : null);
+  /** a public comment thread (Facebook / Instagram post comments): the reply is public or private, chosen each time */
+  const isComment = !!sel && /@(fb|ig)comment$/.test(sel.contactId);
+  useEffect(() => { setCommentReply(null); }, [selId]);
   // lets the shell hide floating widgets while a conversation fills the phone screen
   useEffect(() => { document.body.classList.toggle('chat-open', !!sel); return () => document.body.classList.remove('chat-open'); }, [sel]);
 
@@ -213,7 +218,8 @@ export function Inbox({ me }: { me: Me }) {
         setFile(null);
         if (fileRef.current) fileRef.current.value = '';
       } else {
-        await api('POST', `/conversations/${selId}/messages`, { text });
+        await api('POST', `/conversations/${selId}/messages`, { text, ...(isComment ? { commentReply } : {}) });
+        if (isComment) setCommentReply(null);   // chosen again for every reply: a public answer must never be the default
       }
       edit('');
     });
@@ -373,6 +379,7 @@ export function Inbox({ me }: { me: Me }) {
                     <span className={`mchip ch-${sel.channelType}`}>{sel.channelLabel}</span>
                     <span className={`mchip${sel.assignedName ? '' : ' muted'}`}>{sel.assignedName ?? 'לא משויך'}</span>
                     {sel.status === 'closed' && <span className="mchip muted">סגורה</span>}
+                    {isComment && <span className="mchip comment">תגובה ציבורית על פוסט</span>}
                     {related.length > 0 && <span className="mchip person">עוד {related.length} {related.length === 1 ? 'ערוץ' : 'ערוצים'} של אותו אדם</span>}
                   </small>
                 </div>
@@ -405,6 +412,7 @@ export function Inbox({ me }: { me: Me }) {
                 </select>
                 {tpls.length > 0 && <button type="button" aria-expanded={!!tp} onClick={() => setTp(tp ? null : { key: `${tpls[0]!.name}|${tpls[0]!.language}`, values: Array(tpls[0]!.params).fill(''), msg: '' })}>שליחת תבנית</button>}
                 {targets.length > 0 && <button type="button" aria-expanded={!!fwd} onClick={() => setFwd(fwd ? null : { rule: targets[0]!.id, note: '', msg: '' })}>העברה לקבוצה</button>}
+                {isComment && <button type="button" className="danger" onClick={() => setHideOpen(true)}>הסתרת התגובה מהציבור</button>}
                 <button onClick={() => act(async () => { await api('POST', `/conversations/${sel.id}/unread`); setSelId(null); })}>סימון כלא נקראה</button>
                 <button onClick={() => act(() => api('POST', `/conversations/${sel.id}/status`, { status: sel.status === 'open' ? 'closed' : 'open' }))}>
                   {sel.status === 'open' ? 'סגירת שיחה' : 'פתיחה מחדש'}
@@ -534,6 +542,7 @@ export function Inbox({ me }: { me: Me }) {
                   <div key={m.id} className={`msg ${m.direction}${m.auto ? ' auto' : ''}`}>
                     {m.attachment && <AttachmentView a={m.attachment} />}
                     {m.body && <div className="msg-text" dir="auto">{m.body}</div>}
+                    {m.replyMode && <span className={`mchip reply-${m.replyMode}`}>{m.replyMode === 'public' ? 'נענה בפומבי' : 'נענה בפרטי'}</span>}
                     <small>{m.direction === 'out' && m.auto && botAvatarSrc(brand) && <img className="bot-face" src={botAvatarSrc(brand)!} alt="" width={20} height={20} />}{m.direction === 'out' ? (m.auto ? `${botLabel(brand)} / מענה אוטומטי` : (m.senderName ?? 'צוות')) : 'לקוח'} · {fmt(m.createdAt)}</small>
                   </div>
                 ))}
@@ -633,11 +642,19 @@ export function Inbox({ me }: { me: Me }) {
                 {file && <p className="picked-file"><Icon name="clip" size={16} />{file.name} <button type="button" style={{ minHeight: 32 }} onClick={() => { setFile(null); if (fileRef.current) fileRef.current.value = ''; }}>הסרה</button></p>}
                 {picker === 'emoji' && <EmojiPicker returnTo={emojiBtn} onClose={() => setPicker(null)} onPick={insertEmoji} />}
                 {picker === 'gif' && <GifPicker returnTo={gifBtn} busy={sending} onClose={() => setPicker(null)} onPick={(g) => void sendGif(g)} />}
+                {isComment && (
+                  <fieldset className="reply-mode">
+                    <legend>איך לענות על התגובה?</legend>
+                    <label><input type="radio" name="comment-reply" checked={commentReply === 'private'} onChange={() => setCommentReply('private')} /> הודעה פרטית לכותב/ת (מומלץ)</label>
+                    <label><input type="radio" name="comment-reply" checked={commentReply === 'public'} onChange={() => setCommentReply('public')} /> תגובה ציבורית מתחת לתגובה</label>
+                    {commentReply === 'public' && <p className="reply-warn" role="note">התשובה תהיה גלויה לכל מי שרואה את הפוסט. אל תכללו פרטים אישיים, מספרי טלפון או פרטי פנייה.</p>}
+                  </fieldset>
+                )}
                 <div className="composer-row">
-                  <button type="button" className="attach" onClick={() => fileRef.current?.click()} aria-label="צירוף קובץ"><Icon name="clip" /></button>
+                  {!isComment && <button type="button" className="attach" onClick={() => fileRef.current?.click()} aria-label="צירוף קובץ"><Icon name="clip" /></button>}
                   <button type="button" ref={emojiBtn} className="attach" aria-label="אימוג׳י" aria-expanded={picker === 'emoji'} aria-controls={picker === 'emoji' ? 'emoji-picker' : undefined}
                     onClick={() => setPicker(picker === 'emoji' ? null : 'emoji')}><Icon name="smile" /></button>
-                  {sel.channelType !== 'webchat' && (
+                  {sel.channelType !== 'webchat' && !isComment && (
                     <button type="button" ref={gifBtn} className="attach gif-btn" aria-label="שליחת GIF" aria-expanded={picker === 'gif'} aria-controls={picker === 'gif' ? 'gif-picker' : undefined}
                       disabled={!!sel.blocked || !!sel.optedOut} onClick={() => setPicker(picker === 'gif' ? null : 'gif')}><span aria-hidden="true">GIF</span></button>
                   )}
@@ -645,7 +662,7 @@ export function Inbox({ me }: { me: Me }) {
                   <label htmlFor="reply" className="sr-only">תשובה</label>
                   <textarea id="reply" ref={taRef} rows={1} maxLength={4000} value={text} placeholder="כתבו תשובה… (/ לתשובות מוכנות)" onChange={(e) => edit(e.target.value)}
                     onKeyDown={(e) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) void send(); }} />
-                  <button className="primary send" type="submit" disabled={sending || !!sel.blocked || !!sel.optedOut || (!text.trim() && !file)}><Icon name="send" /><span className="sr-only">שליחה</span></button>
+                  <button className="primary send" type="submit" disabled={sending || !!sel.blocked || !!sel.optedOut || (!text.trim() && !file) || (isComment && !commentReply)}><Icon name="send" /><span className="sr-only">שליחה</span></button>
                 </div>
               </form>
             </>
@@ -653,6 +670,10 @@ export function Inbox({ me }: { me: Me }) {
         </section>
       </div>
 
+      <ConfirmDialog open={hideOpen} danger title="הסתרת התגובה"
+        message="התגובה האחרונה של הלקוח תוסתר מהציבור בפוסט (לפי Meta, הכותב/ת וחבריו עדיין רואים אותה). מתאים לתגובה שחושפת פרטים אישיים או פוגענית."
+        confirmLabel="הסתרה" onCancel={() => setHideOpen(false)}
+        onConfirm={() => { setHideOpen(false); if (sel) void act(() => api('POST', `/conversations/${sel.id}/comment/hide`)); }} />
       <ConfirmDialog open={eraseAll} danger title="מחיקת האדם בכל הערוצים"
         message="איש הקשר וכל אנשי הקשר המקושרים אליו בערוצים אחרים, עם כל ההודעות, ההערות והקבצים, יימחקו לצמיתות (גיבויים קיימים יישארו עד תום מחזור הגיבוי). לא ניתן לשחזר."
         confirmLabel="מחיקה לצמיתות בכל הערוצים" onCancel={() => setEraseAll(false)}

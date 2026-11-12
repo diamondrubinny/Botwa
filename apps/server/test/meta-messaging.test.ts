@@ -37,10 +37,13 @@ describe('Messenger and Instagram channels', () => {
   const calls: { url: string; init?: RequestInit }[] = [];
   let sendResponse: () => Response = () => Response.json({ recipient_id: '1', message_id: 'm_OUT1' });
   let infoResponse: () => Response = () => Response.json({ id: PAGE, name: 'Shop' });
+  let replyN = 0;
   const fakeFetch = async (url: string, init?: RequestInit): Promise<Response> => {
     calls.push({ url, init });
     if (url.includes('/subscribed_apps')) return init?.method === 'POST' ? Response.json({ success: true }) : Response.json({ data: [{ id: 'app' }] });
     if (init?.method === 'POST' && url.endsWith('/messages')) return sendResponse();
+    if (init?.method === 'POST' && /\/(comments|replies)$/.test(url)) return Response.json({ id: `reply_${++replyN}` });
+    if (init?.method === 'POST' && /\/v21\.0\/[\d_]+$/.test(url)) return Response.json({ success: true });   // hide a comment
     if (/\/\d+\?fields=first_name/.test(url)) return Response.json({ first_name: 'Dana', last_name: 'Levi' });
     if (/\/\d+\?fields=name,username/.test(url)) return Response.json({ name: 'Noa IG', username: 'noa' });
     if (url.startsWith('https://scontent.xx.fbcdn.net/')) return new Response(Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==', 'base64'));
@@ -156,5 +159,57 @@ describe('Messenger and Instagram channels', () => {
     calls.length = 0;
     expect((await call('POST', `/conversations/${conv[0].id}/messages`, 'adm@t.io', { text: 'late' })).json()).toEqual({ error: 'outside_reply_window' });
     expect(calls.filter((c) => c.init?.method === 'POST')).toHaveLength(0);
+  });
+
+  it('comments on posts: taken in only when switched on; never answered by the bot; a person picks public or private', async () => {
+    const id = ids.messenger;
+    const feed = (commentId: string, from: string, message: string, verb = 'add') => ({ object: 'page', entry: [{ id: PAGE, time: Date.now(), changes: [{ field: 'feed', value: { item: 'comment', verb, comment_id: commentId, post_id: `${PAGE}_1`, from: { id: from, name: 'Ron Commenter' }, message, created_time: Math.floor(Date.now() / 1000), post: { permalink_url: 'https://www.facebook.com/shop/posts/1' } } }] }] });
+    await hook(id, feed('111_1', '8880001', 'כמה עולה?'));
+    expect((await db.query(`SELECT 1 FROM contacts WHERE external_id = '8880001@fbcomment'`)).rowCount).toBe(0);   // off by default
+    calls.length = 0;
+    expect((await call('PUT', `/channels/${id}/meta`, 'adm@t.io', { pageId: PAGE, pageAccessToken: TOKEN, appSecret: SECRET, comments: true })).json()).toMatchObject({ status: 'connected' });
+    expect(calls.find((c) => c.url.includes('/subscribed_apps') && c.init?.method === 'POST')!.url).toContain(',feed');
+    expect((await call('GET', `/channels/${id}/meta`, 'adm@t.io')).json().comments).toBe(true);
+    await db.query(`INSERT INTO settings (key, value) VALUES ('bot', '{"enabled": true, "mode": "menu", "welcome": "שלום", "items": [{"title": "א", "answer": "ב"}]}') ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`);
+    calls.length = 0;
+    await hook(id, feed('111_2', '8880001', 'כמה עולה?'));
+    await hook(id, feed('111_3', PAGE, 'our own reply'));
+    await hook(id, feed('111_4', '8880001', 'deleted', 'remove'));
+    const conv = (await db.query(`SELECT c.id FROM conversations c JOIN contacts ct ON ct.id = c.contact_id WHERE ct.external_id = '8880001@fbcomment'`)).rows[0].id as string;
+    const inb = (await db.query(`SELECT body, external_id FROM messages WHERE conversation_id = $1 AND direction = 'in'`, [conv])).rows;
+    expect(inb).toHaveLength(1);
+    expect(inb[0].body).toContain('כמה עולה?');
+    expect(inb[0].body).toContain('https://www.facebook.com/shop/posts/1');
+    expect(calls.filter((c) => c.init?.method === 'POST' && c.url.endsWith('/messages'))).toHaveLength(0);   // the bot stayed silent
+    expect((await db.query(`SELECT count(*)::int AS n FROM messages WHERE conversation_id = $1 AND direction = 'out'`, [conv])).rows[0].n).toBe(0);
+
+    expect((await call('POST', `/conversations/${conv}/messages`, 'adm@t.io', { text: 'מחיר בפרטי' })).json()).toEqual({ error: 'comment_reply_mode_required' });
+    calls.length = 0;
+    expect((await call('POST', `/conversations/${conv}/messages`, 'adm@t.io', { text: 'שלחנו לך בפרטי', commentReply: 'public' })).statusCode).toBe(201);
+    const pub = calls.find((c) => c.url.endsWith('/111_2/comments'))!;
+    expect(JSON.parse(pub.init!.body as string)).toEqual({ message: 'שלחנו לך בפרטי' });
+    expect((await call('POST', `/conversations/${conv}/messages`, 'adm@t.io', { text: 'המחיר הוא 100', commentReply: 'private' })).statusCode).toBe(201);
+    const priv = calls.find((c) => c.url.endsWith(`/${PAGE}/messages`))!;
+    expect(JSON.parse(priv.init!.body as string)).toMatchObject({ recipient: { comment_id: '111_2' }, message: { text: 'המחיר הוא 100' } });
+    expect((await db.query(`SELECT reply_mode FROM messages WHERE conversation_id = $1 AND direction = 'out' ORDER BY created_at`, [conv])).rows.map((r) => r.reply_mode)).toEqual(['public', 'private']);
+    // a day later there is no 24-hour block on a comment thread
+    await db.query(`UPDATE messages SET created_at = now() - interval '3 days' WHERE conversation_id = $1 AND direction = 'in'`, [conv]);
+    expect((await call('POST', `/conversations/${conv}/messages`, 'adm@t.io', { text: 'עדיין כאן', commentReply: 'public' })).statusCode).toBe(201);
+
+    calls.length = 0;
+    expect((await call('POST', `/conversations/${conv}/comment/hide`, 'adm@t.io')).json()).toEqual({ ok: true });
+    expect(JSON.parse(calls.find((c) => c.url.endsWith('/111_2'))!.init!.body as string)).toEqual({ is_hidden: true });
+    expect((await db.query(`SELECT action FROM audit_log WHERE action LIKE 'comment.%' ORDER BY created_at`)).rows.map((r) => r.action)).toEqual(['comment.reply_public', 'comment.reply_private', 'comment.reply_public', 'comment.hide']);
+    await db.query(`DELETE FROM settings WHERE key = 'bot'`);
+  });
+
+  it('Instagram comments: a public reply goes to /replies', async () => {
+    const id = ids.instagram;
+    await call('PUT', `/channels/${id}/meta`, 'adm@t.io', { pageId: PAGE, pageAccessToken: TOKEN, appSecret: SECRET, igAccountId: IG, comments: true });
+    await hook(id, { object: 'instagram', entry: [{ id: IG, time: Date.now(), changes: [{ field: 'comments', value: { id: '1790001', text: 'איפה זה?', from: { id: '7770009', username: 'gal' }, media: { id: '1780001' } } }] }] });
+    const conv = (await db.query(`SELECT c.id FROM conversations c JOIN contacts ct ON ct.id = c.contact_id WHERE ct.external_id = '7770009@igcomment'`)).rows[0].id as string;
+    calls.length = 0;
+    expect((await call('POST', `/conversations/${conv}/messages`, 'adm@t.io', { text: 'בתל אביב', commentReply: 'public' })).statusCode).toBe(201);
+    expect(calls.some((c) => c.url.endsWith('/1790001/replies'))).toBe(true);
   });
 });

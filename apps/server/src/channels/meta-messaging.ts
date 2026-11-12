@@ -18,7 +18,12 @@ export interface MetaCreds {
   verifyToken: string;
   /** Instagram only: the Instagram professional account id linked to the Page (the webhook entry id) */
   igAccountId?: string;
+  /** also take in comments on the Page's / account's posts (needs more permissions at Meta) */
+  comments?: boolean;
 }
+/** A conversation that is a public comment thread rather than private messages (its contact id says so). */
+export const isCommentContact = (externalContactId: string) => /@(fb|ig)comment$/.test(externalContactId);
+export type CommentReplyMode = 'public' | 'private';
 export const META_CREDS_KEY = 'meta';
 
 type FetchLike = (url: string, init?: RequestInit) => Promise<Response>;
@@ -39,7 +44,15 @@ interface MetaMessaging {
   postback?: { mid?: string; title?: string; payload?: string };
   reaction?: { mid?: string; action?: 'react' | 'unreact'; emoji?: string; reaction?: string };
 }
-export interface MetaWebhook { object?: string; entry?: { id?: string; time?: number; messaging?: MetaMessaging[] }[] }
+interface MetaChange {
+  field?: string;
+  value?: {
+    item?: string; verb?: string; comment_id?: string; post_id?: string; parent_id?: string; message?: string; created_time?: number;
+    from?: { id?: string; name?: string; username?: string }; post?: { permalink_url?: string };
+    id?: string; text?: string; media?: { id?: string };   // Instagram comment
+  };
+}
+export interface MetaWebhook { object?: string; entry?: { id?: string; time?: number; messaging?: MetaMessaging[]; changes?: MetaChange[] }[] }
 
 export const isMetaMediaUrl = (raw: string): boolean => {
   if (isGraphMediaUrl(raw)) return true;
@@ -109,7 +122,7 @@ export class MetaMessagingAdapter implements ChannelAdapter {
   /** Subscribe the Page to this app's webhooks (POST /{page-id}/subscribed_apps). Without it Meta delivers nothing. */
   async subscribeApp(): Promise<string> {
     if (!this.creds) return 'not_configured';
-    const fields = 'messages,messaging_postbacks,message_reactions';
+    const fields = `messages,messaging_postbacks,message_reactions${this.creds.comments && this.platform === 'messenger' ? ',feed' : ''}`;
     try {
       const res = await this.fetchImpl(this.url(`${this.creds.pageId}/subscribed_apps?subscribed_fields=${fields}`), { method: 'POST', headers: this.auth(), signal: AbortSignal.timeout(10_000) });
       const j = (await res.json().catch(() => ({}))) as { success?: boolean; error?: { code?: number } };
@@ -150,8 +163,55 @@ export class MetaMessagingAdapter implements ChannelAdapter {
         await this.ctx.events.onMessage(msg);
         n++;
       }
+      if (this.creds?.comments) for (const ch of entry.changes ?? []) if (await this.handleComment(ch)) n++;
     }
     return n;
+  }
+
+  /** A new comment on one of our posts becomes a message in that commenter's comment thread. Our own replies, edits and removals are skipped. */
+  private async handleComment(ch: MetaChange): Promise<boolean> {
+    const v = ch.value;
+    if (!v) return false;
+    const fb = this.platform === 'messenger';
+    if (fb ? (ch.field !== 'feed' || v.item !== 'comment' || v.verb !== 'add') : ch.field !== 'comments') return false;
+    const commentId = fb ? v.comment_id : v.id;
+    const from = v.from?.id;
+    const text = (fb ? v.message : v.text) ?? '';
+    if (!commentId || !/^[\d_]{3,80}$/.test(commentId) || !from || !/^\d{3,40}$/.test(from) || from === this.creds?.pageId || from === this.creds?.igAccountId) return false;
+    const link = fb && v.post?.permalink_url && /^https:\/\/(www\.)?facebook\.com\//.test(v.post.permalink_url) ? v.post.permalink_url : null;
+    await this.ctx.events.onMessage({
+      externalContactId: `${from}@${fb ? 'fbcomment' : 'igcomment'}`,
+      contactName: (v.from?.name ?? v.from?.username)?.slice(0, 100),
+      externalMessageId: commentId,
+      text: `${text.slice(0, 8000)}\n\n(תגובה ציבורית על פוסט${link ? `: ${link}` : fb ? '' : ' באינסטגרם'})`,
+      timestamp: v.created_time ? new Date(v.created_time * 1000) : new Date(),
+    });
+    return true;
+  }
+
+  /**
+   * Answer a comment. public: a reply under the comment that everyone sees; private: one private message to its author
+   * (Meta allows one, within a few days of the comment). Endpoints per Meta's Graph API docs; verify against the current reference.
+   */
+  async replyComment(commentId: string, text: string, mode: CommentReplyMode): Promise<{ externalMessageId?: string }> {
+    if (!this.creds || !this.active) throw new Error('channel_not_connected');
+    if (mode === 'private') {
+      const out = await this.send({ recipient: { comment_id: commentId }, message: { text: text.slice(0, TEXT_LIMIT[this.platform]) } });
+      return { externalMessageId: out.message_id };
+    }
+    const path = this.platform === 'instagram' ? `${commentId}/replies` : `${commentId}/comments`;
+    const res = await this.fetchImpl(this.url(path), { method: 'POST', headers: { ...this.auth(), 'content-type': 'application/json' }, body: JSON.stringify({ message: text.slice(0, 8000) }), signal: AbortSignal.timeout(15_000) });
+    const j = (await res.json().catch(() => ({}))) as { id?: string; error?: { code?: number } };
+    if (!res.ok) throw new Error(`meta_send_failed_${j.error?.code ?? res.status}`);
+    return { externalMessageId: j.id };
+  }
+
+  /** Hide a comment from the public (it stays visible to its author and friends, per Meta). */
+  async hideComment(commentId: string): Promise<void> {
+    if (!this.creds || !this.active) throw new Error('channel_not_connected');
+    const body = this.platform === 'instagram' ? { hide: true } : { is_hidden: true };
+    const res = await this.fetchImpl(this.url(commentId), { method: 'POST', headers: { ...this.auth(), 'content-type': 'application/json' }, body: JSON.stringify(body), signal: AbortSignal.timeout(15_000) });
+    if (!res.ok) throw new Error(`meta_hide_failed_${res.status}`);
   }
 
   private toInbound(ev: MetaMessaging, contact: string): InboundMessage | null {
@@ -228,6 +288,7 @@ export class MetaMessagingAdapter implements ChannelAdapter {
   private recipient = (contact: string) => ({ id: contact.split('@')[0] });
 
   async sendText(externalContactId: string, text: string): Promise<{ externalMessageId?: string }> {
+    if (isCommentContact(externalContactId)) throw new Error('comment_reply_mode_required');   // a person chooses public or private
     let last: { message_id?: string } = {};
     for (const part of splitText(text, TEXT_LIMIT[this.platform])) {
       last = await this.send({ recipient: this.recipient(externalContactId), messaging_type: 'RESPONSE', message: { text: part } });
@@ -244,6 +305,7 @@ export class MetaMessagingAdapter implements ChannelAdapter {
   }
 
   async sendMedia(externalContactId: string, media: OutboundMedia): Promise<{ externalMessageId?: string }> {
+    if (isCommentContact(externalContactId)) throw new Error('media_unsupported');
     const type = media.mime.startsWith('image/') ? 'image' : media.mime.startsWith('video/') ? 'video' : media.mime.startsWith('audio/') ? 'audio' : 'file';
     if (this.platform === 'instagram' && type === 'file') throw new Error('media_unsupported');   // Instagram DMs take pictures, video and audio only (verify)
     const form = new FormData();

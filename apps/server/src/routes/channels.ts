@@ -181,6 +181,7 @@ export function channelRoutes(app: FastifyInstance, db: Db, mgr: ChannelManager,
       pageAccessToken: z.string().min(20).max(1000).regex(/^[\w.\-~+/=]+$/),
       appSecret: z.string().min(16).max(200).regex(/^[\w.\-~+/=]+$/),
       igAccountId: z.string().regex(/^\d{5,32}$/).optional(),
+      comments: z.boolean().optional(),
     }).safeParse(body);
     if (!p.success) return reply.code(400).send({ error: 'bad_request' });
     if (!b.success) {
