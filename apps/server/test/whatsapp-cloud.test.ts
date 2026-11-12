@@ -161,6 +161,21 @@ describe('official WhatsApp channel', () => {
     expect((await app.inject({ method: 'POST', url: `/webhooks/whatsapp/${channelId}`, payload: 'not json', headers: { 'content-type': 'application/json' } })).statusCode).toBe(403);
   });
 
+  it('tells apart "Meta never reached us" from a wrong App secret or verify token', async () => {
+    const last = async () => (await call('GET', `/channels/${channelId}/cloud`, 'adm@t.io')).json().lastAttempt;
+    const raw = JSON.stringify(msg('wamid.SIG', 'x'));
+    await app.inject({ method: 'POST', url: `/webhooks/whatsapp/${channelId}`, payload: raw, headers: { 'content-type': 'application/json', 'x-hub-signature-256': 'sha256=' + createHmac('sha256', 'a-different-secret').update(raw).digest('hex') } });
+    expect((await last()).outcome).toBe('bad_signature');
+    await app.inject({ method: 'POST', url: `/webhooks/whatsapp/${channelId}`, payload: raw, headers: { 'content-type': 'application/json' } });
+    expect((await last()).outcome).toBe('unsigned');
+    await app.inject({ url: `/webhooks/whatsapp/${channelId}?hub.mode=subscribe&hub.verify_token=wrong&hub.challenge=1` });
+    expect((await last()).outcome).toBe('handshake_bad_token');
+    await app.inject({ url: `/webhooks/whatsapp/${channelId}?hub.mode=subscribe&hub.verify_token=${encodeURIComponent(verifyToken)}&hub.challenge=1` });
+    expect((await last()).outcome).toBe('handshake_ok');
+    await hook(msg('wamid.SIG2', 'ok'));
+    expect((await last()).outcome).toBe('ok');
+  });
+
   it('records when the last signed webhook arrived', async () => {
     expect((await hook(msg('wamid.T1', 'ping'))).statusCode).toBe(200);
     const at = (await call('GET', `/channels/${channelId}/cloud`, 'adm@t.io')).json().lastWebhookAt as string;

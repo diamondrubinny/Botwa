@@ -24,6 +24,7 @@ export function webhookRoutes(app: FastifyInstance, db: Db, mgr: ChannelManager)
       if (!p.success || !(await isCloud(p.data.channelId))) return reply.code(404).send('not found');
       const q = req.query as Record<string, string | undefined>;
       const ok = mgr.cloudAdapter(p.data.channelId)?.verifyHandshake(q['hub.mode'], q['hub.verify_token'], q['hub.challenge']);
+      mgr.noteWebhookAttempt(p.data.channelId, ok ? 'handshake_ok' : mgr.cloudAdapter(p.data.channelId) ? 'handshake_bad_token' : 'not_running');
       return ok ? reply.type('text/plain').send(ok) : reply.code(403).send('forbidden');
     });
 
@@ -31,14 +32,15 @@ export function webhookRoutes(app: FastifyInstance, db: Db, mgr: ChannelManager)
       const p = idParam.safeParse(req.params);
       if (!p.success || !(await isCloud(p.data.channelId))) return reply.code(404).send({ error: 'not_found' });
       const adapter = mgr.cloudAdapter(p.data.channelId);
-      if (!adapter || !adapter.isActive()) return reply.code(503).send({ error: 'channel_not_running' }); // Meta retries later
+      if (!adapter || !adapter.isActive()) { mgr.noteWebhookAttempt(p.data.channelId, 'not_running'); return reply.code(503).send({ error: 'channel_not_running' }); } // Meta retries later
       const raw = req.body as Buffer;
       if (!Buffer.isBuffer(raw) || !adapter.checkSignature(raw, req.headers['x-hub-signature-256'] as string | undefined)) {
+        mgr.noteWebhookAttempt(p.data.channelId, req.headers['x-hub-signature-256'] ? 'bad_signature' : 'unsigned');
         return reply.code(403).send({ error: 'bad_signature' });
       }
       let payload: WaWebhook;
       try { payload = JSON.parse(raw.toString('utf8')) as WaWebhook; } catch { return reply.code(400).send({ error: 'bad_request' }); }
-      mgr.noteCloudWebhook(p.data.channelId);   // a signed delivery arrived: the webhook works (shown on the channel's settings)
+      mgr.noteCloudWebhook(p.data.channelId); mgr.noteWebhookAttempt(p.data.channelId, 'ok');   // a signed delivery arrived: the webhook works (shown on the channel's settings)
       try {
         await adapter.handleWebhook(payload);
       } catch (e) {
@@ -55,18 +57,22 @@ export function webhookRoutes(app: FastifyInstance, db: Db, mgr: ChannelManager)
       if (!p.success || !(await isMeta(p.data.channelId))) return reply.code(404).send('not found');
       const q = req.query as Record<string, string | undefined>;
       const ok = mgr.metaAdapter(p.data.channelId)?.verifyHandshake(q['hub.mode'], q['hub.verify_token'], q['hub.challenge']);
+      mgr.noteWebhookAttempt(p.data.channelId, ok ? 'handshake_ok' : mgr.metaAdapter(p.data.channelId) ? 'handshake_bad_token' : 'not_running');
       return ok ? reply.type('text/plain').send(ok) : reply.code(403).send('forbidden');
     });
     scope.post('/webhooks/meta/:channelId', { config: limit }, async (req, reply) => {
       const p = idParam.safeParse(req.params);
       if (!p.success || !(await isMeta(p.data.channelId))) return reply.code(404).send({ error: 'not_found' });
       const adapter = mgr.metaAdapter(p.data.channelId);
-      if (!adapter || !adapter.isActive()) return reply.code(503).send({ error: 'channel_not_running' });
+      if (!adapter || !adapter.isActive()) { mgr.noteWebhookAttempt(p.data.channelId, 'not_running'); return reply.code(503).send({ error: 'channel_not_running' }); }
       const raw = req.body as Buffer;
-      if (!Buffer.isBuffer(raw) || !adapter.checkSignature(raw, req.headers['x-hub-signature-256'] as string | undefined)) return reply.code(403).send({ error: 'bad_signature' });
+      if (!Buffer.isBuffer(raw) || !adapter.checkSignature(raw, req.headers['x-hub-signature-256'] as string | undefined)) {
+        mgr.noteWebhookAttempt(p.data.channelId, req.headers['x-hub-signature-256'] ? 'bad_signature' : 'unsigned');
+        return reply.code(403).send({ error: 'bad_signature' });
+      }
       let payload: MetaWebhook;
       try { payload = JSON.parse(raw.toString('utf8')) as MetaWebhook; } catch { return reply.code(400).send({ error: 'bad_request' }); }
-      mgr.noteCloudWebhook(p.data.channelId);
+      mgr.noteCloudWebhook(p.data.channelId); mgr.noteWebhookAttempt(p.data.channelId, 'ok');
       try {
         await adapter.handleWebhook(payload);
       } catch (e) {

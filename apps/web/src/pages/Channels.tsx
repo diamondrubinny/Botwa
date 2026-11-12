@@ -298,7 +298,7 @@ function LinkPanel({ channel, onClose }: { channel: Channel; onClose: () => void
 
 /** Credentials for the official WhatsApp channel, plus the webhook details to paste into Meta's app dashboard. */
 function CloudPanel({ channel, onSaved }: { channel: Channel; onSaved: () => void }) {
-  const [info, setInfo] = useState<{ configured: boolean; phoneNumberId?: string; verifyToken?: string; wabaId?: string; webhookUrl: string; lastWebhookAt?: string | null } | null>(null);
+  const [info, setInfo] = useState<{ configured: boolean; phoneNumberId?: string; verifyToken?: string; wabaId?: string; webhookUrl: string; lastWebhookAt?: string | null; lastAttempt?: { at: string; outcome: string } | null } | null>(null);
   const [phoneNumberId, setPhoneNumberId] = useState('');
   const [wabaId, setWabaId] = useState('');
   const [accessToken, setAccessToken] = useState('');
@@ -347,7 +347,7 @@ function CloudPanel({ channel, onSaved }: { channel: Channel; onSaved: () => voi
         <button className="primary" type="submit" disabled={busy}>{info?.configured ? 'עדכון ופתיחת חיבור' : 'שמירה וחיבור'}</button>
         <p role="status" className={msg.startsWith('החיבור הצליח') ? 'ok' : 'error'}>{msg}</p>
       </form>
-      {info?.configured && <WebhookCheck channelId={channel.id} connected={channel.status === 'connected'} lastWebhookAt={info.lastWebhookAt ?? null} />}
+      {info?.configured && <WebhookCheck channelId={channel.id} connected={channel.status === 'connected'} lastWebhookAt={info.lastWebhookAt ?? null} lastAttempt={info.lastAttempt} />}
       {info?.configured && <TemplatesPanel channelId={channel.id} hasWaba={!!info.wabaId} />}
     </div>
   );
@@ -414,7 +414,7 @@ function EmailPanel({ channel, onSaved }: { channel: Channel; onSaved: () => voi
 /** Messenger / Instagram: Page credentials, the webhook details for Meta's dashboard and the receive check. */
 function MetaPanel({ channel, onSaved }: { channel: Channel; onSaved: () => void }) {
   const ig = channel.type === 'instagram';
-  const [info, setInfo] = useState<{ configured: boolean; pageId?: string; igAccountId?: string; verifyToken?: string; webhookUrl: string; lastWebhookAt?: string | null; comments?: boolean } | null>(null);
+  const [info, setInfo] = useState<{ configured: boolean; pageId?: string; igAccountId?: string; verifyToken?: string; webhookUrl: string; lastWebhookAt?: string | null; comments?: boolean; lastAttempt?: { at: string; outcome: string } | null } | null>(null);
   const [comments, setComments] = useState(false);
   const [pageId, setPageId] = useState('');
   const [igId, setIgId] = useState('');
@@ -467,13 +467,21 @@ function MetaPanel({ channel, onSaved }: { channel: Channel; onSaved: () => void
         <button className="primary" type="submit" disabled={busy}>{info?.configured ? 'עדכון ופתיחת חיבור' : 'שמירה וחיבור'}</button>
         <p role="status" className={msg ? (msg.ok ? 'ok' : 'error') : undefined}>{msg?.text}</p>
       </form>
-      {info?.configured && <WebhookCheck kind="meta" channelId={channel.id} connected={channel.status === 'connected'} lastWebhookAt={info.lastWebhookAt ?? null} />}
+      {info?.configured && <WebhookCheck kind="meta" channelId={channel.id} connected={channel.status === 'connected'} lastWebhookAt={info.lastWebhookAt ?? null} lastAttempt={info.lastAttempt} />}
     </div>
   );
 }
 
 /** "No messages arrive": link the business account to the app again and show whether Meta delivers to us at all. */
-function WebhookCheck({ channelId, connected, lastWebhookAt, kind = 'cloud' }: { channelId: string; connected: boolean; lastWebhookAt: string | null; kind?: 'cloud' | 'meta' }) {
+const ATTEMPT: Record<string, { ok: boolean; text: string }> = {
+  ok: { ok: true, text: 'הודעה חתומה התקבלה ועובדה.' },
+  handshake_ok: { ok: true, text: 'Meta אימתה את כתובת ה-Webhook (Verify token תקין). עכשיו צריך שהשדה messages יהיה מסומן ב-Subscribe, ואז לשלוח הודעת ניסיון.' },
+  handshake_bad_token: { ok: false, text: 'Meta ניסתה לאמת את הכתובת, אבל ה-Verify token שהוזן אצל Meta לא תואם לזה שמוצג כאן. העתיקו אותו שוב בדיוק.' },
+  bad_signature: { ok: false, text: 'הגיעה בקשה מ-Meta, אבל החתימה לא תואמת. כמעט תמיד זה App secret שגוי: העתיקו אותו מחדש מהגדרות האפליקציה ← Basic ושמרו כאן.' },
+  unsigned: { ok: false, text: 'הגיעה בקשה בלי חתימה, כלומר לא מ-Meta (או דרך שרת ביניים שמסיר כותרות). הבקשה נדחתה.' },
+  not_running: { ok: false, text: 'Meta פנתה לשרת בזמן שהערוץ לא היה פעיל, ולכן הבקשה נדחתה. ודאו שהערוץ מחובר. Meta תנסה שוב.' },
+};
+function WebhookCheck({ channelId, connected, lastWebhookAt, lastAttempt, kind = 'cloud' }: { channelId: string; connected: boolean; lastWebhookAt: string | null; lastAttempt?: { at: string; outcome: string } | null; kind?: 'cloud' | 'meta' }) {
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState('');
   const [ok, setOk] = useState(false);
@@ -492,6 +500,12 @@ function WebhookCheck({ channelId, connected, lastWebhookAt, kind = 'cloud' }: {
     <section aria-labelledby={`whk-${channelId}`} className="fieldset">
       <h4 id={`whk-${channelId}`}>קבלת הודעות מ-Meta</h4>
       <p>{when ? <>ההודעה האחרונה מ-Meta התקבלה ב-<time dateTime={lastWebhookAt!}>{when}</time>.</> : 'עוד לא התקבלה הודעה מ-Meta מאז שהשרת עלה. שלחו הודעת ניסיון למספר העסקי מטלפון אחר.'}</p>
+      {lastAttempt && ATTEMPT[lastAttempt.outcome] && (
+        <p className={ATTEMPT[lastAttempt.outcome]!.ok ? 'ok' : 'error'}>
+          <strong>הפנייה האחרונה לכתובת ה-Webhook (<time dateTime={lastAttempt.at}>{new Date(lastAttempt.at).toLocaleString('he-IL')}</time>):</strong> {ATTEMPT[lastAttempt.outcome]!.text}
+        </p>
+      )}
+      {!lastAttempt && <p className="hint">אף בקשה לא הגיעה לכתובת ה-Webhook מאז שהשרת עלה. אם Meta כבר שלחה, היא לא מגיעה לשרת: בדקו את כתובת ה-Callback URL אצל Meta, ושהאתר נגיש מבחוץ ב-HTTPS עם תעודה תקפה.</p>}
       {kind === 'meta'
         ? <p className="hint">כדי שהודעות יגיעו צריך שני דברים: (1) הדף רשום לאפליקציה. הכפתור עושה זאת. (2) בהגדרות ה-Webhook של האפליקציה (Messenger או Instagram) מסומנים השדות <span dir="ltr">messages</span> ו-<span dir="ltr">messaging_postbacks</span>. יש לאמת מול התיעוד הרשמי.</p>
         : <p className="hint">כדי שהודעות יגיעו צריך שני דברים: (1) האפליקציה רשומה לחשבון העסקי (WABA). הכפתור עושה זאת. (2) ב-WhatsApp ← Configuration ← Webhook fields, השדה <span dir="ltr">messages</span> מסומן ב-Subscribe. עדכוני סטטוס (נשלח / נמסר / נקרא) מגיעים בתוך אותו שדה. יש לאמת מול התיעוד הרשמי.</p>}

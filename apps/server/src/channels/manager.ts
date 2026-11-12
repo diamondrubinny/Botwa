@@ -494,12 +494,21 @@ export class ChannelManager {
   /** When a signed webhook from Meta last arrived for each official channel (since this server started). */
   private cloudWebhookAt = new Map<string, string>();
   noteCloudWebhook(channelId: string): void { this.cloudWebhookAt.set(channelId, new Date().toISOString()); }
+  /**
+   * The last request Meta (or anyone) made to the channel's webhook and what happened to it: the screen can then tell
+   * "Meta never reached the server" from "it reached it but the App secret / verify token does not match".
+   */
+  private webhookAttempt = new Map<string, { at: string; outcome: string }>();
+  noteWebhookAttempt(channelId: string, outcome: 'ok' | 'bad_signature' | 'unsigned' | 'not_running' | 'handshake_ok' | 'handshake_bad_token'): void {
+    this.webhookAttempt.set(channelId, { at: new Date().toISOString(), outcome });
+  }
+  lastWebhookAttempt(channelId: string): { at: string; outcome: string } | null { return this.webhookAttempt.get(channelId) ?? null; }
 
-  async getCloudConfig(channelId: string): Promise<{ configured: boolean; phoneNumberId?: string; verifyToken?: string; wabaId?: string; lastWebhookAt?: string | null }> {
+  async getCloudConfig(channelId: string): Promise<{ configured: boolean; phoneNumberId?: string; verifyToken?: string; wabaId?: string; lastWebhookAt?: string | null; lastAttempt?: { at: string; outcome: string } | null }> {
     const raw = await createAuthStore(this.db, channelId, this.cfg.ENCRYPTION_KEY).get(CLOUD_CREDS_KEY);
     if (!raw) return { configured: false };
     const c = JSON.parse(raw) as CloudCreds;
-    return { configured: true, phoneNumberId: c.phoneNumberId, verifyToken: c.verifyToken, wabaId: c.wabaId, lastWebhookAt: this.cloudWebhookAt.get(channelId) ?? null };
+    return { configured: true, phoneNumberId: c.phoneNumberId, verifyToken: c.verifyToken, wabaId: c.wabaId, lastWebhookAt: this.cloudWebhookAt.get(channelId) ?? null, lastAttempt: this.lastWebhookAttempt(channelId) };
   }
 
   /** Save the official-API credentials (encrypted at rest) and restart the channel so they take effect. The verify token is kept across edits. */
@@ -529,11 +538,11 @@ export class ChannelManager {
     return this.sender.run(channelId, this.effective(channelId, await this.loadSending()), () => a.replyComment(commentId, text, mode), { maxWaitMs: 8_000 });
   }
 
-  async getMetaConfig(channelId: string): Promise<{ configured: boolean; pageId?: string; igAccountId?: string; verifyToken?: string; lastWebhookAt?: string | null; comments?: boolean }> {
+  async getMetaConfig(channelId: string): Promise<{ configured: boolean; pageId?: string; igAccountId?: string; verifyToken?: string; lastWebhookAt?: string | null; comments?: boolean; lastAttempt?: { at: string; outcome: string } | null }> {
     const raw = await createAuthStore(this.db, channelId, this.cfg.ENCRYPTION_KEY).get(META_CREDS_KEY);
     if (!raw) return { configured: false };
     const c = JSON.parse(raw) as MetaCreds;
-    return { configured: true, pageId: c.pageId, igAccountId: c.igAccountId, verifyToken: c.verifyToken, lastWebhookAt: this.cloudWebhookAt.get(channelId) ?? null, comments: !!c.comments };
+    return { configured: true, pageId: c.pageId, igAccountId: c.igAccountId, verifyToken: c.verifyToken, lastWebhookAt: this.cloudWebhookAt.get(channelId) ?? null, comments: !!c.comments, lastAttempt: this.lastWebhookAttempt(channelId) };
   }
 
   /** Save Page credentials (encrypted at rest) and restart the channel. The verify token is kept across edits. */
