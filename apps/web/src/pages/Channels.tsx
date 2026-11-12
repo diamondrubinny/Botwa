@@ -487,6 +487,17 @@ function WebhookCheck({ channelId, connected, lastWebhookAt, lastAttempt, kind =
   const [ok, setOk] = useState(false);
   type Hook = { application?: string; whatsapp_business_account?: string; phone_number?: string; effective: string | null; ours: string; matches: boolean };
   const [hook, setHook] = useState<Hook | null>(null);
+  type AppFields = { appId: string; callbackUrl: string | null; fields: string[]; messages: boolean; urlMatches: boolean };
+  const [app, setApp] = useState<AppFields | null | undefined>(undefined);
+  const [fieldsMsg, setFieldsMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  async function subscribeFields() {
+    setFieldsMsg(null);
+    try {
+      const r = await api<{ result: string }>('POST', `/channels/${channelId}/cloud/subscribe-fields`);
+      setFieldsMsg(r.result === 'ok' ? { ok: true, text: 'Meta אישרה: האפליקציה רשומה לשדה messages עם הכתובת של השרת הזה.' } : { ok: false, text: errText(r.result) });
+      if (r.result === 'ok') void check();
+    } catch (er) { setFieldsMsg({ ok: false, text: errText(er instanceof ApiError ? er.code : 'generic') }); }
+  }
   const [routeMsg, setRouteMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [confirmRoute, setConfirmRoute] = useState(false);
   async function routeHere() {
@@ -500,8 +511,9 @@ function WebhookCheck({ channelId, connected, lastWebhookAt, lastAttempt, kind =
   async function check() {
     setBusy(true); setMsg('');
     try {
-      const r = await api<{ result: string; subscribed: boolean | null; webhook?: Hook | null }>('POST', `/channels/${channelId}/${kind}/subscribe`);
+      const r = await api<{ result: string; subscribed: boolean | null; webhook?: Hook | null; appFields?: AppFields | null }>('POST', `/channels/${channelId}/${kind}/subscribe`);
       setHook(r.webhook ?? null);
+      setApp(kind === 'cloud' ? (r.appFields ?? null) : undefined);
       const good = r.result === 'ok' && r.subscribed !== false;
       setOk(good);
       setMsg(good ? (kind === 'meta' ? 'הדף רשום לאפליקציה. אם עדיין לא מגיעות הודעות, ודאו שבהגדרות ה-Webhook של האפליקציה מסומנים messages ו-messaging_postbacks.' : 'החשבון העסקי מחובר לאפליקציה. אם עדיין לא מגיעות הודעות, ודאו שהשדה messages מסומן ב-Subscribe בהגדרות ה-Webhook אצל Meta.') : errText(r.result === 'ok' ? 'meta_check_failed' : r.result));
@@ -538,6 +550,18 @@ function WebhookCheck({ channelId, connected, lastWebhookAt, lastAttempt, kind =
         </div>
       )}
       {routeMsg && <p role="status" className={routeMsg.ok ? 'ok' : 'error'}>{routeMsg.text}</p>}
+      {app === null && <p className="error" role="status">לא ניתן לבדוק את רישום ה-Webhook של האפליקציה. בדרך כלל זה App secret שגוי, או אסימון ששייך לאפליקציה אחרת.</p>}
+      {app && (app.messages && app.urlMatches
+        ? <div className="ok" role="status">
+            <p><strong>האפליקציה (App ID <span dir="ltr">{app.appId}</span>) רשומה לשדה messages, עם הכתובת של השרת הזה.</strong></p>
+            <p>אם עדיין לא מגיעות הודעות, כמעט בטוח שהאפליקציה עוד במצב פיתוח (Development). כך Meta שולחת רק הודעות בדיקה מהלוח ולא הודעות אמיתיות. כדי לעבור ל-Live: ב-developers.facebook.com ← My Apps ← האפליקציה, ובראש העמוד App Mode ← Live. Meta תבקש כתובת למדיניות הפרטיות, למשל <span dir="ltr">{location.origin}/legal/privacy</span>. יש לאמת מול התיעוד של Meta.</p>
+          </div>
+        : <div className="error" role="status">
+            <p><strong>{!app.messages ? 'האפליקציה לא רשומה לשדה messages, ולכן Meta לא שולחת הודעות.' : 'האפליקציה רשומה לשדה messages, אבל עם כתובת אחרת:'}</strong></p>
+            {app.callbackUrl && !app.urlMatches && <p dir="ltr"><code>{app.callbackUrl}</code></p>}
+            <button type="button" className="primary" onClick={() => void subscribeFields()}>רישום האפליקציה לשדה messages עם הכתובת של השרת הזה</button>
+          </div>)}
+      {fieldsMsg && <p role="status" className={fieldsMsg.ok ? 'ok' : 'error'}>{fieldsMsg.text}</p>}
       <ConfirmDialog open={confirmRoute} title="הפניית ההודעות לשרת הזה"
         message={`Meta תשלח את הודעות המספר הזה לכתובת ${hook?.ours ?? ''} במקום ${hook?.effective ?? 'הכתובת הנוכחית'}. אם ספק אחר מקבל היום את ההודעות, הוא יפסיק לקבל אותן.`}
         confirmLabel="הפניה לכאן" onCancel={() => setConfirmRoute(false)}

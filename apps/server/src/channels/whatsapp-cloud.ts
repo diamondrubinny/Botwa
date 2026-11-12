@@ -161,6 +161,41 @@ export class WhatsAppCloudAdapter implements ChannelAdapter {
     } catch { return 'meta_unreachable'; }
   }
 
+  /**
+   * The app-level webhook subscription (which fields Meta sends at all, and to which URL): GET /{app-id}/subscriptions with the
+   * app access token "{app-id}|{app-secret}". The app id comes from GET /app with the saved access token. Per Meta's Graph API
+   * "App Subscriptions" reference; verify against the official docs. null when Meta does not answer.
+   */
+  private async appToken(): Promise<{ appId: string; token: string } | null> {
+    if (!this.creds) return null;
+    const res = await this.fetchImpl(this.url('app?fields=id'), { headers: this.auth(), signal: AbortSignal.timeout(10_000) }).catch(() => null);
+    if (!res?.ok) return null;
+    const j = (await res.json().catch(() => ({}))) as { id?: string };
+    return j.id && /^\d{5,32}$/.test(j.id) ? { appId: j.id, token: `${j.id}|${this.creds.appSecret}` } : null;
+  }
+
+  async appSubscription(): Promise<{ appId: string; callbackUrl: string | null; fields: string[]; active: boolean } | null> {
+    const t = await this.appToken();
+    if (!t) return null;
+    const res = await this.fetchImpl(this.url(`${t.appId}/subscriptions`), { headers: { authorization: `Bearer ${t.token}` }, signal: AbortSignal.timeout(10_000) }).catch(() => null);
+    if (!res?.ok) return null;
+    const j = (await res.json().catch(() => ({}))) as { data?: { object?: string; callback_url?: string; active?: boolean; fields?: { name?: string }[] }[] };
+    const wa = (j.data ?? []).find((d) => d.object === 'whatsapp_business_account');
+    return { appId: t.appId, callbackUrl: wa?.callback_url ?? null, fields: (wa?.fields ?? []).map((f) => f.name ?? '').filter(Boolean), active: wa?.active !== false && !!wa };
+  }
+
+  /** Subscribe the app to the WhatsApp "messages" field at `url` (Meta verifies it with the handshake first). */
+  async subscribeAppFields(url: string): Promise<string> {
+    const t = await this.appToken();
+    if (!t || !this.creds) return 'meta_app_unknown';
+    const body = new URLSearchParams({ object: 'whatsapp_business_account', callback_url: url, fields: 'messages', verify_token: this.creds.verifyToken, include_values: 'true' });
+    const res = await this.fetchImpl(this.url(`${t.appId}/subscriptions`), { method: 'POST', headers: { authorization: `Bearer ${t.token}`, 'content-type': 'application/x-www-form-urlencoded' }, body: body.toString(), signal: AbortSignal.timeout(20_000) }).catch(() => null);
+    if (!res) return 'meta_unreachable';
+    const j = (await res.json().catch(() => ({}))) as { success?: boolean; error?: { code?: number } };
+    if (res.ok && j.success !== false) return 'ok';
+    return metaCheckError(res.status, j.error?.code);
+  }
+
   /** Is any app subscribed to the business account? null when it cannot be told (no account id, or Meta did not answer). */
   async subscribedApps(): Promise<boolean | null> {
     if (!this.creds?.wabaId) return null;

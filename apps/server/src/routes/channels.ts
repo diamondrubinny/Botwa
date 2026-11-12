@@ -122,7 +122,22 @@ export function channelRoutes(app: FastifyInstance, db: Db, mgr: ChannelManager,
     const targets = await a.webhookTargets();
     const effective = targets ? (targets.phone_number ?? targets.whatsapp_business_account ?? targets.application ?? null) : null;
     const ours = cloudWebhook(p.data.id, cfg.APP_ORIGIN);
-    return { result, subscribed: await a.subscribedApps(), webhook: targets ? { ...targets, effective, ours, matches: effective === ours } : null };
+    const sub = await a.appSubscription();
+    const appFields = sub ? { appId: sub.appId, callbackUrl: sub.callbackUrl, fields: sub.fields, messages: sub.active && sub.fields.includes('messages'), urlMatches: sub.callbackUrl === ours } : null;
+    return { result, subscribed: await a.subscribedApps(), webhook: targets ? { ...targets, effective, ours, matches: effective === ours } : null, appFields };
+  });
+
+  // Subscribe the app to the WhatsApp "messages" field with this server as its callback. Admin only, audited.
+  app.post('/channels/:id/cloud/subscribe-fields', { preHandler: adminOnly, config: { rateLimit: { max: 5, timeWindow: '1 minute' } } }, async (req, reply) => {
+    const p = idParam.safeParse(req.params);
+    if (!p.success || (await db.query(`SELECT 1 FROM channels WHERE id=$1 AND type='whatsapp_cloud'`, [p.data.id])).rowCount !== 1) return reply.code(404).send({ error: 'not_found' });
+    const a = mgr.cloudAdapter(p.data.id);
+    if (!a || !a.isActive()) return reply.code(409).send({ error: 'channel_not_connected' });
+    const url = cloudWebhook(p.data.id, cfg.APP_ORIGIN);
+    if (!url.startsWith('https://')) return reply.code(409).send({ error: 'webhook_needs_https' });
+    const result = await a.subscribeAppFields(url);
+    await audit(db, { actorId: req.user!.id, action: 'channel.cloud_subscribe_fields', target: p.data.id, ip: req.ip, meta: { result } });
+    return { result };
   });
 
   // Send this number's webhooks here (Meta checks the address with the handshake before accepting it). Admin only, audited.
