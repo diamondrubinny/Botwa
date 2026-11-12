@@ -292,9 +292,9 @@ function CloudPanel({ channel, onSaved }: { channel: Channel; onSaved: () => voi
     e.preventDefault();
     setBusy(true); setMsg('');
     try {
-      const r = await api<{ status: string }>('PUT', `/channels/${channel.id}/cloud`, { phoneNumberId, accessToken, appSecret, ...(wabaId.trim() ? { wabaId: wabaId.trim() } : {}) });
+      const r = await api<{ status: string; error?: string }>('PUT', `/channels/${channel.id}/cloud`, { phoneNumberId, accessToken, appSecret, ...(wabaId.trim() ? { wabaId: wabaId.trim() } : {}) });
       setAccessToken(''); setAppSecret('');
-      setMsg(r.status === 'connected' ? 'החיבור הצליח.' : 'הפרטים נשמרו אך החיבור ל-Meta נכשל. בדקו את מזהה המספר ואת האסימון.');
+      setMsg(r.status === 'connected' ? 'החיבור הצליח.' : `הפרטים נשמרו, אבל החיבור ל-Meta נכשל: ${errText(r.error ?? 'meta_check_failed')}`);
       onSaved();
     } catch (er) { setMsg(errText(er instanceof ApiError ? er.code : 'generic')); }
     setBusy(false);
@@ -320,8 +320,8 @@ function CloudPanel({ channel, onSaved }: { channel: Channel; onSaved: () => voi
       )}
       <form onSubmit={save}>
         <div className="field"><label htmlFor={`pn-${channel.id}`}>Phone number ID</label><input id={`pn-${channel.id}`} required inputMode="numeric" dir="ltr" pattern="\d{5,32}" value={phoneNumberId} onChange={(e) => setPhoneNumberId(e.target.value.replace(/\D/g, ''))} /></div>
-        <div className="field"><label htmlFor={`tk-${channel.id}`}>אסימון גישה (Access token)</label><input id={`tk-${channel.id}`} required type="password" autoComplete="off" dir="ltr" minLength={20} value={accessToken} onChange={(e) => setAccessToken(e.target.value.trim())} /></div>
-        <div className="field"><label htmlFor={`as-${channel.id}`}>App secret</label><input id={`as-${channel.id}`} required type="password" autoComplete="off" dir="ltr" minLength={16} value={appSecret} onChange={(e) => setAppSecret(e.target.value.trim())} /></div>
+        <div className="field"><label htmlFor={`tk-${channel.id}`}>אסימון גישה (Access token)</label><input id={`tk-${channel.id}`} required type="password" autoComplete="new-password" data-lpignore="true" data-1p-ignore="true" data-form-type="other" spellCheck={false} dir="ltr" minLength={20} value={accessToken} onChange={(e) => setAccessToken(e.target.value.trim())} /></div>
+        <div className="field"><label htmlFor={`as-${channel.id}`}>App secret</label><input id={`as-${channel.id}`} required type="password" autoComplete="new-password" data-lpignore="true" data-1p-ignore="true" data-form-type="other" spellCheck={false} dir="ltr" minLength={16} value={appSecret} onChange={(e) => setAppSecret(e.target.value.trim())} /></div>
         <div className="field"><label htmlFor={`wb-${channel.id}`}>WhatsApp Business Account ID (אופציונלי: לתבניות הודעה)</label><input id={`wb-${channel.id}`} inputMode="numeric" dir="ltr" pattern="\d{5,32}" value={wabaId} onChange={(e) => setWabaId(e.target.value)} aria-describedby={`wbh-${channel.id}`} />
           <p id={`wbh-${channel.id}`} className="hint">נדרש כדי לראות תבניות הודעה ולהגיש חדשות. נמצא ב-WhatsApp ← API Setup אצל Meta (שונה מ-Phone number ID). יש לאמת מול התיעוד הרשמי.</p></div>
         <button className="primary" type="submit" disabled={busy}>{info?.configured ? 'עדכון ופתיחת חיבור' : 'שמירה וחיבור'}</button>

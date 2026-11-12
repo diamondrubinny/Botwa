@@ -2,7 +2,7 @@ import { createHmac, randomBytes } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { buildApp } from '../src/app.js';
 import { ChannelManager, createDefaultFactory } from '../src/channels/manager.js';
-import { isGraphMediaUrl, verifySignature, WhatsAppCloudAdapter } from '../src/channels/whatsapp-cloud.js';
+import { metaCheckError, isGraphMediaUrl, verifySignature, WhatsAppCloudAdapter } from '../src/channels/whatsapp-cloud.js';
 import { loadConfig } from '../src/config.js';
 import { createDb } from '../src/db.js';
 import { migrate } from '../src/migrate.js';
@@ -17,6 +17,14 @@ const SECRET = 'app-secret-0123456789abcdef';
 const TOKEN = 'EAAG' + 'x'.repeat(40);
 
 describe('helpers', () => {
+  it('names the reason of a failed credentials check from Meta\'s error code', () => {
+    expect(metaCheckError(401, 190)).toBe('meta_auth_failed');
+    expect(metaCheckError(400, 100)).toBe('meta_phone_not_found');
+    expect(metaCheckError(403, 10)).toBe('meta_permission_denied');
+    expect(metaCheckError(400, 4)).toBe('meta_rate_limited');
+    expect(metaCheckError(500, undefined)).toBe('meta_check_failed');
+  });
+
   it('verifies HMAC signatures and restricts media hosts', () => {
     const body = Buffer.from('{"a":1}');
     const sig = 'sha256=' + createHmac('sha256', SECRET).update(body).digest('hex');
@@ -37,8 +45,9 @@ describe('official WhatsApp channel', () => {
   const fakeFetch = async (url: string, init?: RequestInit): Promise<Response> => {
     calls.push({ url, init });
     if (init?.method === 'POST' && url.endsWith('/messages')) return sendResponse();
-    return Response.json({ display_phone_number: '+972 50-000-0000', verified_name: 'Shop' });
+    return infoResponse();
   };
+  let infoResponse: () => Response = () => Response.json({ display_phone_number: '+972 50-000-0000', verified_name: 'Shop' });
   const cookies: Record<string, string> = {};
   let ip = 0;
   const call = (method: 'GET' | 'POST' | 'PUT', url: string, who?: string, payload?: object, extra: Record<string, string> = {}) =>
@@ -75,8 +84,12 @@ describe('official WhatsApp channel', () => {
     channelId = c.json().id;
     expect((await call('GET', `/channels/${channelId}/cloud`, 'adm@t.io')).json()).toMatchObject({ configured: false });
     expect((await call('PUT', `/channels/${channelId}/cloud`, 'ag@t.io', { phoneNumberId: '1234567890', accessToken: TOKEN, appSecret: SECRET })).statusCode).toBe(403);
-    expect((await call('PUT', `/channels/${channelId}/cloud`, 'adm@t.io', { phoneNumberId: 'abc', accessToken: TOKEN, appSecret: SECRET })).statusCode).toBe(400);
-    const put = await call('PUT', `/channels/${channelId}/cloud`, 'adm@t.io', { phoneNumberId: '1234567890', accessToken: TOKEN, appSecret: SECRET });
+    expect((await call('PUT', `/channels/${channelId}/cloud`, 'adm@t.io', { phoneNumberId: 'abc', accessToken: TOKEN, appSecret: SECRET })).json()).toEqual({ error: 'invalid_phone_number_id' });
+    expect((await call('PUT', `/channels/${channelId}/cloud`, 'adm@t.io', { phoneNumberId: '1234567890', accessToken: 'short', appSecret: SECRET })).json()).toEqual({ error: 'invalid_token_format' });
+    expect((await call('PUT', `/channels/${channelId}/cloud`, 'adm@t.io', { phoneNumberId: '1234567890', accessToken: TOKEN, appSecret: 'bad secret!' })).json()).toEqual({ error: 'invalid_app_secret_format' });
+    expect((await call('PUT', `/channels/${channelId}/cloud`, 'adm@t.io', { phoneNumberId: '1234567890', accessToken: TOKEN, appSecret: SECRET, wabaId: 'x1' })).json()).toEqual({ error: 'invalid_waba_id' });
+    // a token pasted with "Bearer " in front and spaces around it is accepted as the token itself
+    const put = await call('PUT', `/channels/${channelId}/cloud`, 'adm@t.io', { phoneNumberId: '1234567890', accessToken: `  Bearer ${TOKEN} `, appSecret: SECRET });
     expect(put.json()).toMatchObject({ ok: true, status: 'connected' });
     const cfgOut = (await call('GET', `/channels/${channelId}/cloud`, 'adm@t.io')).json();
     expect(cfgOut).toMatchObject({ configured: true, phoneNumberId: '1234567890', webhookUrl: `${ORIGIN}/webhooks/whatsapp/${channelId}` });
@@ -88,6 +101,20 @@ describe('official WhatsApp channel', () => {
     // re-saving keeps the verify token (so the Meta dashboard value stays valid)
     await call('PUT', `/channels/${channelId}/cloud`, 'adm@t.io', { phoneNumberId: '1234567890', accessToken: TOKEN, appSecret: SECRET });
     expect((await call('GET', `/channels/${channelId}/cloud`, 'adm@t.io')).json().verifyToken).toBe(verifyToken);
+  });
+
+  it('says why Meta refused the credentials (they are saved either way)', async () => {
+    const put = () => call('PUT', `/channels/${channelId}/cloud`, 'adm@t.io', { phoneNumberId: '1234567890', accessToken: TOKEN, appSecret: SECRET });
+    infoResponse = () => Response.json({ error: { message: 'Error validating access token', type: 'OAuthException', code: 190 } }, { status: 401 });
+    expect((await put()).json()).toEqual({ ok: true, status: 'error', error: 'meta_auth_failed' });
+    infoResponse = () => Response.json({ error: { message: 'Unsupported get request', type: 'GraphMethodException', code: 100 } }, { status: 400 });
+    expect((await put()).json()).toMatchObject({ status: 'error', error: 'meta_phone_not_found' });
+    infoResponse = () => Response.json({ error: { code: 200 } }, { status: 403 });
+    expect((await put()).json()).toMatchObject({ error: 'meta_permission_denied' });
+    infoResponse = () => { throw new TypeError('fetch failed'); };
+    expect((await put()).json()).toMatchObject({ error: 'meta_unreachable' });
+    infoResponse = () => Response.json({ display_phone_number: '+972 50-000-0000', verified_name: 'Shop' });
+    expect((await put()).json()).toEqual({ ok: true, status: 'connected' });
   });
 
   it('answers the webhook handshake only for the right verify token', async () => {

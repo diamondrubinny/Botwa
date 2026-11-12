@@ -261,7 +261,12 @@ export class ChannelManager {
     this.statuses.set(channelId, status);
     if (prev !== status) this.statusSince.set(channelId, Date.now());
     if (status !== 'qr') { this.lastQr.delete(channelId); this.lastCode.delete(channelId); }
-    if (status === 'stopped' || status === 'logged_out' || status === 'error' || status === 'restricted') this.adapters.delete(channelId);
+    if (status === 'stopped' || status === 'logged_out' || status === 'error' || status === 'restricted') {
+      // an official channel that failed its credentials check: keep the reason for the settings screen
+      const a = this.adapters.get(channelId);
+      if (a instanceof WhatsAppCloudAdapter) this.cloudErrors.set(channelId, a.lastError);
+      this.adapters.delete(channelId);
+    }
     // never auto-reconnect an account the platform has restricted: it must be reviewed by a person first
     if (status === 'restricted') await this.db.query('UPDATE channels SET auto_start=false WHERE id=$1', [channelId]).catch(() => undefined);
     await this.db.query('UPDATE channels SET status=$2 WHERE id=$1', [channelId, status]).catch(() => undefined);
@@ -459,6 +464,10 @@ export class ChannelManager {
 
   // ---- Official WhatsApp (Cloud API) -------------------------------------------------------------------------------
   /** The running official-API adapter for webhook handling (null when the channel is not started or is another type). */
+  private cloudErrors = new Map<string, string | null>();
+  /** Why the official channel's last credentials check failed (null when it did not fail or the reason is unknown). */
+  cloudLastError(channelId: string): string | null { return this.cloudAdapter(channelId)?.lastError ?? this.cloudErrors.get(channelId) ?? null; }
+
   cloudAdapter(channelId: string): WhatsAppCloudAdapter | null {
     const a = this.adapters.get(channelId);
     return a instanceof WhatsAppCloudAdapter ? a : null;

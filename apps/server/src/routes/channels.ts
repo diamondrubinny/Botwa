@@ -112,14 +112,23 @@ export function channelRoutes(app: FastifyInstance, db: Db, mgr: ChannelManager,
   });
   app.put('/channels/:id/cloud', { preHandler: adminOnly, config: { rateLimit: { max: 10, timeWindow: '1 minute' } } }, async (req, reply) => {
     const p = idParam.safeParse(req.params);
+    // a token copied together with "Bearer " (as Meta's examples show it) or with spaces around it is still the same token
+    const raw = (req.body ?? {}) as Record<string, unknown>;
+    const body = { ...raw, ...(typeof raw.accessToken === 'string' ? { accessToken: raw.accessToken.trim().replace(/^Bearer\s+/i, '') } : {}), ...(typeof raw.appSecret === 'string' ? { appSecret: raw.appSecret.trim() } : {}) };
     const b = z.object({
       phoneNumberId: z.string().regex(/^\d{5,32}$/),
       accessToken: z.string().min(20).max(1000).regex(/^[\w.\-~+/=]+$/),
       appSecret: z.string().min(16).max(200).regex(/^[\w.\-~+/=]+$/),
       /** WhatsApp Business Account id (to read and create message templates); optional */
       wabaId: z.string().regex(/^\d{5,32}$/).optional(),
-    }).safeParse(req.body);
-    if (!p.success || !b.success) return reply.code(400).send({ error: 'bad_request' });
+    }).safeParse(body);
+    if (!p.success) return reply.code(400).send({ error: 'bad_request' });
+    if (!b.success) {
+      // name the field that is wrong, so the screen can say what to fix (the values themselves are never echoed)
+      const field = String(b.error.issues[0]?.path[0] ?? '');
+      const code = ({ phoneNumberId: 'invalid_phone_number_id', accessToken: 'invalid_token_format', appSecret: 'invalid_app_secret_format', wabaId: 'invalid_waba_id' } as Record<string, string>)[field] ?? 'bad_request';
+      return reply.code(400).send({ error: code });
+    }
     if ((await db.query(`SELECT 1 FROM channels WHERE id=$1 AND type='whatsapp_cloud'`, [p.data.id])).rowCount !== 1) return reply.code(404).send({ error: 'not_found' });
     try {
       await mgr.setCloudCredentials(p.data.id, b.data);
@@ -128,7 +137,9 @@ export function channelRoutes(app: FastifyInstance, db: Db, mgr: ChannelManager,
       return reply.code(502).send({ error: 'channel_error' });
     }
     await audit(db, { actorId: req.user!.id, action: 'channel.cloud_credentials', target: p.data.id, ip: req.ip }); // never logs the values
-    return { ok: true, status: mgr.snapshot(p.data.id).status };
+    const status = mgr.snapshot(p.data.id).status;
+    // saved either way; when Meta refused, say why (the screen explains each reason)
+    return { ok: true, status, ...(status === 'connected' ? {} : { error: mgr.cloudLastError(p.data.id) ?? 'meta_check_failed' }) };
   });
 
   // Telegram two-step verification password during QR login. Not persisted, not logged.

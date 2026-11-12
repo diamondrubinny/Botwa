@@ -28,6 +28,20 @@ export function isGraphMediaUrl(raw: string): boolean {
   } catch { return false; }
 }
 
+/**
+ * The reason a credentials check failed, from the Graph API error code. Meta's codes as documented for the Graph API
+ * (190 = access token invalid or expired, 100 = object not found or not accessible, 10/200-299 = permission,
+ * 4/17/32/613/80007 = rate limits); requires verification against Meta's official documentation, which changes.
+ */
+export function metaCheckError(httpStatus: number, code: number | undefined): string {
+  if (code === 190 || httpStatus === 401) return 'meta_auth_failed';
+  if (code === 10 || (code !== undefined && code >= 200 && code <= 299)) return 'meta_permission_denied';
+  if (code === 100 || code === 803 || httpStatus === 404) return 'meta_phone_not_found';
+  if (code !== undefined && [4, 17, 32, 613, 80007].includes(code)) return 'meta_rate_limited';
+  if (httpStatus === 403) return 'meta_permission_denied';
+  return 'meta_check_failed';
+}
+
 export function verifySignature(appSecret: string, rawBody: Buffer, header: string | undefined): boolean {
   if (!header?.startsWith('sha256=')) return false;
   const want = createHmac('sha256', appSecret).update(rawBody).digest();
@@ -55,16 +69,24 @@ export class WhatsAppCloudAdapter implements ChannelAdapter {
   private url = (path: string) => `${GRAPH}/${this.version}/${path}`;
   private auth = () => ({ authorization: `Bearer ${this.creds!.accessToken}` });
 
+  /** Why the last check against Meta failed (a code the panel explains), or null. */
+  lastError: string | null = null;
+
   async start(): Promise<void> {
     const { store, events } = this.ctx;
     const raw = await store.get(CLOUD_CREDS_KEY);
     if (!raw) { events.onStatus('logged_out'); return; } // not configured yet
     this.creds = JSON.parse(raw) as CloudCreds;
     events.onStatus('connecting');
+    this.lastError = null;
     try {
       const res = await this.fetchImpl(this.url(`${this.creds.phoneNumberId}?fields=display_phone_number,verified_name`), { headers: this.auth(), signal: AbortSignal.timeout(10_000) });
-      if (!res.ok) { events.onStatus('error'); return; }
-    } catch { events.onStatus('error'); return; }
+      if (!res.ok) {
+        const j = (await res.json().catch(() => ({}))) as { error?: { code?: number } };
+        this.lastError = metaCheckError(res.status, j.error?.code);
+        events.onStatus('error'); return;
+      }
+    } catch { this.lastError = 'meta_unreachable'; events.onStatus('error'); return; }
     this.active = true;
     events.onStatus('connected');
   }

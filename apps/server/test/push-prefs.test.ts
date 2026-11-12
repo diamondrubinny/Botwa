@@ -58,7 +58,7 @@ describe('phone alerts', () => {
     await db.query(`INSERT INTO branding_logo (id, mime, data) VALUES (1, 'image/png', '\\x89504e47') ON CONFLICT (id) DO NOTHING`);
     sends.length = 0;
     expect((await call('POST', '/push/test', 'a1', {})).json()).toEqual({ delivered: 1 });
-    expect(sends[0]!.payload.icon).toMatch(/^\/branding\/logo\?v=\d+$/);
+    expect((sends[0]!.payload as { icon?: string }).icon).toMatch(/^\/branding\/logo\?v=\d+$/);
     await db.query('DELETE FROM branding_logo');
     expect((await call('PUT', '/push/prefs', 'a1', { messages: true, assigned: 'yes' })).statusCode).toBe(400);
   });
