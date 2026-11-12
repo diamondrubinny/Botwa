@@ -467,3 +467,41 @@ details > summary { border-radius: 8px; }
 :root[data-theme='dark'] .avatar.tone-4 { background: #2e1f66; color: #ddd3ff; } :root[data-theme='dark'] .avatar.tone-5 { background: #4a3a0c; color: #fde68a; }
 :root[data-contrast='high'] .avatar[class*='tone-'] { background: #000; color: #fff; border-color: #fff; }
 :root[data-contrast='high'] .notes-list li, :root[data-contrast='high'] .msg.out.auto { background: #000; color: #fff; border-color: #fff; }
+
+/* ---------- Buttons and hover, refined ----------
+   Colour changes on hover are instant (no colour transitions: they made contrast checks read half-way colours); only movement and
+   shadow animate, and the global reduced-motion rules switch those off. Hover styles apply only where a real pointer can hover
+   (@media (hover: hover)), so a tap on a phone does not leave a button stuck in its hover look. Disabled buttons never react. */
+:root { --accent-hover: color-mix(in srgb, var(--accent) 86%, #000); --lift: 0 6px 14px -8px rgba(43, 22, 96, .35); }
+:root[data-theme='dark'] { --accent-hover: color-mix(in srgb, var(--accent) 84%, #fff); --lift: 0 6px 16px -8px rgba(0, 0, 0, .7); }
+
+button, .btn { border-radius: 12px; font-weight: 600; border-color: color-mix(in srgb, var(--input-border) 55%, var(--border)); letter-spacing: .005em; }
+button.primary { border-color: transparent; font-weight: 700; }
+button.danger { border-color: color-mix(in srgb, var(--danger) 55%, transparent); }
+.icon-btn, .sb-btn { border-color: transparent; }
+button:active:not(:disabled), .btn:active { transform: translateY(1px) scale(.985); box-shadow: none; }
+button:disabled, button[aria-disabled='true'] { opacity: .45; cursor: not-allowed; box-shadow: none; filter: saturate(.6); }
+
+@media (hover: hover) {
+  button:hover:not(:disabled):not(.primary):not(.danger):not(.chip):not(.swatch):not(.icon-btn):not(.sb-btn):not([role='tab']),
+  .btn:hover { background: var(--accent-soft); border-color: var(--accent); transform: translateY(-1px); box-shadow: var(--lift); }
+  button.primary:hover:not(:disabled) { background: var(--accent-hover); border-color: transparent; filter: none; transform: translateY(-1px); box-shadow: 0 10px 22px -10px var(--accent); }
+  button.danger:hover:not(:disabled) { background: color-mix(in srgb, var(--danger) 10%, var(--surface)); border-color: var(--danger); transform: translateY(-1px); box-shadow: var(--lift); }
+  .icon-btn:hover:not(:disabled), .sb-btn:hover:not(:disabled) { background: var(--accent-soft); color: var(--accent); }
+  .chip:hover:not([aria-pressed='true']):not(:disabled) { border-color: var(--accent); background: var(--accent-soft); }
+  .chip[aria-pressed='true']:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
+  .swatch:hover { transform: scale(1.08); }
+  .seg button:hover:not(.on) { background: var(--accent-soft); }
+  .nav-link:hover:not([aria-current='page']) { background: var(--accent-soft); color: var(--text); }
+  .nav-link:hover:not([aria-current='page']) svg { color: var(--accent); }
+  .conv-item:hover { background: var(--accent-soft); }
+  a:not(.btn):not(.nav-link):not(.card):hover { text-decoration-thickness: 2px; }
+}
+.icon-btn, .sb-btn, .chip, .swatch, .nav-link svg { transition: transform .12s var(--ease), box-shadow .15s var(--ease); }
+
+/* keyboard focus: a clear ring that follows the button's shape, in every theme */
+button:focus-visible, .btn:focus-visible, .chip:focus-visible, .nav-link:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; border-radius: 12px; }
+.icon-btn:focus-visible, .swatch:focus-visible { border-radius: 50%; }
+
+/* high contrast: hover shows as an outline (colours there are fixed black/white) */
+:root[data-contrast='high'] button:hover:not(:disabled), :root[data-contrast='high'] .nav-link:hover, :root[data-contrast='high'] .chip:hover { outline: 2px solid #fff; outline-offset: 1px; transform: none; box-shadow: none; }
