@@ -6,7 +6,7 @@ import { errText } from '../strings';
 
 type Id = string | undefined;
 type Opt = { label: string; next?: string; examples: string[] };
-type Check = { kind: 'hours' } | { kind: 'variable'; name: string; contains: string } | { kind: 'has'; name: string } | { kind: 'channel'; is: 'whatsapp' | 'whatsapp_cloud' | 'telegram' };
+type Check = { kind: 'hours' } | { kind: 'variable'; name: string; contains: string } | { kind: 'has'; name: string } | { kind: 'channel'; is: 'whatsapp' | 'whatsapp_cloud' | 'telegram' | 'webchat' | 'messenger' | 'instagram' };
 type Node = { id: string; label?: string } & (
   | { type: 'message'; text: string; next?: Id }
   | { type: 'menu'; text: string; options: Opt[]; kbOnFreeText: boolean; save?: string }
@@ -447,7 +447,7 @@ function NodeForm({ n, flow, refs, canEdit, upd, del, makeStart }: { n: Node; fl
             <select id={f('ck')} value={n.check.kind} onChange={(e) => set({ check: e.target.value === 'hours' ? { kind: 'hours' } : e.target.value === 'channel' ? { kind: 'channel', is: 'whatsapp' } : e.target.value === 'has' ? { kind: 'has', name: varsOf(flow)[0] ?? 'fullName' } : { kind: 'variable', name: varsOf(flow)[0] ?? 'text', contains: '' } })}>
               <option value="hours">עכשיו בשעות הפעילות</option><option value="channel">הלקוח פנה דרך ערוץ מסוים</option><option value="variable">פרט שנאסף מכיל טקסט</option><option value="has">פרט כבר נאסף (למשל מפנייה קודמת)</option>
             </select></div>
-          {n.check.kind === 'channel' && <div className="field"><label htmlFor={f('ch')}>ערוץ</label><select id={f('ch')} value={n.check.is} onChange={(e) => set({ check: { kind: 'channel', is: e.target.value } })}><option value="whatsapp">ווצאפ (QR)</option><option value="whatsapp_cloud">ווצאפ רשמי</option><option value="telegram">טלגרם</option></select></div>}
+          {n.check.kind === 'channel' && <div className="field"><label htmlFor={f('ch')}>ערוץ</label><select id={f('ch')} value={n.check.is} onChange={(e) => set({ check: { kind: 'channel', is: e.target.value } })}><option value="whatsapp">ווצאפ (QR)</option><option value="whatsapp_cloud">ווצאפ רשמי</option><option value="telegram">טלגרם</option><option value="messenger">Messenger</option><option value="instagram">Instagram</option><option value="webchat">צ׳אט באתר</option></select></div>}
           {n.check.kind === 'variable' && (
             <div className="row">
               <VarInput id={f('vn')} label="הפרט" value={n.check.name} onChange={(v) => set({ check: { ...(n.check as Extract<Check, { kind: 'variable' }>), name: v } })} flow={flow} />
@@ -511,7 +511,7 @@ function Simulator({ flow }: { flow: Flow | null }) {
   const [state, setState] = useState<FState | null>(null);
   const [text, setText] = useState('');
   const [openNow, setOpenNow] = useState(true);
-  const [channel, setChannel] = useState<'whatsapp' | 'whatsapp_cloud' | 'telegram'>('whatsapp');
+  const [channel, setChannel] = useState<'whatsapp' | 'whatsapp_cloud' | 'telegram' | 'messenger' | 'instagram'>('whatsapp');
   const [err, setErr] = useState('');
   const end = useRef<HTMLDivElement>(null);
   useEffect(() => { end.current?.scrollIntoView({ block: 'nearest' }); }, [log]);
@@ -532,7 +532,7 @@ function Simulator({ flow }: { flow: Flow | null }) {
       <div className="row">
         <label><input type="checkbox" style={{ width: 'auto', minHeight: 'auto' }} checked={openNow} onChange={(e) => setOpenNow(e.target.checked)} /> עכשיו בשעות הפעילות</label>
         <label htmlFor="sim-ch" className="sr-only">ערוץ</label>
-        <select id="sim-ch" value={channel} onChange={(e) => setChannel(e.target.value as 'whatsapp')} style={{ maxWidth: 200 }}><option value="whatsapp">ווצאפ</option><option value="whatsapp_cloud">ווצאפ רשמי</option><option value="telegram">טלגרם</option></select>
+        <select id="sim-ch" value={channel} onChange={(e) => setChannel(e.target.value as 'whatsapp')} style={{ maxWidth: 200 }}><option value="whatsapp">ווצאפ</option><option value="whatsapp_cloud">ווצאפ רשמי</option><option value="telegram">טלגרם</option><option value="messenger">Messenger</option><option value="instagram">Instagram</option></select>
         <button onClick={() => { setLog([]); setState(null); }}>התחלה מחדש</button>
       </div>
       <div className="sim-log" tabIndex={0} role="log" aria-live="polite" aria-label="שיחת הבדיקה">

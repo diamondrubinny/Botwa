@@ -3,6 +3,7 @@ import { z } from 'zod';
 import type { ChannelManager } from '../channels/manager.js';
 import type { Db } from '../db.js';
 import type { WaWebhook } from '../channels/whatsapp-cloud.js';
+import type { MetaWebhook } from '../channels/meta-messaging.js';
 
 const idParam = z.object({ channelId: z.string().uuid() });
 
@@ -43,6 +44,34 @@ export function webhookRoutes(app: FastifyInstance, db: Db, mgr: ChannelManager)
       } catch (e) {
         req.log.error({ err: e }, 'whatsapp webhook processing failed');
         return reply.code(500).send({ error: 'processing_failed' }); // not acknowledged => Meta redelivers; duplicates are ignored by message id
+      }
+      return { ok: true };
+    });
+
+    // Messenger / Instagram: the same handshake and HMAC check (app secret), payload object 'page' or 'instagram'
+    const isMeta = async (id: string) => (await db.query(`SELECT 1 FROM channels WHERE id = $1 AND type IN ('messenger','instagram')`, [id])).rowCount === 1;
+    scope.get('/webhooks/meta/:channelId', { config: limit }, async (req, reply) => {
+      const p = idParam.safeParse(req.params);
+      if (!p.success || !(await isMeta(p.data.channelId))) return reply.code(404).send('not found');
+      const q = req.query as Record<string, string | undefined>;
+      const ok = mgr.metaAdapter(p.data.channelId)?.verifyHandshake(q['hub.mode'], q['hub.verify_token'], q['hub.challenge']);
+      return ok ? reply.type('text/plain').send(ok) : reply.code(403).send('forbidden');
+    });
+    scope.post('/webhooks/meta/:channelId', { config: limit }, async (req, reply) => {
+      const p = idParam.safeParse(req.params);
+      if (!p.success || !(await isMeta(p.data.channelId))) return reply.code(404).send({ error: 'not_found' });
+      const adapter = mgr.metaAdapter(p.data.channelId);
+      if (!adapter || !adapter.isActive()) return reply.code(503).send({ error: 'channel_not_running' });
+      const raw = req.body as Buffer;
+      if (!Buffer.isBuffer(raw) || !adapter.checkSignature(raw, req.headers['x-hub-signature-256'] as string | undefined)) return reply.code(403).send({ error: 'bad_signature' });
+      let payload: MetaWebhook;
+      try { payload = JSON.parse(raw.toString('utf8')) as MetaWebhook; } catch { return reply.code(400).send({ error: 'bad_request' }); }
+      mgr.noteCloudWebhook(p.data.channelId);
+      try {
+        await adapter.handleWebhook(payload);
+      } catch (e) {
+        req.log.error({ err: e }, 'meta webhook processing failed');
+        return reply.code(500).send({ error: 'processing_failed' });
       }
       return { ok: true };
     });

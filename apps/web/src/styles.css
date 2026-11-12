@@ -730,3 +730,7 @@ details[open]:not(.more) > summary::before { transform: rotate(45deg) translateY
 .gif-admin { list-style: none; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: .7rem; }
 .gif-admin li { border: 1px solid var(--border); border-radius: 14px; padding: .5rem; display: grid; gap: .35rem; background: var(--surface); }
 .gif-admin .gif-thumb { border-radius: 10px; }
+.mchip.ch-messenger { background: #dbeafe; color: #1e40af; border-color: #bfd4fb; }
+.mchip.ch-instagram { background: #fce7f3; color: #9d174d; border-color: #f9c9e1; }
+:root[data-theme='dark'] .mchip.ch-messenger { background: #172f5e; color: #d6e4ff; border-color: #24427d; }
+:root[data-theme='dark'] .mchip.ch-instagram { background: #4a1530; color: #ffd6ea; border-color: #66203f; }

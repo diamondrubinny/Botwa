@@ -1,7 +1,7 @@
 import { Loading } from '../components/Loading';
 import { EmptyState, PageTitle } from '../components/Illustration';
 import { useEffect, useRef, useState, type FormEvent } from 'react';
-import { api, ApiError, can, type Channel, type ChannelHealth, type Me } from '../api';
+import { api, ApiError, can, CHANNEL_NAMES, type Channel, type ChannelKind, type ChannelHealth, type Me } from '../api';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { usePoll } from '../hooks';
 import { errText, t } from '../strings';
@@ -25,7 +25,8 @@ export function Channels({ me }: { me: Me }) {
   const isAdmin = can(me, 'channels.manage');
   const [list, setList] = useState<Channel[]>([]);
   const [label, setLabel] = useState('');
-  const [type, setType] = useState<'whatsapp' | 'whatsapp_cloud' | 'telegram' | 'webchat'>('whatsapp');
+  const [type, setType] = useState<ChannelKind>('whatsapp');
+  const [metaFor, setMetaFor] = useState<string | null>(null);
   const [msg, setMsg] = useState('');
   const [linking, setLinking] = useState<string | null>(null);
   const [pending, setPending] = useState<Pending>(null);
@@ -99,7 +100,7 @@ export function Channels({ me }: { me: Me }) {
           <li key={ch.id} className="card">
             <div className="row">
               <strong>{ch.label}</strong>
-              <span>{ch.type === 'whatsapp' ? 'ווצאפ' : ch.type === 'whatsapp_cloud' ? 'ווצאפ רשמי (Cloud API)' : ch.type === 'webchat' ? 'צ׳אט באתר' : 'טלגרם'}</span>
+              <span>{CHANNEL_NAMES[ch.type] ?? ch.type}</span>
               <span className={`badge ${ch.status}`}>{t.status[ch.status] ?? ch.status}</span>
             </div>
             {isAdmin && (
@@ -107,6 +108,11 @@ export function Channels({ me }: { me: Me }) {
                 {ch.type === 'webchat' ? (
                   <>
                     <button className="primary" onClick={() => setWebFor(webFor === ch.id ? null : ch.id)} aria-expanded={webFor === ch.id}>הגדרת הוויגיט וקוד ההטמעה</button>
+                    <button onClick={() => run(() => api('POST', `/channels/${ch.id}/start`))}>הפעלה</button>
+                  </>
+                ) : ch.type === 'messenger' || ch.type === 'instagram' ? (
+                  <>
+                    <button className="primary" onClick={() => setMetaFor(metaFor === ch.id ? null : ch.id)} aria-expanded={metaFor === ch.id}>הגדרת {ch.type === 'instagram' ? 'Instagram' : 'Messenger'}</button>
                     <button onClick={() => run(() => api('POST', `/channels/${ch.id}/start`))}>הפעלה</button>
                   </>
                 ) : ch.type === 'whatsapp_cloud' ? (
@@ -138,6 +144,7 @@ export function Channels({ me }: { me: Me }) {
               </form>
             )}
             {webFor === ch.id && <WebChatPanel channel={ch} onSaved={() => void reload()} />}
+            {metaFor === ch.id && <MetaPanel channel={ch} onSaved={() => void reload()} />}
             {cloudFor === ch.id && <CloudPanel channel={ch} onSaved={() => { setCloudFor(null); void reload(); }} />}
             {linking === ch.id && <LinkPanel channel={ch} onClose={() => setLinking(null)} />}
           </li>
@@ -154,13 +161,16 @@ export function Channels({ me }: { me: Me }) {
           </div>
           <div className="field">
             <label htmlFor="ch-type">פלטפורמה</label>
-            <select id="ch-type" value={type} onChange={(e) => setType(e.target.value as 'whatsapp')}>
+            <select id="ch-type" value={type} onChange={(e) => setType(e.target.value as ChannelKind)}>
               <option value="whatsapp">ווצאפ (סריקת QR)</option>
               <option value="whatsapp_cloud">ווצאפ רשמי (WhatsApp Business Cloud API)</option>
+              <option value="messenger">Messenger (דף פייסבוק, API רשמי של Meta)</option>
+              <option value="instagram">Instagram (הודעות לחשבון עסקי, API רשמי של Meta)</option>
               <option value="webchat">צ׳אט באתר (ויגיט להטמעה באתרים)</option>
               <option value="telegram">טלגרם (חשבון משתמש, סריקת QR)</option>
             </select>
             {type === 'webchat' && <p className="hint">ויגיט צ׳אט שמטמיעים באתר שלכם בשורת קוד אחת. הפניות נכנסות לתיבה כמו כל ערוץ, והבוט, תרשים הזרימה ומאגר הידע עובדים גם בו. אין סיכון חסימה, ואין תלות בפלטפורמה חיצונית.</p>}
+            {(type === 'messenger' || type === 'instagram') && <p className="hint">הודעות פרטיות לדף הפייסבוק או לחשבון האינסטגרם העסקי, דרך אותה אפליקציית Meta של הווצאפ הרשמי. ללקוחות אמיתיים נדרש אישור של Meta להרשאות ההודעות (App Review). תשובה חופשית אפשרית עד 24 שעות מהודעת הלקוח האחרונה.</p>}
             {type === 'whatsapp_cloud' && <p className="hint">הדרך המותרת והיציבה: מספר עסקי מאומת אצל Meta, בלי סיכון חסימה בגלל ספרייה לא רשמית. דורשת חשבון Meta Business ועלולה לעלות כסף לפי שיחה. ניתן לשלוח טקסט חופשי רק עד 24 שעות מהודעת הלקוח האחרונה.</p>}
             <p className="hint">הערה: החיבור לווצאפ בסריקת QR נעשה באמצעות ספרייה לא רשמית וקיים סיכון לחסימת המספר. גם שליחה אוטומטית מחשבון טלגרם עלולה להוביל להגבלת החשבון.</p>
           </div>
@@ -334,18 +344,76 @@ function CloudPanel({ channel, onSaved }: { channel: Channel; onSaved: () => voi
   );
 }
 
+/** Messenger / Instagram: Page credentials, the webhook details for Meta's dashboard and the receive check. */
+function MetaPanel({ channel, onSaved }: { channel: Channel; onSaved: () => void }) {
+  const ig = channel.type === 'instagram';
+  const [info, setInfo] = useState<{ configured: boolean; pageId?: string; igAccountId?: string; verifyToken?: string; webhookUrl: string; lastWebhookAt?: string | null } | null>(null);
+  const [pageId, setPageId] = useState('');
+  const [igId, setIgId] = useState('');
+  const [token, setToken] = useState('');
+  const [secret, setSecret] = useState('');
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const [busy, setBusy] = useState(false);
+  const load = () => api<NonNullable<typeof info>>('GET', `/channels/${channel.id}/meta`).then((d) => { setInfo(d); if (d.pageId) setPageId(d.pageId); if (d.igAccountId) setIgId(d.igAccountId); }).catch(() => undefined);
+  useEffect(() => { void load(); }, [channel.id]);
+  const copy = (v: string) => void navigator.clipboard?.writeText(v).catch(() => undefined);
+  async function save(e: FormEvent) {
+    e.preventDefault();
+    setBusy(true); setMsg(null);
+    try {
+      const r = await api<{ status: string; error?: string; subscribe?: string | null }>('PUT', `/channels/${channel.id}/meta`, { pageId, pageAccessToken: token, appSecret: secret, ...(ig ? { igAccountId: igId } : {}) });
+      setToken(''); setSecret('');
+      const sub = r.subscribe === 'ok' ? ' הדף נרשם לאפליקציה לקבלת הודעות.' : r.subscribe ? ` שימו לב: ${errText(r.subscribe)}` : '';
+      setMsg(r.status === 'connected' ? { ok: true, text: `החיבור הצליח.${sub}` } : { ok: false, text: `הפרטים נשמרו, אבל החיבור ל-Meta נכשל: ${errText(r.error ?? 'meta_check_failed')}` });
+      onSaved(); void load();
+    } catch (er) { setMsg({ ok: false, text: errText(er instanceof ApiError ? er.code : 'generic') }); }
+    setBusy(false);
+  }
+  const p = `mt-${channel.id}`;
+  return (
+    <div className="card">
+      <h3>הגדרת {ig ? 'Instagram' : 'Messenger'}</h3>
+      <ol>
+        <li>באפליקציית Meta (אפשר את זו של הווצאפ הרשמי) הוסיפו את המוצר {ig ? 'Instagram (דרך Messenger API)' : 'Messenger'}.</li>
+        <li>חברו את דף הפייסבוק{ig ? ' (שאליו מקושר חשבון האינסטגרם העסקי)' : ''}, וצרו <strong>Page access token</strong> קבוע (System User עם הרשאה לדף).</li>
+        <li>העתיקו את <strong>Page ID</strong>{ig ? <>, את <strong>Instagram account ID</strong></> : ''} ואת <strong>App secret</strong> (הגדרות האפליקציה ← Basic).</li>
+        <li>בהגדרות ה-Webhook של המוצר הדביקו את הכתובת ואת ה-Verify token שלמטה, וסמנו את <span dir="ltr">messages</span> ו-<span dir="ltr">messaging_postbacks</span>.</li>
+        <li>ללקוחות אמיתיים: הגישו ל-Meta בקשת App Review להרשאות <span dir="ltr">{ig ? 'instagram_manage_messages' : 'pages_messaging'}</span> ו-<span dir="ltr">pages_manage_metadata</span>. עד האישור רק מנהלי האפליקציה ובודקים יכולים לכתוב.</li>
+      </ol>
+      <p className="hint">שמות המסכים וההרשאות אצל Meta משתנים מעת לעת. יש לאמת מול התיעוד הרשמי.</p>
+      {info && (
+        <dl>
+          <dt>כתובת Webhook (Callback URL)</dt>
+          <dd dir="ltr"><code>{info.webhookUrl}</code> <button type="button" onClick={() => copy(info.webhookUrl)}>העתקה</button></dd>
+          {info.verifyToken && (<><dt>Verify token</dt><dd dir="ltr"><code>{info.verifyToken}</code> <button type="button" onClick={() => copy(info.verifyToken!)}>העתקה</button></dd></>)}
+        </dl>
+      )}
+      <form onSubmit={save}>
+        <div className="field"><label htmlFor={`${p}-pg`}>Page ID</label><input id={`${p}-pg`} required inputMode="numeric" dir="ltr" pattern="\d{5,32}" value={pageId} onChange={(e) => setPageId(e.target.value.replace(/\D/g, ''))} /></div>
+        {ig && <div className="field"><label htmlFor={`${p}-ig`}>Instagram account ID</label><input id={`${p}-ig`} required inputMode="numeric" dir="ltr" pattern="\d{5,32}" value={igId} onChange={(e) => setIgId(e.target.value.replace(/\D/g, ''))} /></div>}
+        <div className="field"><label htmlFor={`${p}-tk`}>Page access token</label><input id={`${p}-tk`} required type="password" autoComplete="new-password" data-lpignore="true" data-1p-ignore="true" data-form-type="other" spellCheck={false} dir="ltr" minLength={20} value={token} onChange={(e) => setToken(e.target.value.trim())} /></div>
+        <div className="field"><label htmlFor={`${p}-as`}>App secret</label><input id={`${p}-as`} required type="password" autoComplete="new-password" data-lpignore="true" data-1p-ignore="true" data-form-type="other" spellCheck={false} dir="ltr" minLength={16} value={secret} onChange={(e) => setSecret(e.target.value.trim())} /></div>
+        <p className="hint">הערכים נשמרים מוצפנים ולא יוצגו שוב.</p>
+        <button className="primary" type="submit" disabled={busy}>{info?.configured ? 'עדכון ופתיחת חיבור' : 'שמירה וחיבור'}</button>
+        <p role="status" className={msg ? (msg.ok ? 'ok' : 'error') : undefined}>{msg?.text}</p>
+      </form>
+      {info?.configured && <WebhookCheck kind="meta" channelId={channel.id} connected={channel.status === 'connected'} lastWebhookAt={info.lastWebhookAt ?? null} />}
+    </div>
+  );
+}
+
 /** "No messages arrive": link the business account to the app again and show whether Meta delivers to us at all. */
-function WebhookCheck({ channelId, connected, lastWebhookAt }: { channelId: string; connected: boolean; lastWebhookAt: string | null }) {
+function WebhookCheck({ channelId, connected, lastWebhookAt, kind = 'cloud' }: { channelId: string; connected: boolean; lastWebhookAt: string | null; kind?: 'cloud' | 'meta' }) {
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState('');
   const [ok, setOk] = useState(false);
   async function check() {
     setBusy(true); setMsg('');
     try {
-      const r = await api<{ result: string; subscribed: boolean | null }>('POST', `/channels/${channelId}/cloud/subscribe`);
+      const r = await api<{ result: string; subscribed: boolean | null }>('POST', `/channels/${channelId}/${kind}/subscribe`);
       const good = r.result === 'ok' && r.subscribed !== false;
       setOk(good);
-      setMsg(good ? 'החשבון העסקי מחובר לאפליקציה. אם עדיין לא מגיעות הודעות, ודאו שהשדה messages מסומן ב-Subscribe בהגדרות ה-Webhook אצל Meta.' : errText(r.result === 'ok' ? 'meta_check_failed' : r.result));
+      setMsg(good ? (kind === 'meta' ? 'הדף רשום לאפליקציה. אם עדיין לא מגיעות הודעות, ודאו שבהגדרות ה-Webhook של האפליקציה מסומנים messages ו-messaging_postbacks.' : 'החשבון העסקי מחובר לאפליקציה. אם עדיין לא מגיעות הודעות, ודאו שהשדה messages מסומן ב-Subscribe בהגדרות ה-Webhook אצל Meta.') : errText(r.result === 'ok' ? 'meta_check_failed' : r.result));
     } catch (er) { setOk(false); setMsg(errText(er instanceof ApiError ? er.code : 'generic')); }
     setBusy(false);
   }
@@ -354,7 +422,9 @@ function WebhookCheck({ channelId, connected, lastWebhookAt }: { channelId: stri
     <section aria-labelledby={`whk-${channelId}`} className="fieldset">
       <h4 id={`whk-${channelId}`}>קבלת הודעות מ-Meta</h4>
       <p>{when ? <>ההודעה האחרונה מ-Meta התקבלה ב-<time dateTime={lastWebhookAt!}>{when}</time>.</> : 'עוד לא התקבלה הודעה מ-Meta מאז שהשרת עלה. שלחו הודעת ניסיון למספר העסקי מטלפון אחר.'}</p>
-      <p className="hint">כדי שהודעות יגיעו צריך שני דברים: (1) האפליקציה רשומה לחשבון העסקי (WABA). הכפתור עושה זאת. (2) ב-WhatsApp ← Configuration ← Webhook fields, השדה <span dir="ltr">messages</span> מסומן ב-Subscribe. עדכוני סטטוס (נשלח / נמסר / נקרא) מגיעים בתוך אותו שדה. יש לאמת מול התיעוד הרשמי.</p>
+      {kind === 'meta'
+        ? <p className="hint">כדי שהודעות יגיעו צריך שני דברים: (1) הדף רשום לאפליקציה. הכפתור עושה זאת. (2) בהגדרות ה-Webhook של האפליקציה (Messenger או Instagram) מסומנים השדות <span dir="ltr">messages</span> ו-<span dir="ltr">messaging_postbacks</span>. יש לאמת מול התיעוד הרשמי.</p>
+        : <p className="hint">כדי שהודעות יגיעו צריך שני דברים: (1) האפליקציה רשומה לחשבון העסקי (WABA). הכפתור עושה זאת. (2) ב-WhatsApp ← Configuration ← Webhook fields, השדה <span dir="ltr">messages</span> מסומן ב-Subscribe. עדכוני סטטוס (נשלח / נמסר / נקרא) מגיעים בתוך אותו שדה. יש לאמת מול התיעוד הרשמי.</p>}
       <button type="button" onClick={() => void check()} disabled={busy || !connected} aria-describedby={connected ? undefined : `whn-${channelId}`}>חיבור ובדיקה</button>
       {!connected && <p id={`whn-${channelId}`} className="hint">זמין רק כשהערוץ מחובר.</p>}
       <p role="status" className={msg ? (ok ? 'ok' : 'error') : undefined}>{msg}</p>

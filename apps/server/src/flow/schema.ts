@@ -44,7 +44,7 @@ export const flowNode = z.discriminatedUnion('type', [
       z.object({ kind: z.literal('hours') }),
       z.object({ kind: z.literal('variable'), name: varName, contains: z.string().trim().max(60) }),
       z.object({ kind: z.literal('has'), name: varName }),
-      z.object({ kind: z.literal('channel'), is: z.enum(['whatsapp', 'whatsapp_cloud', 'telegram']) }),
+      z.object({ kind: z.literal('channel'), is: z.enum(['whatsapp', 'whatsapp_cloud', 'telegram', 'webchat', 'messenger', 'instagram']) }),
     ]),
     yes: next, no: next,
   }),

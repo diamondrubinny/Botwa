@@ -72,6 +72,17 @@ await page.click('li.card:has-text("רשמי") >> button:has-text("מחיקת ע
 await page.click('dialog[open] button:has-text("אישור")');
 await page.waitForFunction(() => !document.body.textContent?.includes('ווצאפ רשמי (Cloud API)'));
 check('official channel can be removed', true);
+// Messenger / Instagram channels: setup panel with webhook details, accessible; Instagram asks for its account id
+await page.fill('#ch-label', 'אינסטה'); await page.selectOption('#ch-type', 'instagram'); await page.click('button:has-text("יצירה")');
+await page.waitForSelector('li.card:has-text("אינסטה")');
+await page.click('li.card:has-text("אינסטה") >> button:has-text("הגדרת Instagram")');
+await page.waitForSelector('li.card:has-text("אינסטה") >> text=כתובת Webhook (Callback URL)');
+check('Instagram channel shows its webhook URL and asks for the account id', (await page.textContent('li.card:has-text("אינסטה")'))?.includes('/webhooks/meta/') && await page.isVisible('li.card:has-text("אינסטה") >> label:has-text("Instagram account ID")'));
+await axe('channels: Instagram setup');
+await page.click('li.card:has-text("אינסטה") >> button:has-text("מחיקת ערוץ")');
+await page.click('dialog[open] button:has-text("אישור")');
+await page.waitForFunction(() => ![...document.querySelectorAll('li.card strong')].some((e) => e.textContent === 'אינסטה'));
+check('Instagram channel can be removed', true);
 
 check('emergency pause and resume work from the panel', true);
 await axe('channels');
@@ -411,6 +422,10 @@ check('widget: embed code shown', /<script src="http:\/\/localhost:3077\/widget\
 await page.fill('textarea[id^="wc-org-"]', 'http://localhost:4010');
 await page.selectOption('select[id^="wc-askName-"]', 'required');
 await page.fill('input[id^="wc-cons-"]', 'אני מאשר את מדיניות הפרטיות');
+await page.click('button:has-text("הוספת כפתור")');
+await page.fill('input[id^="wc-soc-"][id$="-sh-0"]', '972501234567');
+await page.click('button:has-text("הוספת כפתור")');
+await page.fill('input[id^="wc-soc-"][id$="-sh-1"]', 'my.shop');
 await axe('widget settings panel');
 check('widget: allowed site is still in the field before saving', (await page.inputValue('textarea[id^="wc-org-"]')) === 'http://localhost:4010');
 await page.click('button:has-text("שמירה והפעלה")');
@@ -436,6 +451,7 @@ check('widget: launcher appears on the allowed site', true);
 await vp.click('[data-botwa-widget] button[aria-label]');
 await page.evaluate(() => fetch('/kb/sources/faq', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ title: 'כמה זמן לוקח משלוח', body: 'משלוח עד 3 ימי עסקים.', variants: [], audience: 'both' }) }));
 const chat = vp.frameLocator('iframe[title="צ׳אט עם הצוות"]');
+check('widget: "continue on" links to WhatsApp and Messenger', (await chat.locator('.social a.net-whatsapp').getAttribute('href')) === 'https://wa.me/972501234567' && (await chat.locator('.social a.net-messenger').getAttribute('href')) === 'https://m.me/my.shop');
 await chat.locator('input#f-name').fill('דנה מהאתר');
 await chat.locator('button.primary').click();
 check('widget: consent is required before chatting', (await chat.locator('#consent-e').textContent()).length > 0);

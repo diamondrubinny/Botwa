@@ -40,7 +40,8 @@ export async function sendBlock(db: Db, conv: AccessibleConversation, replyWindo
   if (conv.blocked) return 'contact_blocked';
   if (conv.opted_out) return 'contact_opted_out';
   // The official API only allows free-form messages within 24h of the customer's last message (verify against Meta's docs).
-  if (conv.channel_type === 'whatsapp_cloud') replyWindowHours = replyWindowHours > 0 ? Math.min(replyWindowHours, 24) : 24;
+  // Meta's official channels allow free-form replies only within 24 hours of the customer's last message (verify against Meta's docs)
+  if (['whatsapp_cloud', 'messenger', 'instagram'].includes(conv.channel_type ?? '')) replyWindowHours = replyWindowHours > 0 ? Math.min(replyWindowHours, 24) : 24;
   if (replyWindowHours > 0) {
     const { rows } = await db.query(
       `SELECT (max(created_at) IS NOT NULL AND max(created_at) > now() - make_interval(hours => $2)) AS ok

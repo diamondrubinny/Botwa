@@ -59,7 +59,7 @@ export function channelRoutes(app: FastifyInstance, db: Db, mgr: ChannelManager,
       const pausedRow = (await db.query('SELECT paused FROM channels WHERE id = $1', [ch.id])).rows[0];
       const autoPausedUntil = mgr.isAutoPausedUntil(ch.id);
       const recentAutoPauses = (await db.query(`SELECT count(*)::int AS n FROM channel_events WHERE channel_id = $1 AND kind = 'auto_paused' AND created_at > now() - interval '24 hours'`, [ch.id])).rows[0].n as number;
-      const risk = ['whatsapp_cloud', 'webchat'].includes(ch.type) ? { level: 'low' as const, reasons: [] as string[] } : assessRisk({ status, day: u.day, cap, inbound24h: inb, ageDays: u.ageDays, recentAutoPauses });
+      const risk = ['whatsapp_cloud', 'webchat', 'messenger', 'instagram'].includes(ch.type) ? { level: 'low' as const, reasons: [] as string[] } : assessRisk({ status, day: u.day, cap, inbound24h: inb, ageDays: u.ageDays, recentAutoPauses });
       out.push({
         id: ch.id, label: ch.label, type: ch.type, status, sentLast24h: u.day, inboundLast24h: inb, sentLastMinute: u.minute, dailyCap: cap, ageDays: Math.floor(u.ageDays),
         paused: !!pausedRow?.paused, autoPausedUntil: autoPausedUntil > Date.now() ? new Date(autoPausedUntil).toISOString() : null,
@@ -70,7 +70,7 @@ export function channelRoutes(app: FastifyInstance, db: Db, mgr: ChannelManager,
   });
 
   app.post('/channels', { preHandler: adminOnly }, async (req, reply) => {
-    const b = z.object({ type: z.enum(['whatsapp', 'whatsapp_cloud', 'telegram', 'webchat']), label: z.string().min(1).max(80) }).safeParse(req.body);
+    const b = z.object({ type: z.enum(['whatsapp', 'whatsapp_cloud', 'telegram', 'webchat', 'messenger', 'instagram']), label: z.string().min(1).max(80) }).safeParse(req.body);
     if (!b.success) return reply.code(400).send({ error: 'bad_request' });
     if (!mgr.supports(b.data.type)) return reply.code(501).send({ error: 'unsupported_channel_type' });
     const { rows } = await db.query(
@@ -152,6 +152,54 @@ export function channelRoutes(app: FastifyInstance, db: Db, mgr: ChannelManager,
     // connected: link the business account to the app, or Meta sends no webhooks at all
     const subscribe = status === 'connected' ? await mgr.cloudAdapter(p.data.id)!.subscribeApp() : null;
     // saved either way; when Meta refused, say why (the screen explains each reason)
+    return { ok: true, status, ...(status === 'connected' ? { subscribe } : { error: mgr.cloudLastError(p.data.id) ?? 'meta_check_failed' }) };
+  });
+
+  // Messenger / Instagram: Page credentials + the webhook details for Meta's app dashboard (same pattern as the official WhatsApp channel).
+  const isMeta = async (id: string) => (await db.query(`SELECT 1 FROM channels WHERE id=$1 AND type IN ('messenger','instagram')`, [id])).rowCount === 1;
+  const metaWebhook = (id: string) => `${cfg.APP_ORIGIN.split(',')[0]!.trim().replace(/\/$/, '')}/webhooks/meta/${id}`;
+  app.get('/channels/:id/meta', { preHandler: adminOnly }, async (req, reply) => {
+    const p = idParam.safeParse(req.params);
+    if (!p.success || !(await isMeta(p.data.id))) return reply.code(404).send({ error: 'not_found' });
+    return { ...(await mgr.getMetaConfig(p.data.id)), webhookUrl: metaWebhook(p.data.id) };
+  });
+  app.post('/channels/:id/meta/subscribe', { preHandler: adminOnly, config: { rateLimit: { max: 10, timeWindow: '1 minute' } } }, async (req, reply) => {
+    const p = idParam.safeParse(req.params);
+    if (!p.success || !(await isMeta(p.data.id))) return reply.code(404).send({ error: 'not_found' });
+    const a = mgr.metaAdapter(p.data.id);
+    if (!a || !a.isActive()) return reply.code(409).send({ error: 'channel_not_connected' });
+    const result = await a.subscribeApp();
+    await audit(db, { actorId: req.user!.id, action: 'channel.meta_subscribe', target: p.data.id, ip: req.ip, meta: { result } });
+    return { result, subscribed: await a.subscribedApps() };
+  });
+  app.put('/channels/:id/meta', { preHandler: adminOnly, config: { rateLimit: { max: 10, timeWindow: '1 minute' } } }, async (req, reply) => {
+    const p = idParam.safeParse(req.params);
+    const raw = (req.body ?? {}) as Record<string, unknown>;
+    const body = { ...raw, ...(typeof raw.pageAccessToken === 'string' ? { pageAccessToken: raw.pageAccessToken.trim().replace(/^Bearer\s+/i, '') } : {}), ...(typeof raw.appSecret === 'string' ? { appSecret: raw.appSecret.trim() } : {}) };
+    const b = z.object({
+      pageId: z.string().regex(/^\d{5,32}$/),
+      pageAccessToken: z.string().min(20).max(1000).regex(/^[\w.\-~+/=]+$/),
+      appSecret: z.string().min(16).max(200).regex(/^[\w.\-~+/=]+$/),
+      igAccountId: z.string().regex(/^\d{5,32}$/).optional(),
+    }).safeParse(body);
+    if (!p.success) return reply.code(400).send({ error: 'bad_request' });
+    if (!b.success) {
+      const field = String(b.error.issues[0]?.path[0] ?? '');
+      const code = ({ pageId: 'invalid_page_id', pageAccessToken: 'invalid_token_format', appSecret: 'invalid_app_secret_format', igAccountId: 'invalid_ig_account_id' } as Record<string, string>)[field] ?? 'bad_request';
+      return reply.code(400).send({ error: code });
+    }
+    const type = (await db.query(`SELECT type FROM channels WHERE id=$1`, [p.data.id])).rows[0]?.type as string | undefined;
+    if (type !== 'messenger' && type !== 'instagram') return reply.code(404).send({ error: 'not_found' });
+    if (type === 'instagram' && !b.data.igAccountId) return reply.code(400).send({ error: 'invalid_ig_account_id' });
+    try {
+      await mgr.setMetaCredentials(p.data.id, b.data);
+    } catch (e) {
+      req.log.error({ err: e }, 'meta credentials failed');
+      return reply.code(502).send({ error: 'channel_error' });
+    }
+    await audit(db, { actorId: req.user!.id, action: 'channel.meta_credentials', target: p.data.id, ip: req.ip });
+    const status = mgr.snapshot(p.data.id).status;
+    const subscribe = status === 'connected' ? await mgr.metaAdapter(p.data.id)!.subscribeApp() : null;
     return { ok: true, status, ...(status === 'connected' ? { subscribe } : { error: mgr.cloudLastError(p.data.id) ?? 'meta_check_failed' }) };
   });
 

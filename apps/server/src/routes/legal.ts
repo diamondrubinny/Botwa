@@ -30,7 +30,7 @@ nav ul{list-style:none;padding:0;display:flex;flex-wrap:wrap;gap:.4rem 1.2rem;ma
 section[lang=en]{border-top:1px solid var(--line);margin-top:2.5rem;padding-top:1rem}
 .skip{position:absolute;inset-inline-start:-999px}.skip:focus{inset-inline-start:1rem;top:1rem;background:var(--card);padding:.4rem .8rem}`;
 
-const CHANNEL_NAMES: Record<string, string> = { whatsapp_cloud: 'WhatsApp (WhatsApp Business Platform של Meta)', whatsapp: 'WhatsApp', telegram: 'Telegram', webchat: 'צ׳אט באתר' };
+const CHANNEL_NAMES: Record<string, string> = { whatsapp_cloud: 'WhatsApp (WhatsApp Business Platform של Meta)', whatsapp: 'WhatsApp', telegram: 'Telegram', messenger: 'Facebook Messenger (Meta)', instagram: 'Instagram (Meta)', webchat: 'צ׳אט באתר' };
 
 function page(title: string, body: string, info: LegalInfo & { updatedAt: string | null }): string {
   const updated = info.updatedAt ? new Date(info.updatedAt).toLocaleDateString('he-IL', { timeZone: 'Asia/Jerusalem' }) : null;
@@ -59,7 +59,7 @@ const contactHtml = (i: LegalInfo) => {
 
 function privacyBody(i: LegalInfo, channels: string[], cfg: Config): string {
   const via = channels.length ? channels.map((c) => CHANNEL_NAMES[c] ?? c).join(', ') : 'WhatsApp, Telegram וצ׳אט באתר';
-  const meta = channels.includes('whatsapp_cloud') || channels.includes('whatsapp') || channels.length === 0;
+  const meta = ['whatsapp_cloud', 'whatsapp', 'messenger', 'instagram'].some((c) => channels.includes(c)) || channels.length === 0;
   const keep = cfg.MESSAGE_RETENTION_DAYS > 0
     ? `שיחות, הודעות וקבצים נמחקים אוטומטית לאחר ${cfg.MESSAGE_RETENTION_DAYS} ימים ללא פעילות בשיחה, אלא אם נדרש לשמור אותם לפי דין או לצורך טיפול בפנייה פתוחה.`
     : 'שיחות והודעות נשמרות כל עוד הן נדרשות לטיפול בפנייה ולתיעוד השירות, ונמחקות לפי בקשה או לפי מדיניות השמירה של הארגון.';
