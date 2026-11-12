@@ -37,7 +37,9 @@ export function brandingRoutes(app: FastifyInstance, db: Db, kb: KnowledgeBase) 
     const r = await db.query(`SELECT mime, data FROM branding_logo WHERE id = 1`);
     if (!r.rows[0]) return reply.code(404).send({ error: 'not_found' });
     return reply.header('content-type', r.rows[0].mime).header('x-content-type-options', 'nosniff')
-      .header('content-security-policy', "default-src 'none'; sandbox").header('cache-control', 'public, max-age=300').send(r.rows[0].data);
+      .header('content-security-policy', "default-src 'none'; sandbox").header('cache-control', 'public, max-age=300')
+      .header('cross-origin-resource-policy', 'cross-origin')   // shown in the chat bubble on the organisation's own website
+      .send(r.rows[0].data);
   });
 
   app.put('/branding', { preHandler: manage }, async (req, reply) => {

@@ -31,7 +31,7 @@ self.addEventListener('push', (e) => {
   try { d = e.data ? e.data.json() : {}; } catch (_) { /* ignore malformed payload */ }
   // only a same-site path is followed (the link opens the conversation; no customer data is in the payload)
   const url = typeof d.url === 'string' && d.url.startsWith('/') && !d.url.startsWith('//') ? d.url : '/#/inbox';
-  e.waitUntil(self.registration.showNotification(d.title || 'הודעה חדשה', { tag: d.tag || 'botwa-new', icon: '/icons/icon-192.png', badge: '/icons/icon-192.png', lang: 'he', dir: 'rtl', renotify: true, data: { url } }));
+  e.waitUntil(self.registration.showNotification(d.title || 'הודעה חדשה', { tag: d.tag || 'botwa-new', icon: typeof d.icon === 'string' && /^\/branding\/logo(\?v=\d+)?$/.test(d.icon) ? d.icon : '/icons/icon-192.png', badge: '/icons/icon-192.png', lang: 'he', dir: 'rtl', renotify: true, data: { url } }));
 });
 self.addEventListener('notificationclick', (e) => {
   e.notification.close();

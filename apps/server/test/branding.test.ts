@@ -64,6 +64,7 @@ describe('branding API', () => {
     expect(got.headers['x-content-type-options']).toBe('nosniff');
     expect(String(got.headers['content-security-policy'])).toContain("default-src 'none'");
     expect(got.rawPayload.equals(PNG)).toBe(true);
+    expect(got.headers['cross-origin-resource-policy']).toBe('cross-origin');   // may show in the chat bubble on the organisation's website
     expect((await call('DELETE', '/branding/logo', 'admin')).json().hasLogo).toBe(false);
   });
 

@@ -68,7 +68,14 @@
       setTimeout(function () {
         if (state.open || state.destroyed || sessionStorageGet('popup')) return;
         popup = el('div', { role: 'status' }, 'position:absolute;bottom:68px;' + side + ':0;max-width:240px;width:max-content;background:#fff;color:#111;padding:10px 14px;border-radius:12px;box-shadow:0 4px 16px rgba(0,0,0,.25);font:14px/1.4 system-ui,sans-serif;cursor:pointer;');
-        popup.textContent = b.popupText;
+        if (c.logo && /^https?:\/\/[^\s"'<>]+\/branding\/logo(\?v=\d+)?$/.test(c.logo)) {
+          // the organisation's logo beside the greeting (decorative: the text says who writes)
+          popup.style.display = 'flex'; popup.style.alignItems = 'center'; popup.style.gap = '10px';
+          var img = el('img', { src: c.logo, alt: '', width: '34', height: '34', 'aria-hidden': 'true' }, 'width:34px;height:34px;border-radius:50%;object-fit:cover;flex:none;background:#fff;box-shadow:0 0 0 1px rgba(0,0,0,.08);');
+          img.addEventListener('error', function () { img.remove(); });
+          popup.appendChild(img);
+          var txt = el('span', {}); txt.textContent = b.popupText; popup.appendChild(txt);
+        } else popup.textContent = b.popupText;
         popup.addEventListener('click', function () { setOpen(true); });
         host.appendChild(popup);
         sessionStorageSet('popup', '1');

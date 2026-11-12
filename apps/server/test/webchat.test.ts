@@ -144,6 +144,10 @@ describe('website chat widget', () => {
     expect((await app.inject({ url: `/widget/config?key=${key}`, headers: { origin: 'https://evil.com' } })).headers['access-control-allow-origin']).toBeUndefined();
     const j = ok.json();
     expect(j).toMatchObject({ available: true, textColor: '#ffffff', behavior: { askName: 'required' } });
+    expect(j.logo).toBeNull();   // no organisation logo uploaded: the bubble and header show text only
+    await db.query(`INSERT INTO branding_logo (id, mime, data) VALUES (1, 'image/png', '\\x89504e47') ON CONFLICT (id) DO NOTHING`);
+    expect((await app.inject({ url: `/widget/config?key=${key}`, headers: { origin: SITE } })).json().logo).toMatch(/^https?:\/\/[^/]+\/branding\/logo\?v=\d+$/);
+    await db.query('DELETE FROM branding_logo');
     expect(JSON.stringify(j)).not.toMatch(/secret|identity/i);
     expect((await app.inject({ url: '/widget/config?key=nope' })).statusCode).toBe(404);
   });

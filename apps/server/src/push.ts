@@ -58,8 +58,12 @@ export class PushService {
   getPublicKey(): string { return this.publicKey; }
 
   /** Send one alert to these devices; a device the push service says is gone is forgotten. The payload never holds customer data. */
-  private async deliver(rows: { id: string; endpoint: string; p256dh: string; auth: string }[], payload: { title: string; tag: string; url?: string }, urgency: 'normal' | 'high' = 'normal'): Promise<number> {
+  private async deliver(rows: { id: string; endpoint: string; p256dh: string; auth: string }[], payload: { title: string; tag: string; url?: string; icon?: string }, urgency: 'normal' | 'high' = 'normal'): Promise<number> {
     let ok = 0;
+    if (!payload.icon) {
+      const lg = (await this.db.query(`SELECT extract(epoch FROM updated_at)::bigint AS v FROM branding_logo WHERE id = 1`).catch(() => ({ rows: [] }))).rows[0] as { v: string } | undefined;
+      if (lg) payload = { ...payload, icon: `/branding/logo?v=${Number(lg.v)}` };
+    }
     for (const s of rows) {
       try {
         await webpush.sendNotification({ endpoint: s.endpoint, keys: { p256dh: s.p256dh, auth: s.auth } }, JSON.stringify(payload), { TTL: 3600, urgency, timeout: 8000 });

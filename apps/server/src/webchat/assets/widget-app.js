@@ -39,6 +39,14 @@
   }
 
   // a small welcome picture (drawn for Botwa; decorative, hidden from screen readers), coloured by the chat's own colour
+  // the organisation's logo in the header (decorative; the title next to it names the chat)
+  function logoEl() {
+    if (!cfg.logo || !/\/branding\/logo(\?v=\d+)?$/.test(cfg.logo)) return null;
+    var img = h('img', { class: 'logo', src: cfg.logo.replace(/^https?:\/\/[^/]+/, ''), alt: '', width: '36', height: '36' });
+    img.addEventListener('error', function () { img.remove(); });
+    return img;
+  }
+
   function helloArt() {
     var NS = 'http://www.w3.org/2000/svg';
     var svg = document.createElementNS(NS, 'svg');
@@ -82,7 +90,7 @@
     app.textContent = '';
     var close = h('button', { type: 'button', class: 'close', 'aria-label': L.close, text: '×' });
     close.addEventListener('click', function () { parent({ type: 'botwa:close' }); });
-    var head = h('header', {}, [h('div', { class: 'grow' }, [h('h1', { text: cfg.design.title }), h('p', { text: cfg.design.subtitle })]), close]);
+    var head = h('header', {}, [logoEl(), h('div', { class: 'grow' }, [h('h1', { text: cfg.design.title }), h('p', { text: cfg.design.subtitle })]), close].filter(Boolean));
     var kids = [head];
     if (!cfg.online) kids.push(h('div', { class: 'offline', role: 'status', text: cfg.behavior.offlineMessage }));
     els.log = h('div', { class: 'log', role: 'log', 'aria-live': 'polite', 'aria-label': L.log });
@@ -177,7 +185,7 @@
     app.textContent = '';
     var close = h('button', { type: 'button', class: 'close', 'aria-label': L.close, text: '×' });
     close.addEventListener('click', function () { parent({ type: 'botwa:close' }); });
-    app.appendChild(h('header', {}, [h('div', { class: 'grow' }, [h('h1', { text: cfg.design.title }), h('p', { text: cfg.design.subtitle })]), close]));
+    app.appendChild(h('header', {}, [logoEl(), h('div', { class: 'grow' }, [h('h1', { text: cfg.design.title }), h('p', { text: cfg.design.subtitle })]), close].filter(Boolean)));
     var form = h('form', { class: 'pre', novalidate: 'novalidate' });
     var hi = h('div', { class: 'hello' }); hi.appendChild(helloArt()); form.appendChild(hi);
     form.appendChild(h('p', { text: cfg.design.welcome }));

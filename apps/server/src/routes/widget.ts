@@ -70,8 +70,9 @@ export function widgetRoutes(app: FastifyInstance, db: Db, mgr: ChannelManager, 
     const hours = await loadBusinessHours(db);
     const text = textOn(s.design.color) ?? '#ffffff';
     const b = s.behavior;
+    const lg = (await db.query(`SELECT extract(epoch FROM updated_at)::bigint AS v FROM branding_logo WHERE id = 1`)).rows[0];
     return {
-      design: s.design, textColor: text, available: !!mgr.webchatAdapter(s.channelId)?.isActive(), online: !hours.enabled || isOpen(hours, new Date()),
+      design: s.design, textColor: text, logo: lg ? `${appOrigins[0]}/branding/logo?v=${Number(lg.v)}` : null, available: !!mgr.webchatAdapter(s.channelId)?.isActive(), online: !hours.enabled || isOpen(hours, new Date()),
       behavior: { askName: b.askName, askEmail: b.askEmail, askPhone: b.askPhone, popupText: b.popupText, popupDelaySec: b.popupDelaySec, autoOpenSec: b.autoOpenSec, consentText: b.consentText, consentLink: b.consentLink, offlineMessage: b.offlineMessage, maxLength: b.maxLength },
     };
   });

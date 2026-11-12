@@ -64,3 +64,5 @@ form.composer textarea { text-align: start; unicode-bidi: plaintext; }
 .pre .hello { margin-bottom: 8px; }
 @media (max-height: 520px) { .hello-art { display: none; } }
 @media (prefers-color-scheme: dark) { .hello-art .a-sun { fill: #e6bc2e; } .hello-art .a-mint { fill: #3fbf95; } .hello-art .a-peach { fill: #e08452; } }
+
+header .logo { width: 36px; height: 36px; border-radius: 50%; object-fit: cover; background: #fff; flex: none; box-shadow: 0 0 0 2px rgba(255,255,255,.5); }
