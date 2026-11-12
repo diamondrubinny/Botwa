@@ -1,4 +1,5 @@
 import { EmptyState, PageTitle } from '../components/Illustration';
+import { GifLibrary } from '../components/GifLibrary';
 import { useState, type FormEvent } from 'react';
 import { api, ApiError, can, type Canned as CannedT, type CannedVar, type Me, type Tag } from '../api';
 import { usePoll } from '../hooks';
@@ -86,6 +87,7 @@ export function CannedReplies({ me }: { me: Me }) {
         <div className="row"><button className="primary" type="submit">{editId ? 'שמירה' : 'הוספה'}</button>{editId && <button type="button" onClick={cancelEdit}>ביטול</button>}</div>
       </form>
       </>}
+      {canCanned && <GifLibrary />}
     </>
   );
 }

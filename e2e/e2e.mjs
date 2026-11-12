@@ -526,6 +526,19 @@ await page.fill('#tag-name', 'VIP'); await page.click('button:has-text("הוספ
 await page.waitForSelector('li.badge:has-text("VIP")');
 await axe('canned replies + tags');
 
+// GIF library: a manager adds a GIF (checked by content, scanned by clamd), then edits its title
+const GIF = Buffer.from('R0lGODlhEAAQAPcfMQAAACQAAEgAAGwAAJAAALQAANgAAPwAAAAkACQkAEgkAGwkAJAkALQkANgkAPwkAABIACRIAEhIAGxIAJBIALRIANhIAPxIAABsACRsAEhsAGxsAJBsALRsANhsAPxsAACQACSQAEiQAGyQAJCQALSQANiQAPyQAAC0ACS0AEi0AGy0AJC0ALS0ANi0APy0AADYACTYAEjYAGzYAJDYALTYANjYAPzYAAD8ACT8AEj8AGz8AJD8ALT8ANj8APz8AAAAVSQAVUgAVWwAVZAAVbQAVdgAVfwAVQAkVSQkVUgkVWwkVZAkVbQkVdgkVfwkVQBIVSRIVUhIVWxIVZBIVbRIVdhIVfxIVQBsVSRsVUhsVWxsVZBsVbRsVdhsVfxsVQCQVSSQVUiQVWyQVZCQVbSQVdiQVfyQVQC0VSS0VUi0VWy0VZC0VbS0Vdi0Vfy0VQDYVSTYVUjYVWzYVZDYVbTYVdjYVfzYVQD8VST8VUj8VWz8VZD8VbT8Vdj8Vfz8VQAAqiQAqkgAqmwAqpAAqrQAqtgAqvwAqgAkqiQkqkgkqmwkqpAkqrQkqtgkqvwkqgBIqiRIqkhIqmxIqpBIqrRIqthIqvxIqgBsqiRsqkhsqmxsqpBsqrRsqthsqvxsqgCQqiSQqkiQqmyQqpCQqrSQqtiQqvyQqgC0qiS0qki0qmy0qpC0qrS0qti0qvy0qgDYqiTYqkjYqmzYqpDYqrTYqtjYqvzYqgD8qiT8qkj8qmz8qpD8qrT8qtj8qvz8qgAA/yQA/0gA/2wA/5AA/7QA/9gA//wA/wAk/yQk/0gk/2wk/5Ak/7Qk/9gk//wk/wBI/yRI/0hI/2xI/5BI/7RI/9hI//xI/wBs/yRs/0hs/2xs/5Bs/7Rs/9hs//xs/wCQ/ySQ/0iQ/2yQ/5CQ/7SQ/9iQ//yQ/wC0/yS0/0i0/2y0/5C0/7S0/9i0//y0/wDY/yTY/0jY/2zY/5DY/7TY/9jY//zY/wD8/yT8/0j8/2z8/5D8/7T8/9j8//z8/yH/C05FVFNDQVBFMi4wAwEAAAAh+QQEFAAfACwAAAAAEAAQAAAIHQAPCBxIsKDBgwgTKlzIsKHDhxAjSpxIsaLFgQEBACH5BAUUAAAALA8ADwABAAEAAAgEAAEEBAAh+QQFFAAAACwPAA8AAQABAAAIBAABBAQAIfkEBRQAAAAsDwAPAAEAAQAACAQAAQQEADs=', 'base64');
+await page.fill('#gif-title', 'תודה רבה'); await page.fill('#gif-kw', 'אגודל, שמחה');
+await page.setInputFiles('#gif-file', { name: 'thanks.gif', mimeType: 'image/gif', buffer: GIF });
+await page.click('button:has-text("הוספה לספרייה")');
+await page.waitForSelector('.gif-admin li:has-text("תודה רבה")', { timeout: 20000 }).catch(() => undefined);
+check('GIF added to the library', await page.locator('.gif-admin li:has-text("תודה רבה")').count() === 1, await page.textContent('#gifs-h ~ p[role=status]').catch(() => ''));
+await page.setInputFiles('#gif-file', { name: 'fake.gif', mimeType: 'image/gif', buffer: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==', 'base64') });
+await page.fill('#gif-title', 'מזויף'); await page.click('button:has-text("הוספה לספרייה")');
+await page.waitForSelector('[role=status].error:has-text("רק קובצי GIF")', { timeout: 8000 }).catch(() => undefined);
+check('a PNG renamed .gif is refused', await page.isVisible('[role=status].error:has-text("רק קובצי GIF")'));
+await axe('canned replies: GIF library');
+
 // seed an inbound conversation directly (adapter can't reach WhatsApp here)
 const ch = psql("SELECT id FROM channels LIMIT 1");
 psql(`INSERT INTO contacts (channel_id, external_id, display_name) VALUES ('${ch}','972501234567@s.whatsapp.net','יוסי לקוח')`);
@@ -660,6 +673,35 @@ check('authenticated image attachment renders', loaded);
 check('pending/infected/blocked states shown',
   (await page.isVisible('text=בסריקת אבטחה')) && (await page.isVisible('text=זוהתה בו תוכנה זדונית')) && (await page.isVisible('text=סוג הקובץ אינו נתמך')));
 await axe('inbox with attachments');
+// emoji picker: search in Hebrew, insert at the cursor, Escape gives focus back to its button
+await page.fill('#reply', 'מעולה ');
+await page.click('button[aria-label="אימוג׳י"]');
+await page.waitForSelector('#emoji-picker');
+check('emoji picker opens with focus in its search box', await page.evaluate(() => document.activeElement?.id === 'emoji-q'));
+await axe('inbox: emoji picker');
+await page.fill('#emoji-q', 'אגודל');
+await page.click('#emoji-picker button[aria-label="אגודל למעלה"]');
+check('emoji is inserted into the reply', (await page.inputValue('#reply')) === 'מעולה 👍');
+await page.click('#emoji-q');
+await page.fill('#emoji-q', '');
+await page.click('#emoji-picker .picker-tabs button[title="בטיחות"]');
+await page.focus('#emoji-picker .emoji-grid button[tabindex="0"]');
+await page.keyboard.press('ArrowLeft');
+const moved = await page.evaluate(() => document.activeElement?.getAttribute('aria-label'));
+check('arrow keys move inside the emoji grid (RTL: left = next)', moved === 'קסדת חילוץ', moved ?? '');
+await page.keyboard.press('Escape');
+check('Escape closes the emoji picker and returns focus', !(await page.isVisible('#emoji-picker')) && await page.evaluate(() => document.activeElement?.getAttribute('aria-label') === 'אימוג׳י'));
+// GIF picker: the library item is there; sending reaches the server (stops at "channel not connected" here)
+await page.click('button[aria-label="שליחת GIF"]');
+await page.waitForSelector('#gif-picker .gif-tile', { timeout: 8000 }).catch(() => undefined);
+check('GIF picker lists the library', await page.locator('#gif-picker .gif-tile').count() === 1);
+await axe('inbox: GIF picker');
+await page.click('#gif-picker .gif-tile');
+await page.waitForSelector('[role=alert]:has-text("הערוץ אינו מחובר")', { timeout: 8000 }).catch(() => undefined);
+check('sending a GIF goes through the server checks', await page.isVisible('[role=alert]:has-text("הערוץ אינו מחובר")'));
+check('the typed text stays in the box after a GIF', (await page.inputValue('#reply')) === 'מעולה 👍');
+await page.keyboard.press('Escape');
+await page.fill('#reply', '');
 await page.setInputFiles('#attach', { name: 'pic.png', mimeType: 'image/png', buffer: PNG });
 await page.click('button:has-text("שליחה")');
 await page.waitForSelector('[role=alert]:has-text("הערוץ אינו מחובר")');

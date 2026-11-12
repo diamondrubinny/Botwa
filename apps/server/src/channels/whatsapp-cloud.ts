@@ -244,6 +244,11 @@ export class WhatsAppCloudAdapter implements ChannelAdapter {
 
   async sendMedia(externalContactId: string, media: OutboundMedia): Promise<{ externalMessageId?: string }> {
     if (!this.creds || !this.active) throw new Error('channel_not_connected');
+    // The Cloud API's image type takes JPEG/PNG only (verify against the current reference): a GIF goes as its MP4 video.
+    if (media.mime === 'image/gif') {
+      if (!media.animation) throw new Error('gif_unsupported');
+      media = { buffer: media.animation, mime: 'video/mp4', fileName: media.fileName.replace(/\.gif$/i, '') + '.mp4', caption: media.caption };
+    }
     const form = new FormData();
     form.append('messaging_product', 'whatsapp');
     form.append('type', media.mime);

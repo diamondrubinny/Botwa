@@ -12,6 +12,8 @@ export interface OutboundMedia {
   mime: string;
   fileName: string;
   caption?: string;
+  /** For a GIF: the same animation as a silent MP4, when the server could make one (WhatsApp plays only that as a moving "GIF"). */
+  animation?: Buffer;
 }
 
 export interface InboundMessage {

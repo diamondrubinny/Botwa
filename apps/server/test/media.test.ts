@@ -14,6 +14,8 @@ import { purgeOldMessages } from '../src/inbox.js';
 import { clamScan, parseReply } from '../src/media/clamav.js';
 import { MediaService } from '../src/media/store.js';
 import { detect, sanitizeFileName } from '../src/media/validate.js';
+import { gifSize, gifToMp4 } from '../src/media/animation.js';
+import { execFileSync } from 'node:child_process';
 import { migrate } from '../src/migrate.js';
 import { hashPassword } from '../src/password.js';
 import { EICAR, startFakeClamd } from './helpers/fake-clamd.js';
@@ -23,6 +25,7 @@ const PDF = Buffer.from('%PDF-1.4\n1 0 obj<<>>endobj\ntrailer<<>>\n%%EOF\n');
 const EXE = Buffer.concat([Buffer.from('MZ'), Buffer.alloc(200, 1)]);
 const SVG = Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>');
 const HTML = Buffer.from('<html><script>alert(1)</script></html>');
+const GIF = Buffer.from('R0lGODlhEAAQAPcfMQAAACQAAEgAAGwAAJAAALQAANgAAPwAAAAkACQkAEgkAGwkAJAkALQkANgkAPwkAABIACRIAEhIAGxIAJBIALRIANhIAPxIAABsACRsAEhsAGxsAJBsALRsANhsAPxsAACQACSQAEiQAGyQAJCQALSQANiQAPyQAAC0ACS0AEi0AGy0AJC0ALS0ANi0APy0AADYACTYAEjYAGzYAJDYALTYANjYAPzYAAD8ACT8AEj8AGz8AJD8ALT8ANj8APz8AAAAVSQAVUgAVWwAVZAAVbQAVdgAVfwAVQAkVSQkVUgkVWwkVZAkVbQkVdgkVfwkVQBIVSRIVUhIVWxIVZBIVbRIVdhIVfxIVQBsVSRsVUhsVWxsVZBsVbRsVdhsVfxsVQCQVSSQVUiQVWyQVZCQVbSQVdiQVfyQVQC0VSS0VUi0VWy0VZC0VbS0Vdi0Vfy0VQDYVSTYVUjYVWzYVZDYVbTYVdjYVfzYVQD8VST8VUj8VWz8VZD8VbT8Vdj8Vfz8VQAAqiQAqkgAqmwAqpAAqrQAqtgAqvwAqgAkqiQkqkgkqmwkqpAkqrQkqtgkqvwkqgBIqiRIqkhIqmxIqpBIqrRIqthIqvxIqgBsqiRsqkhsqmxsqpBsqrRsqthsqvxsqgCQqiSQqkiQqmyQqpCQqrSQqtiQqvyQqgC0qiS0qki0qmy0qpC0qrS0qti0qvy0qgDYqiTYqkjYqmzYqpDYqrTYqtjYqvzYqgD8qiT8qkj8qmz8qpD8qrT8qtj8qvz8qgAA/yQA/0gA/2wA/5AA/7QA/9gA//wA/wAk/yQk/0gk/2wk/5Ak/7Qk/9gk//wk/wBI/yRI/0hI/2xI/5BI/7RI/9hI//xI/wBs/yRs/0hs/2xs/5Bs/7Rs/9hs//xs/wCQ/ySQ/0iQ/2yQ/5CQ/7SQ/9iQ//yQ/wC0/yS0/0i0/2y0/5C0/7S0/9i0//y0/wDY/yTY/0jY/2zY/5DY/7TY/9jY//zY/wD8/yT8/0j8/2z8/5D8/7T8/9j8//z8/yH/C05FVFNDQVBFMi4wAwEAAAAh+QQEFAAfACwAAAAAEAAQAAAIHQAPCBxIsKDBgwgTKlzIsKHDhxAjSpxIsaLFgQEBACH5BAUUAAAALA8ADwABAAEAAAgEAAEEBAAh+QQFFAAAACwPAA8AAQABAAAIBAABBAQAIfkEBRQAAAAsDwAPAAEAAQAACAQAAQQEADs=', 'base64');
 const PNG_WITH_EICAR = Buffer.concat([PNG, Buffer.from(EICAR)]);
 
 describe('content validation', () => {
@@ -101,7 +104,7 @@ describe('media pipeline', () => {
   }
   const factory: AdapterFactory = (t, ctx) => (t === 'whatsapp' ? new Fake(ctx) : null);
 
-  const call = (method: 'GET' | 'POST' | 'DELETE', url: string, who?: string, payload?: object) =>
+  const call = (method: 'GET' | 'POST' | 'DELETE' | 'PATCH', url: string, who?: string, payload?: object) =>
     app.inject({ method, url, payload, remoteAddress: `10.5.${Math.floor(++ip / 250)}.${ip % 250}`, headers: { origin: ORIGIN, ...(who ? { cookie: cookies[who]! } : {}) } });
 
   function upload(convId: string, who: string, file: Buffer, name: string, caption?: string) {
@@ -324,5 +327,81 @@ describe('media pipeline', () => {
     expect((await call('DELETE', `/contacts/${contactId}`, 'admin@t.io')).statusCode).toBe(200);
     expect(await files('clean')).toHaveLength(0);
     expect((await db.query('SELECT 1 FROM attachments')).rowCount).toBe(0);
+  });
+
+  function addGif(who: string, file: Buffer, title?: string, keywords?: string) {
+    const b = '----botwagif';
+    const parts = [
+      ...(title !== undefined ? [Buffer.from(`--${b}\r\nContent-Disposition: form-data; name="title"\r\n\r\n${title}\r\n`)] : []),
+      ...(keywords ? [Buffer.from(`--${b}\r\nContent-Disposition: form-data; name="keywords"\r\n\r\n${keywords}\r\n`)] : []),
+      Buffer.from(`--${b}\r\nContent-Disposition: form-data; name="file"; filename="x.gif"\r\nContent-Type: image/gif\r\n\r\n`),
+      file,
+      Buffer.from(`\r\n--${b}--\r\n`),
+    ];
+    return app.inject({
+      method: 'POST', url: '/gifs', payload: Buffer.concat(parts), remoteAddress: `10.7.${Math.floor(++ip / 250)}.${ip % 250}`,
+      headers: { origin: ORIGIN, cookie: cookies[who]!, 'content-type': `multipart/form-data; boundary=${b}` },
+    });
+  }
+
+  it('GIF gallery: managers add (GIF only, scanned, no duplicates), everyone signed in lists, searches and sends', async () => {
+    expect((await addGif('a1@t.io', GIF, 'תודה')).statusCode).toBe(403);           // agents may not add
+    expect((await addGif('admin@t.io', PNG, 'png')).json()).toEqual({ error: 'gif_only' });
+    expect((await addGif('admin@t.io', GIF, '')).json()).toEqual({ error: 'gif_title_required' });
+    expect((await addGif('admin@t.io', Buffer.concat([GIF, Buffer.from(EICAR)]), 'virus')).json()).toEqual({ error: 'file_infected' });
+    const add = await addGif('admin@t.io', GIF, 'תודה רבה', 'שמחה, אגודל');
+    expect(add.statusCode).toBe(201);
+    const gifId = add.json().id as string;
+    expect((await addGif('admin@t.io', GIF, 'again')).json()).toEqual({ error: 'gif_exists' });
+
+    const list = (await call('GET', '/gifs?q=' + encodeURIComponent('אגודל'), 'a1@t.io')).json();
+    expect(list.gifs).toHaveLength(1);
+    expect(list.gifs[0]).toMatchObject({ id: gifId, title: 'תודה רבה', width: 16, height: 16 });
+    expect((await call('GET', '/gifs?q=%25', 'a1@t.io')).json().gifs).toHaveLength(0);    // % is literal, not a wildcard
+    expect((await call('GET', '/gifs')).statusCode).toBe(401);
+    const file = await call('GET', `/gifs/${gifId}/file`, 'a1@t.io');
+    expect(file.headers['content-type']).toBe('image/gif');
+    expect(file.headers['content-security-policy']).toContain('sandbox');
+    expect(file.rawPayload.equals(GIF)).toBe(true);
+
+    expect((await call('PATCH', `/gifs/${gifId}`, 'a1@t.io', { title: 'x' })).statusCode).toBe(403);
+    expect((await call('PATCH', `/gifs/${gifId}`, 'admin@t.io', { title: 'תודה!', keywords: 'thanks' })).json()).toEqual({ ok: true });
+
+    // sending: a fresh conversation assigned to a1; the other agent has no access; the assigned one sends it like any file
+    await ctxRef.events.onMessage({ externalContactId: 'gif@s.whatsapp.net', contactName: 'Gal', externalMessageId: 'gif-seed', text: 'hi', timestamp: new Date() });
+    const convId = (await db.query(`SELECT c.id FROM conversations c JOIN contacts ct ON ct.id = c.contact_id WHERE ct.external_id = 'gif@s.whatsapp.net'`)).rows[0].id as string;
+    await call('POST', `/conversations/${convId}/assign`, 'a1@t.io', { userId: ids['a1@t.io'] });
+    expect((await call('POST', `/conversations/${convId}/gif`, 'a2@t.io', { gifId })).statusCode).toBe(404);
+    expect((await call('POST', `/conversations/${convId}/gif`, 'a1@t.io', { gifId: '00000000-0000-4000-8000-000000000000' })).json()).toEqual({ error: 'gif_not_found' });
+    sentMedia = [];
+    const sent = await call('POST', `/conversations/${convId}/gif`, 'a1@t.io', { gifId, caption: 'כל הכבוד' });
+    expect(sent.statusCode).toBe(201);
+    expect(sentMedia[0]).toMatchObject({ mime: 'image/gif', fileName: 'תודה!.gif', caption: 'כל הכבוד' });
+    expect(sentMedia[0]!.buffer.equals(GIF)).toBe(true);
+    if (list.gifs[0].hasVideo) expect(sentMedia[0]!.animation!.subarray(4, 8).toString('latin1')).toBe('ftyp');
+    const msgs = (await call('GET', `/conversations/${convId}/messages`, 'a1@t.io')).json();
+    expect(msgs.find((m: { body: string }) => m.body === 'כל הכבוד').attachment).toMatchObject({ status: 'clean', mime: 'image/gif' });
+    expect((await db.query(`SELECT 1 FROM audit_log WHERE action IN ('gif.add','gif.edit')`)).rowCount).toBe(2);
+
+    expect((await call('DELETE', `/gifs/${gifId}`, 'a1@t.io')).statusCode).toBe(403);
+    expect((await call('DELETE', `/gifs/${gifId}`, 'admin@t.io')).json()).toEqual({ ok: true });
+    expect((await call('GET', '/gifs', 'a1@t.io')).json().gifs).toHaveLength(0);
+  });
+});
+
+const hasFfmpeg = (() => { try { execFileSync('ffmpeg', ['-version'], { stdio: 'ignore' }); return true; } catch { return false; } })();
+describe('GIF to MP4', () => {
+  it('reads the size from the header and refuses what is not a GIF', async () => {
+    expect(gifSize(GIF)).toEqual({ width: 16, height: 16 });
+    expect(gifSize(PNG)).toBeNull();
+    expect(await gifToMp4(PNG, { ffmpegPath: 'ffmpeg', tmpDir: os.tmpdir() })).toBeNull();
+    expect(await gifToMp4(GIF, { ffmpegPath: '', tmpDir: os.tmpdir() })).toBeNull();
+    expect(await gifToMp4(GIF, { ffmpegPath: '/nonexistent/ffmpeg', tmpDir: os.tmpdir() })).toBeNull();
+  });
+  it.skipIf(!hasFfmpeg)('makes a real MP4 and leaves no temp files', async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), 'botwa-anim-'));
+    const mp4 = await gifToMp4(GIF, { ffmpegPath: 'ffmpeg', tmpDir: dir });
+    expect(mp4?.subarray(4, 8).toString('latin1')).toBe('ftyp');
+    expect(await readdir(dir)).toHaveLength(0);
   });
 });

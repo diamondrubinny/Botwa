@@ -708,3 +708,25 @@ details[open]:not(.more) > summary::before { transform: rotate(45deg) translateY
 /* a soft sub-panel inside a card, styled like a fieldset (official channel: "receiving messages from Meta") */
 .fieldset { border: 1px solid var(--border); border-radius: 16px; background: color-mix(in srgb, var(--surface-2) 45%, var(--surface)); padding: 1rem 1.1rem 1.1rem; margin: 1rem 0; }
 .fieldset > h4 { margin-top: 0; }
+
+/* ---- emoji and GIF pickers in the composer ---- */
+.picker { border: 1px solid var(--border); border-radius: 16px; background: var(--surface); box-shadow: 0 10px 30px rgba(43, 22, 96, .14); padding: .6rem; display: grid; gap: .45rem; max-height: min(52vh, 420px); overflow: auto; }
+.picker input[type=search] { min-height: 40px; }
+.picker-tabs { display: flex; gap: .25rem; flex-wrap: wrap; }
+.picker-tabs button { min-height: 40px; min-width: 44px; padding: 0 .4rem; font-size: 1.25rem; border-radius: 10px; border-color: transparent; background: transparent; }
+.picker-tabs button[aria-pressed=true] { background: var(--accent-soft, color-mix(in srgb, var(--accent) 14%, var(--surface))); border-color: var(--accent); }
+.picker-h { margin: 0; font-weight: 600; font-size: .9rem; color: var(--muted); }
+.picker-foot { margin: 0; font-size: .8rem; }
+.emoji-grid { display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); gap: 2px; }
+.emoji-grid button { min-height: 44px; min-width: 0; padding: 0; font-size: 1.45rem; line-height: 1; border-color: transparent; background: transparent; border-radius: 10px; font-family: "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif; }
+@media (hover: hover) { .emoji-grid button:hover, .picker-tabs button:hover { background: var(--surface-2); } }
+.gif-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .4rem; }
+.gif-tile { display: flex; flex-direction: column; align-items: stretch; justify-content: flex-start; width: 100%; padding: 0; min-height: 0; border-radius: 12px; overflow: hidden; background: var(--surface-2); text-align: center; }
+.gif-thumb { position: relative; display: block; width: 100%; aspect-ratio: 4 / 3; background: var(--surface-2); overflow: hidden; }
+.gif-thumb canvas, .gif-thumb img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.gif-title { font-size: .8rem; padding: .2rem .3rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.composer .gif-btn { font-weight: 800; font-size: .78rem; letter-spacing: .02em; }
+.gif-reveal { min-height: 36px; }
+.gif-admin { list-style: none; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: .7rem; }
+.gif-admin li { border: 1px solid var(--border); border-radius: 14px; padding: .5rem; display: grid; gap: .35rem; background: var(--surface); }
+.gif-admin .gif-thumb { border-radius: 10px; }

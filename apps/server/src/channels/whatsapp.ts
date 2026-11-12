@@ -220,7 +220,10 @@ export class WhatsAppAdapter implements ChannelAdapter {
   async sendMedia(externalContactId: string, media: OutboundMedia): Promise<{ externalMessageId?: string }> {
     if (!this.sock) throw new Error('channel_not_connected');
     const { buffer, mime, fileName, caption } = media;
-    const content = mime.startsWith('image/')
+    // a GIF plays only as a looping silent video ("gifPlayback"); without one WhatsApp shows its first frame
+    const content = mime === 'image/gif' && media.animation
+      ? { video: media.animation, gifPlayback: true, caption, mimetype: 'video/mp4' }
+      : mime.startsWith('image/')
       ? { image: buffer, caption }
       : mime === 'video/mp4'
         ? { video: buffer, caption }

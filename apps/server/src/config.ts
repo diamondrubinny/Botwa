@@ -43,6 +43,8 @@ const schema = z.object({
   CLAMAV_HOST: z.string().min(1).optional(),
   CLAMAV_PORT: z.coerce.number().int().default(3310),
   MEDIA_ALLOW_UNSCANNED: bool('false'), // development only: accept files without antivirus
+  /** ffmpeg binary that turns GIFs into short silent MP4s, so WhatsApp plays them as animations. Empty = off (WhatsApp then gets a still picture). */
+  FFMPEG_PATH: z.string().default('ffmpeg'),
   REPORT_TZ: z.string().default('Asia/Jerusalem'),
   /** Android app (android/ folder): its package and signing-certificate SHA-256 fingerprint(s), so the app opens the panel full-screen */
   ANDROID_APP_PACKAGE: z.string().regex(/^[a-zA-Z][\w]*(\.[a-zA-Z][\w]*)+$/).default('net.rubinny.botwa'),

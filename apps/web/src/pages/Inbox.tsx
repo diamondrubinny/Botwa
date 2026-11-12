@@ -2,6 +2,7 @@ import { EmptyState } from '../components/Illustration';
 import { avatarTone } from '../components/Avatar';
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { api, ApiError, can, personLabel, upload, type Attachment, type Canned, type Conversation, type Me, type Message, type Note, type RelatedConv, type Tag, type UserRow } from '../api';
+import { EmojiPicker, GifPicker, motionOff, type GifItem } from '../components/Pickers';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { Icon } from '../components/Icon';
 import { usePoll } from '../hooks';
@@ -26,11 +27,19 @@ function waitLabel(since: string | null, sla: { enabled: boolean; targetMinutes:
   return { text: sla?.enabled && min >= target ? `${text} · חריגה מיעד השירות` : text, late: min >= target };
 }
 
+/** A GIF in the conversation: with reduced motion it stays hidden until asked for, so nothing moves on its own (WCAG 2.2.2). */
+function GifView({ id, name }: { id: string; name: string }) {
+  const [show, setShow] = useState(() => !motionOff());
+  if (!show) return <button type="button" className="gif-reveal" onClick={() => setShow(true)}>הצגת GIF: {name}</button>;
+  return <a href={`/attachments/${id}`} target="_blank" rel="noopener noreferrer"><img src={`/attachments/${id}`} alt={`GIF: ${name}`} loading="lazy" /></a>;
+}
+
 function AttachmentView({ a }: { a: Attachment }) {
   const name = a.fileName ?? 'קובץ';
   if (a.status === 'pending') return <p className="hint" role="status">הקובץ "{name}" בסריקת אבטחה…</p>;
   if (a.status === 'infected') return <p className="error">הקובץ "{name}" נחסם: זוהתה בו תוכנה זדונית.</p>;
   if (a.status === 'blocked') return <p className="error">הקובץ "{name}" לא זמין: {blockedReason[a.detail ?? ''] ?? 'נחסם'}.</p>;
+  if (a.kind === 'image' && a.mime === 'image/gif') return <GifView id={a.id} name={name} />;
   if (a.kind === 'image') {
     return <a href={`/attachments/${a.id}`} target="_blank" rel="noopener noreferrer"><img src={`/attachments/${a.id}`} alt={`תמונה מצורפת: ${name}`} loading="lazy" /></a>;
   }
@@ -65,6 +74,9 @@ export function Inbox({ me }: { me: Me }) {
   const [tagFilter, setTagFilter] = useState('');
   const [err, setErr] = useState('');
   const [sending, setSending] = useState(false);
+  const [picker, setPicker] = useState<'emoji' | 'gif' | null>(null);
+  const emojiBtn = useRef<HTMLButtonElement>(null);
+  const gifBtn = useRef<HTMLButtonElement>(null);
   const logRef = useRef<HTMLDivElement>(null);
   const [eraseOpen, setEraseOpen] = useState(false);
   const [msgQuery, setMsgQuery] = useState('');
@@ -201,6 +213,23 @@ export function Inbox({ me }: { me: Me }) {
       }
       edit('');
     });
+    setSending(false);
+  }
+
+  /** Put the emoji where the cursor is (or replace the selected text) and keep typing from after it. */
+  function insertEmoji(emoji: string) {
+    const ta = taRef.current;
+    const start = ta?.selectionStart ?? text.length;
+    const end = ta?.selectionEnd ?? text.length;
+    const next = (text.slice(0, start) + emoji + text.slice(end)).slice(0, 4000);
+    edit(next);
+    requestAnimationFrame(() => { if (ta) { const at = Math.min(next.length, start + emoji.length); ta.setSelectionRange(at, at); } });
+  }
+
+  async function sendGif(g: GifItem) {
+    if (!selId || sending) return;
+    setSending(true);
+    await act(async () => { await api('POST', `/conversations/${selId}/gif`, { gifId: g.id }); setPicker(null); taRef.current?.focus(); });
     setSending(false);
   }
 
@@ -607,8 +636,16 @@ export function Inbox({ me }: { me: Me }) {
                   )}
                 </details>
                 {file && <p className="picked-file"><Icon name="clip" size={16} />{file.name} <button type="button" style={{ minHeight: 32 }} onClick={() => { setFile(null); if (fileRef.current) fileRef.current.value = ''; }}>הסרה</button></p>}
+                {picker === 'emoji' && <EmojiPicker returnTo={emojiBtn} onClose={() => setPicker(null)} onPick={insertEmoji} />}
+                {picker === 'gif' && <GifPicker returnTo={gifBtn} busy={sending} onClose={() => setPicker(null)} onPick={(g) => void sendGif(g)} />}
                 <div className="composer-row">
                   <button type="button" className="attach" onClick={() => fileRef.current?.click()} aria-label="צירוף קובץ"><Icon name="clip" /></button>
+                  <button type="button" ref={emojiBtn} className="attach" aria-label="אימוג׳י" aria-expanded={picker === 'emoji'} aria-controls={picker === 'emoji' ? 'emoji-picker' : undefined}
+                    onClick={() => setPicker(picker === 'emoji' ? null : 'emoji')}><Icon name="smile" /></button>
+                  {sel.channelType !== 'webchat' && (
+                    <button type="button" ref={gifBtn} className="attach gif-btn" aria-label="שליחת GIF" aria-expanded={picker === 'gif'} aria-controls={picker === 'gif' ? 'gif-picker' : undefined}
+                      disabled={!!sel.blocked || !!sel.optedOut} onClick={() => setPicker(picker === 'gif' ? null : 'gif')}><span aria-hidden="true">GIF</span></button>
+                  )}
                   <input id="attach" ref={fileRef} type="file" tabIndex={-1} aria-hidden="true" accept="image/jpeg,image/png,image/webp,image/gif,application/pdf,.docx,.xlsx,audio/*,video/mp4" onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
                   <label htmlFor="reply" className="sr-only">תשובה</label>
                   <textarea id="reply" ref={taRef} rows={1} maxLength={4000} value={text} placeholder="כתבו תשובה… (/ לתשובות מוכנות)" onChange={(e) => edit(e.target.value)}

@@ -125,7 +125,7 @@ export async function buildApp(cfg: Config, db: Db, mgr: ChannelManager, media: 
   roleRoutes(app, db);
   channelRoutes(app, db, mgr, cfg);
   conversationRoutes(app, db, mgr, media);
-  mediaRoutes(app, db, mgr, media);
+  mediaRoutes(app, db, mgr, media, cfg);
   reportRoutes(app, db, cfg);
   eventRoutes(app, db, mgr);
   tagRoutes(app, db);
