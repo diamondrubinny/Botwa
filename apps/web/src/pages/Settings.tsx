@@ -69,7 +69,7 @@ export function Settings({ me }: { me: Me }) {
         <form className="card" onSubmit={saveSla} aria-labelledby="sla-h">
           <h2 id="sla-h">יעד זמן מענה (SLA)</h2>
           <p className="hint">כשלקוח ממתין לתשובת נציג יותר מהיעד, השיחה מסומנת "חריגה", נשלחת התראה (דחיפה לנציג המשויך או למנהלים, ואירוע <code dir="ltr">conversation.sla_breached</code> ל-Webhooks) והחריגה נספרת בדוח. הזמן נמדד ברציפות, גם מחוץ לשעות הפעילות. בוט ומענה אוטומטי אינם נחשבים מענה.</p>
-          <div className="field"><label><input type="checkbox" style={{ width: 'auto', minHeight: 0, marginInlineEnd: '.5rem' }} checked={sla.enabled} onChange={(e) => setSla({ ...sla, enabled: e.target.checked })} />הפעלת התראות על חריגה מיעד</label></div>
+          <div className="field"><label><input type="checkbox" role="switch" style={{ width: 'auto', minHeight: 0, marginInlineEnd: '.5rem' }} checked={sla.enabled} onChange={(e) => setSla({ ...sla, enabled: e.target.checked })} />הפעלת התראות על חריגה מיעד</label></div>
           <div className="field"><label htmlFor="sla-min">יעד תגובה בדקות</label>
             <input id="sla-min" type="number" min={1} max={10080} required value={sla.targetMinutes} onChange={(e) => setSla({ ...sla, targetMinutes: Number(e.target.value) })} style={{ maxWidth: 140 }} /></div>
           <button className="primary" type="submit">שמירת יעד</button>
@@ -80,7 +80,7 @@ export function Settings({ me }: { me: Me }) {
         <h2>שעות פעילות ומענה אוטומטי</h2>
         <p className="hint">מחוץ לשעות הפעילות נשלחת ללקוח הודעה אוטומטית אחת (לכל היותר אחת ל-12 שעות לשיחה). ההודעה מסומנת כ"מענה אוטומטי" ואינה נחשבת תשובת נציג בדוחות.</p>
         <div className="field">
-          <label><input type="checkbox" style={{ width: 'auto', minHeight: 0, marginInlineEnd: '.5rem' }} checked={h.enabled} onChange={(e) => setH({ ...h, enabled: e.target.checked })} />הפעלת מענה אוטומטי מחוץ לשעות</label>
+          <label><input type="checkbox" role="switch" style={{ width: 'auto', minHeight: 0, marginInlineEnd: '.5rem' }} checked={h.enabled} onChange={(e) => setH({ ...h, enabled: e.target.checked })} />הפעלת מענה אוטומטי מחוץ לשעות</label>
         </div>
         <div className="field">
           <label htmlFor="tz">אזור זמן</label>

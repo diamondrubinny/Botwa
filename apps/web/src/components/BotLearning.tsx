@@ -59,7 +59,7 @@ export function BotLearning() {
       {set && (
         <details className="card">
           <summary><strong>הגדרות למידה</strong></summary>
-          <div className="field"><label><input type="checkbox" style={{ width: 'auto', minHeight: 0, marginInlineEnd: '.5rem' }} checked={set.enabled} onChange={(e) => setSet({ ...set, enabled: e.target.checked })} />לאסוף הצעות למידה</label></div>
+          <div className="field"><label><input type="checkbox" role="switch" style={{ width: 'auto', minHeight: 0, marginInlineEnd: '.5rem' }} checked={set.enabled} onChange={(e) => setSet({ ...set, enabled: e.target.checked })} />לאסוף הצעות למידה</label></div>
           <div className="field"><label><input type="checkbox" style={{ width: 'auto', minHeight: 0, marginInlineEnd: '.5rem' }} checked={set.autoVariants} onChange={(e) => setSet({ ...set, autoVariants: e.target.checked })} />לאשר אוטומטית ניסוח חדש כשמספיק לקוחות שונים בחרו באותה הצעה</label></div>
           {set.autoVariants && <div className="field"><label htmlFor="learn-after">כמה לקוחות שונים</label><input id="learn-after" type="number" min={2} max={20} value={set.autoAfter} onChange={(e) => setSet({ ...set, autoAfter: Number(e.target.value) })} style={{ maxWidth: 120 }} /></div>}
           <p className="hint">טיוטות מתשובות נציגים ודוגמאות לתפריט תמיד דורשות אישור ידני.</p>

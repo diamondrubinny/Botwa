@@ -83,7 +83,7 @@ export function ForwardRules() {
           )}
           <div className="field"><label htmlFor="fw-m">כמה מההודעות האחרונות לצרף (0 עד 10)</label><input id="fw-m" type="number" min={0} max={10} style={{ maxWidth: 100 }} value={f.includeMessages} onChange={(e) => setF({ ...f, includeMessages: Math.min(10, Math.max(0, Math.round(Number(e.target.value) || 0))) })} /></div>
           <div className="field"><label><input type="checkbox" style={{ width: 'auto', minHeight: 'auto' }} checked={f.includePhone} onChange={(e) => setF({ ...f, includePhone: e.target.checked })} /> לצרף את מספר הטלפון של הלקוח (מידע אישי שיראו כל חברי הקבוצה)</label></div>
-          <div className="field"><label><input type="checkbox" style={{ width: 'auto', minHeight: 'auto' }} checked={f.enabled} onChange={(e) => setF({ ...f, enabled: e.target.checked })} /> הכלל פעיל</label></div>
+          <div className="field"><label><input type="checkbox" role="switch" style={{ width: 'auto', minHeight: 'auto' }} checked={f.enabled} onChange={(e) => setF({ ...f, enabled: e.target.checked })} /> הכלל פעיל</label></div>
           <div className="row"><button className="primary" type="submit">שמירה</button><button type="button" onClick={() => setEditId(null)}>ביטול</button></div>
         </form>
       )}

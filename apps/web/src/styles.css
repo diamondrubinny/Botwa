@@ -505,3 +505,90 @@ button:focus-visible, .btn:focus-visible, .chip:focus-visible, .nav-link:focus-v
 
 /* high contrast: hover shows as an outline (colours there are fixed black/white) */
 :root[data-contrast='high'] button:hover:not(:disabled), :root[data-contrast='high'] .nav-link:hover, :root[data-contrast='high'] .chip:hover { outline: 2px solid #fff; outline-offset: 1px; transform: none; box-shadow: none; }
+
+/* ===================== Design upgrade, round 2 =====================
+   Same rule as the buttons: colours change instantly, only movement/shadow animate, nothing is told by colour alone,
+   every text colour stays AA (checked by axe on all screens). */
+
+/* --- checkboxes and radios: larger, rounder, the accent when on. Drawn with CSS only (the CSP forbids data: images) --- */
+input[type='checkbox'], input[type='radio'] {
+  appearance: none; -webkit-appearance: none; flex: none; margin: 0; padding: 0; vertical-align: middle; cursor: pointer;
+  width: 22px !important; height: 22px !important; min-height: 22px !important; min-width: 22px;
+  border: 2px solid var(--input-border); border-radius: 7px; background: var(--surface);
+  display: inline-grid; place-content: center; transition: transform .12s var(--ease);
+}
+input[type='radio'] { border-radius: 50%; }
+input[type='checkbox']::before { content: ''; width: 6px; height: 11px; margin-top: -3px; border: solid var(--on-accent); border-width: 0 2.5px 2.5px 0; transform: rotate(45deg) scale(0); }
+input[type='checkbox']:checked, input[type='radio']:checked { background: var(--accent); border-color: var(--accent); }
+input[type='checkbox']:checked::before { transform: rotate(45deg) scale(1); }
+input[type='checkbox']:indeterminate { background: var(--accent); border-color: var(--accent); }
+input[type='checkbox']:indeterminate::before { width: 10px; height: 0; margin: 0; border-width: 0 0 2.5px 0; transform: none; }
+input[type='radio']::before { content: ''; width: 9px; height: 9px; border-radius: 50%; background: var(--on-accent); transform: scale(0); }
+input[type='radio']:checked::before { transform: scale(1); }
+input[type='checkbox']:disabled, input[type='radio']:disabled { opacity: .45; cursor: not-allowed; }
+@media (hover: hover) { input[type='checkbox']:hover:not(:disabled), input[type='radio']:hover:not(:disabled) { border-color: var(--accent); } }
+input[type='checkbox']:focus-visible, input[type='radio']:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+label:has(> input[type='checkbox']), label:has(> input[type='radio']) { display: inline-flex; align-items: center; gap: .55rem; cursor: pointer; }
+
+/* --- on/off switches: a checkbox marked role="switch" (the main "turn on" settings) --- */
+/* off: the knob at the start side (right in Hebrew), grey; on: it slides to the end side on the accent track */
+input[type='checkbox'][role='switch'] { width: 46px !important; min-width: 46px; height: 26px !important; min-height: 26px !important; border-radius: 999px; place-content: center; padding: 0; background: var(--surface-2); }
+input[type='checkbox'][role='switch']::before { width: 18px; height: 18px; margin: 0; border: 0; border-radius: 50%; background: var(--input-border); transform: translateX(10px); transition: transform .15s var(--ease); }
+input[type='checkbox'][role='switch']:checked { background: var(--accent); }
+input[type='checkbox'][role='switch']:checked::before { background: var(--on-accent); transform: translateX(-10px); }
+[dir='ltr'] input[type='checkbox'][role='switch']::before { transform: translateX(-10px); }
+[dir='ltr'] input[type='checkbox'][role='switch']:checked::before { transform: translateX(10px); }
+
+/* --- headings and page header --- */
+main > h1 { font-size: clamp(1.6rem, 1.2rem + 1.2vw, 2.15rem); font-weight: 800; letter-spacing: -.015em; line-height: 1.2; margin-bottom: .35rem; }
+main > h1 + .hint { font-size: 1rem; max-width: 70ch; margin-top: 0; }
+.card > h2:first-child, .card > h3:first-child { margin-top: 0; }
+
+/* --- inputs: white fields, a hint of the accent on hover --- */
+input:not([type='checkbox']):not([type='radio']):not([type='range']):not([type='color']), select, textarea { background: var(--surface); border-radius: 12px; }
+@media (hover: hover) { input:not([type='checkbox']):not([type='radio']):not(:focus):not(:disabled):hover, select:not(:focus):not(:disabled):hover, textarea:not(:focus):not(:disabled):hover { border-color: color-mix(in srgb, var(--accent) 55%, var(--input-border)); } }
+::placeholder { color: color-mix(in srgb, var(--muted) 85%, transparent); }
+
+/* --- field groups: a soft panel with a pill title instead of the old etched frame --- */
+fieldset { border: 1px solid var(--border); border-radius: 16px; background: color-mix(in srgb, var(--surface-2) 45%, var(--surface)); padding: 1rem 1.1rem 1.1rem; margin: 1rem 0; }
+legend { padding: .2rem .8rem; border-radius: 999px; background: var(--accent-soft); color: var(--text); font-weight: 700; font-size: .92rem; }
+
+/* --- numbers at a glance (reports, stats): white tiles, a pastel band, big numbers --- */
+.kpi, .stat-grid > * { position: relative; background: var(--surface); border: 1px solid var(--border); border-radius: 16px; padding: 1rem 1.1rem .9rem; box-shadow: 0 1px 2px rgba(43, 22, 96, .04); overflow: hidden; }
+.kpi::before, .stat-grid > *::before { content: ''; position: absolute; inset-block-start: 0; inset-inline: 0; height: 4px; background: var(--band, var(--accent)); }
+.kpi:nth-child(6n+1), .stat-grid > *:nth-child(6n+1) { --band: #6a3de8; } .kpi:nth-child(6n+2), .stat-grid > *:nth-child(6n+2) { --band: #0ea5e9; }
+.kpi:nth-child(6n+3), .stat-grid > *:nth-child(6n+3) { --band: #12b76a; } .kpi:nth-child(6n+4), .stat-grid > *:nth-child(6n+4) { --band: #f5b400; }
+.kpi:nth-child(6n+5), .stat-grid > *:nth-child(6n+5) { --band: #f2675a; } .kpi:nth-child(6n+6), .stat-grid > *:nth-child(6n+6) { --band: #e04d9b; }
+.kpi-v { font-size: 2rem; line-height: 1.15; margin-top: .25rem; font-variant-numeric: tabular-nums; }
+.kpis { gap: .9rem; }
+
+/* --- tables: a tinted header row, roomier cells --- */
+thead th { background: color-mix(in srgb, var(--surface-2) 70%, var(--surface)); }
+thead th:first-child { border-start-start-radius: 10px; } thead th:last-child { border-start-end-radius: 10px; }
+th, td { padding: .7rem .65rem; }
+tbody tr:last-child > * { border-bottom: 0; }
+
+/* --- status badges: filled softly in their own colour, the word stays the meaning --- */
+.badge { background: color-mix(in srgb, currentColor 11%, transparent); border-color: color-mix(in srgb, currentColor 40%, transparent); }
+
+/* --- sidebar: the current page glows a little --- */
+.nav-link[aria-current='page'] { box-shadow: 0 10px 22px -12px var(--accent); }
+
+/* --- sign-in page --- */
+.login { max-width: 440px; }
+.login .brand { margin-bottom: 1.25rem; gap: .8rem; }
+.login .brand h1 { font-size: 1.6rem; font-weight: 800; letter-spacing: -.01em; }
+.login .brand-mark { width: 52px; height: 52px; border-radius: 16px; }
+.login .card { padding: 1.75rem 1.6rem; border-radius: 22px; box-shadow: 0 1px 2px rgba(43, 22, 96, .05), 0 24px 60px -24px rgba(43, 22, 96, .35); }
+.login button[type='submit'] { width: 100%; }
+
+/* --- small things: selection colour, thin themed scrollbars, smoother anchors --- */
+::selection { background: color-mix(in srgb, var(--accent) 24%, transparent); color: var(--text); }
+* { scrollbar-width: thin; scrollbar-color: color-mix(in srgb, var(--accent) 35%, transparent) transparent; }
+details > summary { cursor: pointer; border-radius: 10px; }
+@media (hover: hover) { details > summary:hover { color: var(--accent); } }
+hr { border: 0; border-top: 1px solid var(--border); margin: 1.25rem 0; }
+
+/* high contrast keeps its own black/white look */
+:root[data-contrast='high'] input[type='checkbox']:checked, :root[data-contrast='high'] input[type='radio']:checked { background: #ffeb3b; border-color: #ffeb3b; }
+:root[data-contrast='high'] .kpi::before, :root[data-contrast='high'] .stat-grid > *::before { background: #fff; }

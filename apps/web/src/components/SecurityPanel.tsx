@@ -73,7 +73,7 @@ export function SecurityPanel({ canEdit }: { canEdit: boolean }) {
         {privateIp(s.yourIp) && !s.trustProxy && <p className="error">הכתובת נראית פנימית: כנראה יש לפני המערכת proxy (nginx / HestiaCP / Caddy), וכל הגולשים נראים מאותה כתובת. לפני הפעלה, הגדירו TRUST_PROXY=true בקובץ ‎.env והפעילו מחדש.</p>}
         {s.emergencyOff && <p className="error">חומת האש מושבתת כרגע במצב חירום (FIREWALL_DISABLE=true ב-‎.env).</p>}
         <fieldset disabled={!canEdit} style={{ border: 0, padding: 0, margin: 0 }}>
-          <div className="field"><label><input type="checkbox" style={{ width: 'auto', minHeight: 0, marginInlineEnd: '.5rem' }} checked={enabled} onChange={(e) => setEnabled(e.target.checked)} />להגביל את הפאנל לכתובות המותרות בלבד</label></div>
+          <div className="field"><label><input type="checkbox" role="switch" style={{ width: 'auto', minHeight: 0, marginInlineEnd: '.5rem' }} checked={enabled} onChange={(e) => setEnabled(e.target.checked)} />להגביל את הפאנל לכתובות המותרות בלבד</label></div>
           <div className="field">
             <label htmlFor="fw-allow">כתובות ורשתות מותרות (אחת בכל שורה, למשל 203.0.113.7 או 203.0.113.0/24)</label>
             <textarea id="fw-allow" dir="ltr" rows={4} value={allow} onChange={(e) => setAllow(e.target.value)} />

@@ -66,7 +66,7 @@ export function GovSources() {
         <p className="hint"><strong>חשוב:</strong> זה מידע כללי ולא ייעוץ משפטי. כשהבוט עונה מתוך החקיקה הוא מציין את שם התקנה והסעיף ומוסיף הסתייגות. מומלץ להשאיר "נציגים בלבד" עד שהממונה על הבטיחות או היועץ המשפטי מאשרים.</p>
 
         <div className="row" style={{ alignItems: 'flex-end', flexWrap: 'wrap' }}>
-          <label className="gov-check"><input type="checkbox" checked={form.enabled} onChange={(e) => setForm({ ...form, enabled: e.target.checked })} /> עדכון אוטומטי</label>
+          <label className="gov-check"><input type="checkbox" role="switch" checked={form.enabled} onChange={(e) => setForm({ ...form, enabled: e.target.checked })} /> עדכון אוטומטי</label>
           <div className="field">
             <label htmlFor="gov-aud">מי משתמש בתוכן</label>
             <select id="gov-aud" value={form.audience} onChange={(e) => setForm({ ...form, audience: e.target.value as Audience })} aria-describedby={form.audience !== 'staff' ? 'gov-aud-w' : undefined}>
@@ -213,7 +213,7 @@ function Standards() {
         הנוסח המלא של התקנים נמכר על ידי מכון התקנים ואינו זמין ב־API.{' '}
         <a href={st.dataset} target="_blank" rel="noopener noreferrer">המאגר במקור<span className="sr-only"> (נפתח בחלון חדש)</span></a>
       </p>
-      <label className="gov-check"><input type="checkbox" checked={form.enabled} onChange={(e) => setForm({ ...form, enabled: e.target.checked })} /> עדכון אוטומטי</label>
+      <label className="gov-check"><input type="checkbox" role="switch" checked={form.enabled} onChange={(e) => setForm({ ...form, enabled: e.target.checked })} /> עדכון אוטומטי</label>
       <div className="row" style={{ alignItems: 'flex-end', flexWrap: 'wrap' }}>
         <div className="field">
           <label htmlFor="std-aud">מי משתמש בתוכן</label>
@@ -314,7 +314,7 @@ function Fire() {
         </div>
       ) : (
         <>
-          <label className="gov-check"><input type="checkbox" checked={form.enabled} onChange={(e) => setForm({ ...form, enabled: e.target.checked })} /> עדכון אוטומטי</label>
+          <label className="gov-check"><input type="checkbox" role="switch" checked={form.enabled} onChange={(e) => setForm({ ...form, enabled: e.target.checked })} /> עדכון אוטומטי</label>
           <div className="row" style={{ alignItems: 'flex-end', flexWrap: 'wrap' }}>
             <div className="field">
               <label htmlFor="fire-aud">מי משתמש בתוכן</label>

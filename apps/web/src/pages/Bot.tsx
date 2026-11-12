@@ -51,7 +51,7 @@ export function Bot({ me }: { me: Me }) {
         <p className="hint">הלקוח מקבל תפריט ממוספר ועונה במספר. אם אין התאמה, או שהוא מבקש נציג, השיחה עוברת לנציג (עם הודעה פנימית, שיוך אוטומטי אם הוגדר ניתוב, ו"מחוץ לשעות" אם הוגדרו שעות פעילות). אין שימוש בשירותי AI חיצוניים.</p>
         <fieldset disabled={!canEdit} style={{ border: 0, padding: 0, margin: 0 }}>
           <div className="field">
-            <label><input type="checkbox" style={{ width: 'auto', minHeight: 0, marginInlineEnd: '.5rem' }} checked={b.enabled} onChange={(e) => set({ enabled: e.target.checked })} />הפעלת הבוט</label>
+            <label><input type="checkbox" role="switch" style={{ width: 'auto', minHeight: 0, marginInlineEnd: '.5rem' }} checked={b.enabled} onChange={(e) => set({ enabled: e.target.checked })} />הפעלת הבוט</label>
           </div>
           <div className="field">
             <label htmlFor="b-welcome">הודעת פתיחה (מעל התפריט)</label>
@@ -168,7 +168,7 @@ export function Bot({ me }: { me: Me }) {
         <fieldset disabled={!canEdit}>
           <legend>תגובות אוטומטיות (אימוג׳י על הודעת הלקוח)</legend>
           <p className="hint">הבוט מגיב באימוג׳י על ההודעה של הלקוח לפי מה שהוא עושה: כשהלקוח שואל והבוט מחפש במאגר הידע, מופיע "עיניים" על ההודעה, ואחרי שהתשובה נשלחה האימוג׳י מוחלף בסימון הצלחה (או "לא מצאתי"). כשהבוט מעביר לנציג יופיע אימוג׳י העברה. אימוג׳י ריק = בלי תגובה לאירוע הזה, ואם כבר הוצגה "עיניים" היא תוסר.</p>
-          <div className="field"><label><input type="checkbox" style={{ width: 'auto', minHeight: 'auto' }} checked={!!b.reactions?.enabled} onChange={(e) => set({ reactions: { ...(b.reactions ?? RX), enabled: e.target.checked } })} /> להפעיל תגובות אוטומטיות</label></div>
+          <div className="field"><label><input type="checkbox" role="switch" style={{ width: 'auto', minHeight: 'auto' }} checked={!!b.reactions?.enabled} onChange={(e) => set({ reactions: { ...(b.reactions ?? RX), enabled: e.target.checked } })} /> להפעיל תגובות אוטומטיות</label></div>
           {b.reactions?.enabled && (
             <div className="field"><label><input type="checkbox" style={{ width: 'auto', minHeight: 'auto' }} checked={!!b.reactions.ackAll} onChange={(e) => set({ reactions: { ...b.reactions!, ackAll: e.target.checked } })} /> להגיב על כל הודעה (עיניים מיד עם הקבלה, ואחרי המענה סימון סיום), גם כשלא מתבצע חיפוש</label>
               <p className="hint">בלי הסימון, העיניים מופיעות רק כשהבוט מחפש במאגר הידע בעקבות שאלה חופשית. בתפריט ממוספר ובתרשים בלי צומת מאגר ידע אין חיפוש, ולכן בלי הסימון לא תהיה תגובה על רוב ההודעות.</p></div>
@@ -189,7 +189,7 @@ export function Bot({ me }: { me: Me }) {
           <legend>מענה ממאגר הידע</legend>
           <p className="hint">הבוט עונה על שאלה חופשית מתוך המסמכים, הקישורים והשאלות והתשובות שב<a href="#/kb">מאגר הידע</a>. זה חיפוש מילים בשרת שלכם, בלי בינה מלאכותית ובלי לשלוח מידע החוצה. כשאין התאמה טובה הבוט ממשיך כרגיל (תפריט, ואז העברה לנציג).</p>
           <div className="field">
-            <label><input type="checkbox" style={{ width: 'auto', minHeight: 'auto' }} checked={b.kb.enabled} onChange={(e) => set({ kb: { ...b.kb, enabled: e.target.checked } })} /> לאפשר מענה ממאגר הידע</label>
+            <label><input type="checkbox" role="switch" style={{ width: 'auto', minHeight: 'auto' }} checked={b.kb.enabled} onChange={(e) => set({ kb: { ...b.kb, enabled: e.target.checked } })} /> לאפשר מענה ממאגר הידע</label>
           </div>
           <div className="field">
             <label htmlFor="b-kms">רמת ביטחון מינימלית ({Math.round(b.kb.minScore * 100)}%)</label>
