@@ -89,6 +89,20 @@ describe('staying signed in', () => {
     expect((await app.inject({ method: 'POST', url: '/auth/logout', remoteAddress: addr(), headers: { origin: ORIGIN, cookie: ck } })).statusCode).toBe(200);
     expect((await me(ck)).statusCode).toBe(401);
   });
+
+  it('"sign out everywhere" ends every session of that user only', async () => {
+    const a = `botwa_sid=${(await login(true)).cookies[0]!.value}`;
+    const b = `botwa_sid=${(await login(true)).cookies[0]!.value}`;
+    expect((await me(a)).statusCode).toBe(200);
+    expect((await me(b)).statusCode).toBe(200);
+    expect((await app.inject({ method: 'POST', url: '/auth/logout-all', remoteAddress: addr() })).statusCode).toBe(403);   // no origin: refused before anything
+    const out = await app.inject({ method: 'POST', url: '/auth/logout-all', remoteAddress: addr(), headers: { origin: ORIGIN, cookie: a } });
+    expect(out.statusCode).toBe(200);
+    expect(out.json().sessions).toBeGreaterThanOrEqual(2);
+    expect((await me(a)).statusCode).toBe(401);
+    expect((await me(b)).statusCode).toBe(401);
+    expect((await db.query(`SELECT 1 FROM audit_log WHERE action = 'logout_all'`)).rowCount).toBe(1);
+  });
 });
 
 describe('channels are kept connected', () => {

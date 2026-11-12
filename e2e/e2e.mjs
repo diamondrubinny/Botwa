@@ -47,6 +47,12 @@ await page.click('aside.sidebar nav >> text=החשבון שלי');
 await page.waitForSelector('text=אימות דו-שלבי פעיל');
 check('MFA enabled', true);
 await axe('account');
+// sign-out is always reachable: on screen at the bottom of the side menu (even a short window), and on the account page
+await page.setViewportSize({ width: 1200, height: 560 });
+const outBox = await page.locator('aside.sidebar .side-foot button:has-text("התנתקות")').boundingBox();
+check('sign-out button is inside the visible window', !!outBox && outBox.y >= 0 && outBox.y + outBox.height <= 560, JSON.stringify(outBox));
+await page.setViewportSize({ width: 1280, height: 720 });
+check('account page offers sign-out and sign-out everywhere', await page.isVisible('main button:text-is("התנתקות")') && await page.isVisible('main button:has-text("התנתקות מכל המכשירים")'));
 
 // channels
 await page.click('aside.sidebar nav >> text=ערוצים');
@@ -757,6 +763,11 @@ await axe('high contrast + inbox');
 await page.setViewportSize({ width: 375, height: 700 });
 const overflow = await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth);
 check('no horizontal scroll at 375px', !overflow);
+check('phone: the bottom bar is out of the way while a conversation fills the screen', !(await page.isVisible('nav.bottomnav')));
+await page.click('button[aria-label="חזרה לרשימה"]');
+await page.click('nav.bottomnav button:has-text("עוד")');
+check('phone: "more" sheet holds sign-out', await page.isVisible('dialog[open] button:has-text("התנתקות")'));
+await page.click('dialog[open] button:has-text("סגירה")');
 await page.goto(BASE + '/#/accessibility'); await axe('a11y statement');
 await page.goto(BASE + '/#/privacy'); await axe('privacy page');
 for (const [p, name] of [['/legal/privacy', 'public privacy policy'], ['/legal/terms', 'public terms'], ['/legal/data-deletion', 'public data deletion']]) {

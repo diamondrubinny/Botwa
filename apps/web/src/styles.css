@@ -233,6 +233,8 @@ details.more[open] > summary::after { content: '▴'; }
   /* the open conversation takes the whole screen like a messaging app; the composer stays at the bottom */
   .inbox.has-selection .chat-pane { position: fixed; inset: 0; z-index: 50; max-height: none; min-height: 0; border-radius: 0; border: 0; box-shadow: none; background: var(--bg); padding-top: var(--safe-t); }
   .back { display: inline-flex; }
+  /* the bottom bar is under the full-screen conversation: take it out, so keyboard and screen-reader users never land on buttons they cannot see */
+  .app:has(.inbox.has-selection) .bottomnav { display: none; }
   .chat-head { position: sticky; top: 0; }
   .more-body { max-height: 40dvh; }
   .msg { max-width: 88%; }
@@ -734,3 +736,6 @@ details[open]:not(.more) > summary::before { transform: rotate(45deg) translateY
 .mchip.ch-instagram { background: #fce7f3; color: #9d174d; border-color: #f9c9e1; }
 :root[data-theme='dark'] .mchip.ch-messenger { background: #172f5e; color: #d6e4ff; border-color: #24427d; }
 :root[data-theme='dark'] .mchip.ch-instagram { background: #4a1530; color: #ffd6ea; border-color: #66203f; }
+
+/* the user card and sign-out stay visible at the bottom of the side menu however long the menu is (it scrolls above them) */
+.sidebar .side-foot { position: sticky; bottom: -1rem; z-index: 1; background: var(--surface); margin-inline: -.8rem; padding: .8rem .8rem 1rem; margin-bottom: -1rem; }

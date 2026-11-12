@@ -75,6 +75,14 @@ export function authRoutes(app: FastifyInstance, db: Db, cfg: Config) {
     return { ok: true };
   });
 
+  // Sign out everywhere (e.g. a lost phone): every session of this user, this one included.
+  app.post('/auth/logout-all', { preHandler: auth, config: { rateLimit: { max: 10, timeWindow: '1 minute' } } }, async (req, reply) => {
+    const r = await db.query('DELETE FROM sessions WHERE user_id = $1', [req.user!.id]);
+    await audit(db, { actorId: req.user!.id, action: 'logout_all', ip: req.ip, meta: { sessions: r.rowCount } });
+    reply.clearCookie(SESSION_COOKIE, { path: '/' });
+    return { ok: true, sessions: r.rowCount };
+  });
+
   app.get('/auth/me', { preHandler: auth }, async (req) => {
     const u = req.user!;
     const av = await db.query('SELECT available, username, (SELECT floor(extract(epoch FROM a.updated_at))::float8 FROM user_avatars a WHERE a.user_id = users.id) AS "avatarV" FROM users WHERE id = $1', [u.id]);

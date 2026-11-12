@@ -68,7 +68,8 @@ function Shell({ me, reloadMe, onLogout }: { me: Me; reloadMe: () => Promise<voi
   const page = me.mfaEnrollmentRequired || me.passwordChangeRequired ? 'account' : route;
   const visible = NAV.filter((n) => n.allowed(me));
   // phones: first three destinations + "more" (a sheet with everything); few destinations: show all
-  const bottom = visible.length <= 4 ? visible : visible.slice(0, 3);
+  // three screens + "more" (always there: it also holds sign-out, so a phone is never left without it)
+  const bottom = visible.slice(0, 3);
 
   usePoll(async () => {
     const r = await api<{ count: number }>('GET', '/conversations/unread').catch(() => null);
@@ -178,7 +179,7 @@ function Shell({ me, reloadMe, onLogout }: { me: Me; reloadMe: () => Promise<voi
           {page === 'roles' && can(me, 'roles.manage') && <Roles me={me} />}
           {page === 'audit' && can(me, 'audit.view') && <Audit />}
           {page === 'settings' && (can(me, 'settings.view') || can(me, 'backups.manage')) && <Settings me={me} />}
-          {page === 'account' && <Account me={me} onChanged={reloadMe} />}
+          {page === 'account' && <Account me={me} onChanged={reloadMe} onLogout={logout} />}
           {page === 'accessibility' && <Accessibility />}
           {page === 'privacy' && <Privacy />}
           {!PAGES.includes(page) && <><h1 tabIndex={-1}>הדף לא נמצא</h1><p><a href="#/inbox">חזרה לשיחות</a></p></>}
@@ -197,7 +198,7 @@ function Shell({ me, reloadMe, onLogout }: { me: Me; reloadMe: () => Promise<voi
             {n.r === 'inbox' && unread > 0 && <span className="bn-badge"><span className="sr-only">הודעות שלא נקראו: </span>{unread}</span>}
           </a>
         ))}
-        {visible.length > 4 && <button className="bn-item" onClick={() => sheet.current?.showModal()}><Icon name="more" />עוד</button>}
+        <button className="bn-item" onClick={() => sheet.current?.showModal()}><Icon name="more" />עוד</button>
       </nav>
 
       <dialog ref={sheet} aria-label="כל המסכים" style={{ width: 'min(420px, calc(100vw - 2rem))' }}>

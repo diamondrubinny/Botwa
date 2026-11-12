@@ -12,7 +12,8 @@ import { ThemeMenu } from '../components/ThemeMenu';
 import { usePoll } from '../hooks';
 import { errText } from '../strings';
 
-export function Account({ me, onChanged }: { me: Me; onChanged: () => void }) {
+export function Account({ me, onChanged, onLogout }: { me: Me; onChanged: () => void; onLogout?: () => void }) {
+  const [outAll, setOutAll] = useState(false);
   const [cur, setCur] = useState('');
   const [next, setNext] = useState('');
   const [pwMsg, setPwMsg] = useState<{ ok: boolean; text: string } | null>(null);
@@ -80,6 +81,19 @@ export function Account({ me, onChanged }: { me: Me; onChanged: () => void }) {
   return (
     <>
       <PageTitle art="team" title="החשבון שלי" />
+      {onLogout && (
+        <section className="card" aria-labelledby="acc-out-h">
+          <h2 id="acc-out-h">התנתקות</h2>
+          <p className="hint">"התנתקות" יוצאת רק מהמכשיר הזה. "התנתקות מכל המכשירים" מנתקת גם טלפונים ומחשבים אחרים שמחוברים לחשבון, למשל אם מכשיר אבד.</p>
+          <div className="row">
+            <button type="button" onClick={onLogout}>התנתקות</button>
+            <button type="button" className="danger" onClick={() => setOutAll(true)}>התנתקות מכל המכשירים</button>
+          </div>
+          <ConfirmDialog open={outAll} danger title="התנתקות מכל המכשירים" message="כל המכשירים שמחוברים לחשבון שלך, כולל זה, ינותקו. כדי להיכנס שוב צריך סיסמה ואימות דו-שלבי."
+            confirmLabel="התנתקות מכולם" onCancel={() => setOutAll(false)}
+            onConfirm={() => { setOutAll(false); void api('POST', '/auth/logout-all').catch(() => undefined).then(() => onLogout()); }} />
+        </section>
+      )}
       <p>{me.name} · {me.email} · {me.roleName}{me.username ? <> · שם משתמש: <bdi dir="ltr">@{me.username}</bdi></> : null}</p>
       <section className="card" aria-labelledby="av-h">
         <h2 id="av-h">תמונת פרופיל</h2>
