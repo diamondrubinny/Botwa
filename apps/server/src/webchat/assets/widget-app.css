@@ -14,15 +14,16 @@ button { font: inherit; cursor: pointer; }
 header :focus-visible { outline-color: var(--on); }
 .log { flex: 1; overflow-y: auto; padding: 12px; display: flex; flex-direction: column; gap: 8px; background: var(--surface); }
 .msg { max-width: 82%; padding: 8px 12px; border-radius: 14px; white-space: pre-wrap; overflow-wrap: anywhere; background: var(--bg); border: 1px solid var(--border); }
-.msg.me { align-self: flex-end; background: var(--c); color: var(--on); border-color: var(--c); }
-.msg.them { align-self: flex-start; background: #fff4cc; border-color: #f5d76e; color: #4d3800; }   /* answers from the service: sunny */
+.msg.me { align-self: flex-end; border-end-end-radius: 4px; background: var(--c); color: var(--on); border-color: var(--c); }
+.msg.them { align-self: flex-start; border-end-start-radius: 4px; background: #fff4cc; border-color: #f5d76e; color: #4d3800; }   /* answers from the service: sunny */
 .msg a { color: inherit; text-decoration: underline; }
 .who { display: block; font-size: 12px; color: var(--muted); margin-bottom: 2px; }
 .msg.me .who { color: inherit; opacity: .9; }
 .notice { align-self: center; text-align: center; color: var(--muted); font-size: 13px; padding: 4px 8px; }
 form.composer { display: flex; gap: 8px; padding: 10px; border-top: 1px solid var(--border); background: var(--bg); }
 form.composer textarea { flex: 1; resize: none; max-height: 110px; min-height: 44px; padding: 10px 12px; border: 1px solid #6b7488; border-radius: 22px; font: inherit; color: inherit; background: var(--bg); }
-.send { min-width: 44px; height: 44px; border: 0; border-radius: 50%; background: var(--c); color: var(--on); font-weight: 700; }
+.send { min-width: 44px; height: 44px; border: 0; border-radius: 50%; background: var(--c); color: var(--on); font-weight: 700; display: inline-grid; place-items: center; flex: none; }
+[dir=rtl] .send svg { transform: scaleX(-1); }   /* the arrow points the way the text runs */
 .send:disabled { opacity: .5; cursor: not-allowed; }
 .pre { padding: 16px; overflow-y: auto; flex: 1; background: var(--bg); }
 .pre p { margin: 0 0 12px; }
@@ -45,3 +46,10 @@ form.composer textarea { flex: 1; resize: none; max-height: 110px; min-height: 4
 .sug li:hover, .sug li[aria-selected=true] { background: color-mix(in srgb, var(--c) 14%, transparent); outline: 2px solid var(--c); outline-offset: -2px; }
 .faq-hint { display: block; margin-top: 6px; font-size: 12px; color: var(--muted); }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+/* right-to-left and mixed text */
+.msg .text { text-align: start; unicode-bidi: plaintext; }
+.sug li { text-align: start; unicode-bidi: plaintext; }
+form.composer textarea { text-align: start; unicode-bidi: plaintext; }
+.field input[dir=ltr] { text-align: left; }
+[dir=rtl] .field input[dir=ltr]::placeholder { text-align: right; }

@@ -500,7 +500,7 @@ export function Inbox({ me }: { me: Me }) {
                 {msgs.map((m) => (
                   <div key={m.id} className={`msg ${m.direction}${m.auto ? ' auto' : ''}`}>
                     {m.attachment && <AttachmentView a={m.attachment} />}
-                    {m.body}
+                    {m.body && <div className="msg-text" dir="auto">{m.body}</div>}
                     <small>{m.direction === 'out' ? (m.auto ? 'בוט / מענה אוטומטי' : (m.senderName ?? 'צוות')) : 'לקוח'} · {fmt(m.createdAt)}</small>
                   </div>
                 ))}

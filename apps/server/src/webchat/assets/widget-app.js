@@ -30,13 +30,22 @@
     if (last < text.length) into.appendChild(document.createTextNode(text.slice(last)));
   }
 
+  function sendIcon() {
+    var NS = 'http://www.w3.org/2000/svg';
+    var svg = document.createElementNS(NS, 'svg');
+    [['width', '20'], ['height', '20'], ['viewBox', '0 0 24 24'], ['fill', 'none'], ['stroke', 'currentColor'], ['stroke-width', '2'], ['stroke-linecap', 'round'], ['stroke-linejoin', 'round'], ['aria-hidden', 'true'], ['focusable', 'false']].forEach(function (a) { svg.setAttribute(a[0], a[1]); });
+    var path = document.createElementNS(NS, 'path'); path.setAttribute('d', 'M4 12h13M12 6l6 6-6 6'); svg.appendChild(path);
+    return svg;
+  }
+
   function addMessage(m) {
     if (shown[m.seq]) return; shown[m.seq] = true; after = Math.max(after, m.seq);
     var mine = m.direction === 'in';
     var box = h('div', { class: 'msg ' + (mine ? 'me' : 'them') });
     var who = mine ? L.you : (m.auto ? L.bot : (m.sender || L.team));
     box.appendChild(h('span', { class: 'who', text: who }));
-    var body = h('span'); linkify(m.text, body); box.appendChild(body);
+    // each message takes its own direction: an English question in a Hebrew chat keeps its full stop at the end
+    var body = h('div', { class: 'text', dir: 'auto' }); linkify(m.text, body); box.appendChild(body);
     els.log.appendChild(box);
     els.log.scrollTop = els.log.scrollHeight;
     if (!mine) parent({ type: 'botwa:message' });
@@ -59,8 +68,9 @@
     if (!cfg.online) kids.push(h('div', { class: 'offline', role: 'status', text: cfg.behavior.offlineMessage }));
     els.log = h('div', { class: 'log', role: 'log', 'aria-live': 'polite', 'aria-label': L.log });
     if (cfg.design.welcome) els.log.appendChild(h('div', { class: 'notice', text: cfg.design.welcome }));
-    var ta = h('textarea', { rows: '1', maxlength: String(cfg.behavior.maxLength), placeholder: L.msg, 'aria-label': L.msgLabel });
-    var btn = h('button', { type: 'submit', class: 'send', 'aria-label': L.send, text: '➤' });
+    var ta = h('textarea', { rows: '1', dir: 'auto', maxlength: String(cfg.behavior.maxLength), placeholder: L.msg, 'aria-label': L.msgLabel });
+    var btn = h('button', { type: 'submit', class: 'send', 'aria-label': L.send });
+    btn.appendChild(sendIcon());
     var err = h('div', { class: 'err', role: 'alert' });
     var form = h('form', { class: 'composer' }, [ta, btn]);
     // ---- question suggestions while typing (knowledge-base FAQ); the answer is shown here only, nothing is sent ----
@@ -80,7 +90,7 @@
       sug.textContent = ''; items = list; active = -1;
       if (!list.length) { closeSug(); return; }
       list.forEach(function (it, i) {
-        var li = h('li', { id: 'sug-' + i, role: 'option', 'aria-selected': 'false', text: it.q });
+        var li = h('li', { id: 'sug-' + i, role: 'option', 'aria-selected': 'false', dir: 'auto', text: it.q });
         li.addEventListener('mousedown', function (e) { e.preventDefault(); pickSug(i); });
         sug.appendChild(li);
       });
@@ -152,7 +162,8 @@
     [['name', 'askName', 'text'], ['email', 'askEmail', 'email'], ['phone', 'askPhone', 'tel']].forEach(function (d) {
       var mode = b[d[1]]; if (mode === 'off') return;
       var id = 'f-' + d[0];
-      var input = h('input', { type: d[2], id: id, name: d[0], autocomplete: d[0] === 'phone' ? 'tel' : d[0], maxlength: '100', 'aria-required': mode === 'required' ? 'true' : 'false' });
+      // e-mail and phone are always written left to right; a name follows what is typed
+      var input = h('input', { type: d[2], id: id, name: d[0], dir: d[0] === 'name' ? 'auto' : 'ltr', autocomplete: d[0] === 'phone' ? 'tel' : d[0], maxlength: '100', 'aria-required': mode === 'required' ? 'true' : 'false' });
       if (identity && identity[d[0]]) input.value = String(identity[d[0]]).slice(0, 100);
       var errp = h('div', { class: 'err', id: id + '-e', role: 'alert' });
       input.setAttribute('aria-describedby', id + '-e');

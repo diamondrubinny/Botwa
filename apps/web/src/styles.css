@@ -592,3 +592,6 @@ hr { border: 0; border-top: 1px solid var(--border); margin: 1.25rem 0; }
 /* high contrast keeps its own black/white look */
 :root[data-contrast='high'] input[type='checkbox']:checked, :root[data-contrast='high'] input[type='radio']:checked { background: #ffeb3b; border-color: #ffeb3b; }
 :root[data-contrast='high'] .kpi::before, :root[data-contrast='high'] .stat-grid > *::before { background: #fff; }
+
+/* mixed-direction text: each message lays out by its own language (English in a Hebrew panel, numbers, e-mail addresses) */
+.msg-text { text-align: start; unicode-bidi: plaintext; }
