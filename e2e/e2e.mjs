@@ -240,9 +240,15 @@ await page.click('button:has-text("הוספת פריט")');
 await page.fill('#bt2', 'משלוחים');
 await page.fill('#ba2', 'משלוח תוך 3 ימי עסקים.');
 await page.waitForSelector('pre:has-text("3. משלוחים")');
+// GIFs from the bot: on by default, the moments and the cool-down can be chosen, saved with the bot
+check('bot GIFs: on by default with the four moments', await page.isChecked('text=לשלוח GIF מהבוט') && await page.isChecked('label:has-text("תודה ומחמאה") input'));
+await page.uncheck('label:has-text("העברה לנציג") input[type=checkbox]');
+await page.selectOption('#gif-cd', '720');
 await page.click('button:has-text("שמירה")');
 await page.waitForSelector('text=הבוט נשמר.');
 await axe('bot settings');
+{ const v = await page.evaluate(() => fetch('/settings/bot', { credentials: 'same-origin' }).then((r) => r.json()));
+  check('bot GIFs: the moments and the cool-down are saved', v.gifs?.handoff === false && v.gifs?.cooldownMinutes === 720 && v.gifs?.thanks === true, JSON.stringify(v.gifs)); }
 // the bot's identity: Betty in one click; her picture and name are shown, always marked as a bot
 await page.click('button:has-text("בטי, הבוט של יחידת הבטיחות")');
 await page.waitForSelector('.persona-face img', { timeout: 15000 }).catch(() => undefined);

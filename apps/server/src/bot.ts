@@ -45,6 +45,8 @@ export function isThanks(text: string | null): boolean {
 /** Automatic reactions to the customer's message by what the bot is doing. Off until switched on. */
 export const DEFAULT_REACTIONS = { enabled: false, ackAll: false, working: '👀', done: '✅', noAnswer: '🤔', handoff: '🙋', greeting: '👋', thanks: '❤️' };
 
+export const DEFAULT_GIFS = { enabled: true, greeting: true, thanks: true, handoff: true, close: true, cooldownMinutes: 360 };
+
 export const botSchema = z.object({
   enabled: z.boolean(),
   /** menu = the numbered menu below; flow = the flow chart (Bot > Flow chart) */
@@ -94,6 +96,13 @@ export const botSchema = z.object({
   }).default({ enabled: false, minScore: 0.6, maxChars: 700, showSource: true, intro: 'מצאתי את זה במאגר המידע שלנו:', answerMode: 'quote', outro: 'אם צריך הבהרה או עזרה נוספת, אפשר לכתוב כאן, או לבקש נציג.' }),
   /** automatic emoji reactions on the customer's message: "working" while the bot searches, then "done" / "noAnswer", or "handoff" when a person takes over */
   reactions: z.object({ enabled: z.boolean(), /** react to every message the bot handles (not only to searches) */ ackAll: z.boolean().default(false), working: emoji, done: emoji, noAnswer: emoji, handoff: emoji, /** a greeting (שלום, היי…) gets this reaction and nothing else; empty = none */ greeting: emoji.default('👋'), /** a thank-you or praise (תודה, אתם אחלה, אין עליכם) gets this reaction, also when a person handles the chat; empty = none */ thanks: emoji.default('❤️') }).default(() => ({ ...DEFAULT_REACTIONS })),
+  /** a fitting GIF from the gallery at pleasant moments (greeting, thanks, hand-over, closing): never on sensitive topics, at most one per cool-down */
+  gifs: z.object({
+    enabled: z.boolean(),
+    greeting: z.boolean(), thanks: z.boolean(), handoff: z.boolean(), close: z.boolean(),
+    /** minutes between two GIFs in the same conversation */
+    cooldownMinutes: z.number().int().min(10).max(10080),
+  }).default(() => ({ ...DEFAULT_GIFS })),
   /** a customer message the bot could not answer (channel down, sending failed) is answered when the channel is back, up to this many hours later (0 = never) */
   catchupHours: z.number().int().min(0).max(72).default(12),
   /** on the official WhatsApp channel, send menus as tappable buttons or lists (falls back to the numbered text) */
@@ -118,6 +127,7 @@ export const DEFAULT_BOT: BotConfig = {
   footer: 'לחזרה לתפריט שלחו "תפריט". לנציג שלחו "נציג".',
   kb: { enabled: false, minScore: 0.6, maxChars: 700, showSource: true, intro: 'מצאתי את זה במאגר המידע שלנו:', answerMode: 'quote', outro: 'אם צריך הבהרה או עזרה נוספת, אפשר לכתוב כאן, או לבקש נציג.' },
   reactions: { ...DEFAULT_REACTIONS },
+  gifs: { ...DEFAULT_GIFS },
   catchupHours: 12,
   interactiveMenus: true,
 };

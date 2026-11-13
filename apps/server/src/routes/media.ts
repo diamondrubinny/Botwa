@@ -201,7 +201,7 @@ export function mediaRoutes(app: FastifyInstance, db: Db, mgr: ChannelManager, m
     if (!g) return reply.code(404).send({ error: 'gif_not_found' });
     const d = await detect(g.gif);
     if (d?.mime !== 'image/gif') return reply.code(404).send({ error: 'gif_not_found' });
-    const fileName = sanitizeFileName(`${g.title}.gif`, 'animation.gif');
+    const fileName = sanitizeFileName(`${String(g.title).replace(/[\\/]+/g, '-')}.gif`, 'animation.gif');   // "נציג/ה" is a title, not a path
     return deliver(req, reply, conv, g.gif, d, fileName, b.data.caption ?? '', g.mp4, { gif: g.id });
   });
 }

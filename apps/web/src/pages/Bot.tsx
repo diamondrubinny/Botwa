@@ -13,7 +13,9 @@ interface BotCfg {
   reactions?: { enabled: boolean; ackAll?: boolean; working: string; done: string; noAnswer: string; handoff: string; greeting?: string; thanks?: string };
   catchupHours?: number;
   interactiveMenus?: boolean;
+  gifs?: { enabled: boolean; greeting: boolean; thanks: boolean; handoff: boolean; close: boolean; cooldownMinutes: number };
 }
+const GIFS = { enabled: true, greeting: true, thanks: true, handoff: true, close: true, cooldownMinutes: 360 };
 
 const RX = { enabled: false, ackAll: false, working: '👀', done: '✅', noAnswer: '🤔', handoff: '🙋', greeting: '👋', thanks: '❤️' };
 const menuText = (b: BotCfg) =>
@@ -199,6 +201,28 @@ export function Bot({ me }: { me: Me }) {
           </div>
           <ReactionDiagnostics />
           <p id="rx-hint" className="hint">אימוג׳י אחד בכל שדה. עובד בווצאפ (QR ורשמי) ובטלגרם (טלגרם מאפשר רק קבוצה קבועה של אימוג׳י, למשל 👀 👍 🤔 🙏; אחרים לא יוצגו). בצ׳אט באתר מוצגים רק הלב על תודה ורגשונים שנציג בחר. התגובות נשלחות רק בתגובה להודעה שהלקוח כתב, עד 30 בדקה לערוץ, ולכן הן לא מגדילות סיכון לחסימה כמו הודעות יזומות.</p>
+        </fieldset>
+
+        <fieldset disabled={!canEdit}>
+          <legend>GIF מהבוט ברגעים נעימים</legend>
+          <p className="hint" id="gif-h">הבוט מוסיף GIF מתאים מ<a href="#/canned">גלריית ה-GIF</a> (בעמוד התשובות המוכנות) לפי אופי השיחה: ברכה בתחילת פנייה, "שמחנו לעזור" על תודה, "נציג בדרך" כשהשיחה עוברת לאדם, ו"יום נעים" כשהלקוח סוגר את הפנייה. במתינות: GIF אחד לכל היותר בכל פרק הזמן שנבחר, <strong>אף פעם</strong> לא כשהשיחה עוסקת בתאונה, פגיעה, שריפה, דליפה או חירום, ולא ללקוח חסום או שביקש להפסיק לקבל הודעות. GIF שמסמנים במילות המפתח שלו "לא לבוט" לא יישלח מהבוט, ואפשר להוסיף GIF משלכם לרגע מסוים עם מילה כמו "ברוכים הבאים", "שמחנו לעזור", "נציג בדרך" או "יום נעים".</p>
+          <div className="field"><label><input type="checkbox" role="switch" style={{ width: 'auto', minHeight: 'auto' }} aria-describedby="gif-h" checked={(b.gifs ?? GIFS).enabled} onChange={(e) => set({ gifs: { ...(b.gifs ?? GIFS), enabled: e.target.checked } })} /> לשלוח GIF מהבוט</label></div>
+          {(b.gifs ?? GIFS).enabled && (
+            <>
+              <div className="row" role="group" aria-label="באילו רגעים">
+                {([['greeting', 'ברכה בתחילת פנייה'], ['thanks', 'תודה ומחמאה'], ['handoff', 'העברה לנציג'], ['close', 'הלקוח סגר את הפנייה']] as const).map(([k, label]) => (
+                  <label key={k} style={{ display: 'inline-flex', gap: '.35rem', alignItems: 'center' }}><input type="checkbox" style={{ width: 'auto', minHeight: 'auto' }} checked={(b.gifs ?? GIFS)[k]} onChange={(e) => set({ gifs: { ...(b.gifs ?? GIFS), [k]: e.target.checked } })} /> {label}</label>
+                ))}
+              </div>
+              <div className="field">
+                <label htmlFor="gif-cd">לכל היותר GIF אחד בשיחה בכל</label>
+                <select id="gif-cd" style={{ maxWidth: 220 }} value={(b.gifs ?? GIFS).cooldownMinutes} onChange={(e) => set({ gifs: { ...(b.gifs ?? GIFS), cooldownMinutes: Number(e.target.value) } })}>
+                  {[[60, 'שעה'], [180, '3 שעות'], [360, '6 שעות'], [720, '12 שעות'], [1440, 'יום'], [10080, 'שבוע']].map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+                </select>
+              </div>
+              <p className="hint">בווצאפ הרשמי נשלחים רק GIF שיש להם עותק וידאו (נוצר אוטומטית כשבשרת מותקן ffmpeg). כל GIF נשמר בשיחה כמו קובץ שנשלח.</p>
+            </>
+          )}
         </fieldset>
 
         <fieldset className="card" disabled={!canEdit}>

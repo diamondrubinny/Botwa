@@ -36,6 +36,8 @@ import { closeByCustomer, introduceAgent, isCloseRequest, thankForFeedback } fro
 import { composeAnswer, type KbAnswer } from '../kb/compose.js';
 import { loadPersona } from '../routes/branding.js';
 import { saveUsername } from './username-store.js';
+import { isSensitive, pickGif, type GifMoment } from '../bot-gifs.js';
+import { detect, sanitizeFileName } from '../media/validate.js';
 import { renderBotText, cleanName, type BotTextContext } from '../bot-text.js';
 import { isCommentContact, META_CREDS_KEY, MetaMessagingAdapter, type CommentReplyMode, type MetaCreds } from './meta-messaging.js';
 import { WebChatAdapter } from './webchat.js';
@@ -356,6 +358,7 @@ export class ChannelManager {
           // "הסתדרתי" / "תסגרו את הקריאה": the customer closes the inquiry; no bot, routing or away reply for this message
           if (r.messageId && !stop && !m.media && !isCommentContact(m.externalContactId) && isCloseRequest(m.text)
               && await closeByCustomer(this.db, this, r.conversationId, m.text ?? '').catch(() => false)) {
+            await this.botGif(channelId, r.conversationId, 'close', bot ?? undefined);
             this.emit({ channelId, type: 'message', conversationId: r.conversationId, messageId: r.messageId });
             this.hookMessage('message.received', r.conversationId, r.messageId);   // no "new message" push: it is closed, nothing to do
             this.hookConversation('conversation.status_changed', r.conversationId);
@@ -850,7 +853,7 @@ export class ChannelManager {
   private async runBot(channelId: string, convId: string, ext: string, bot: BotConfig, rawText: string | null, hasMedia = false, inboundId?: string, thanked = ''): Promise<void> {
     const rx = this.reactor(channelId, ext, inboundId, bot, thanked);
     let text: string | null = hasMedia ? null : rawText;
-    const { rows } = await this.db.query('SELECT bot_state, bot_invalid, bot_item, assigned_to FROM conversations WHERE id = $1', [convId]);
+    const { rows } = await this.db.query('SELECT bot_state, bot_invalid, bot_item, assigned_to, flow_state FROM conversations WHERE id = $1', [convId]);
     const c = rows[0];
     if (!c || c.assigned_to) return; // a person already owns this conversation
     if (c.bot_state === 'human') return; // handed over (or stopped by the loop guard): silent, no reactions either, until a person closes it
@@ -873,9 +876,18 @@ export class ChannelManager {
 
     await rx.greet(text);
     if (bot.reactions.ackAll) await rx.set('working');   // "seen, working on it" for every message the bot handles
+    // the moment for a GIF: a thank-you, or the start of a new inquiry (the bot's opening message)
+    const moment = (fresh: boolean): GifMoment | null => (text && isThanks(text) ? 'thanks' : fresh ? 'greeting' : null);
     if (bot.mode === 'flow') {
       const flow = await loadFlow(this.db);
-      if (flow) { await this.runFlowStep(channelId, convId, ext, bot, flow, { text: rawText !== null && rawText.trim() === '[unsupported message type]' ? null : rawText, media: hasMedia }, rx); return; }
+      if (flow) {
+        const st = c.flow_state as FlowState | null;
+        const fresh = !st || st.node === null || st.done === true;
+        await this.runFlowStep(channelId, convId, ext, bot, flow, { text: rawText !== null && rawText.trim() === '[unsupported message type]' ? null : rawText, media: hasMedia }, rx);
+        const mo = moment(fresh);
+        if (mo) await this.botGif(channelId, convId, mo, bot);
+        return;
+      }
     }
 
     let searched = false;
@@ -898,12 +910,52 @@ export class ChannelManager {
         userId = (await resolveArea(this.db, d.topic.place).catch(() => null)) ?? userId;
         await this.db.query(`INSERT INTO conversation_notes (conversation_id, body) VALUES ($1, $2)`, [convId, `מיקום שנמסר: ${d.topic.place}`]).catch(() => undefined);
       }
-      await this.handoffNow(channelId, convId, ext, bot, why, d.topic ? { userId: userId!, topic: d.topic.title } : undefined);
+      await this.handoffNow(channelId, convId, ext, bot, why, d.topic ? { userId: userId!, topic: d.topic.title } : undefined, undefined, undefined, text && isThanks(text) ? 'thanks' : 'handoff');
+    }
+    const mo = moment(c.bot_state === null);
+    if (mo && !d.handoff) await this.botGif(channelId, convId, mo, bot);
+  }
+
+  /**
+   * The bot adds a fitting GIF from the gallery at a pleasant moment (greeting, thanks, hand-over, closing). Restrained on
+   * purpose: never on sensitive topics (accident, injury, fire, emergency…), never to blocked or opted-out customers or public
+   * comments, at most one per conversation within the cool-down, only on channels that can show it. Never throws.
+   */
+  async botGif(channelId: string, convId: string, moment: GifMoment, bot?: BotConfig): Promise<boolean> {
+    try {
+      const b = bot ?? await loadBot(this.db);
+      if (!b.enabled || !b.gifs.enabled || !b.gifs[moment] || !this.media.enabled) return false;
+      const a = this.adapters.get(channelId);
+      if (!a?.sendMedia || this.statuses.get(channelId) !== 'connected') return false;
+      const c = (await this.db.query(
+        `SELECT ct.external_id AS ext, ct.blocked, ct.opted_out,
+                (SELECT string_agg(body, ' ') FROM (SELECT body FROM messages WHERE conversation_id = c.id AND direction = 'in' AND created_at > now() - interval '1 day' ORDER BY created_at DESC LIMIT 15) x) AS recent,
+                (SELECT string_agg(t.name, ' ') FROM conversation_tags x JOIN tags t ON t.id = x.tag_id WHERE x.conversation_id = c.id) AS tags
+           FROM conversations c JOIN contacts ct ON ct.id = c.contact_id WHERE c.id = $1`, [convId])).rows[0] as { ext: string; blocked: boolean; opted_out: boolean; recent: string | null; tags: string | null } | undefined;
+      if (!c || c.blocked || c.opted_out || isCommentContact(c.ext)) return false;
+      if (isSensitive(`${c.recent ?? ''} ${c.tags ?? ''}`)) return false;
+      // claim the cool-down first, so two moments at once (a hand-over right after a greeting) send one GIF
+      const claim = await this.db.query(`UPDATE conversations SET last_bot_gif_at = now() WHERE id = $1 AND (last_bot_gif_at IS NULL OR last_bot_gif_at <= now() - make_interval(mins => $2::int)) RETURNING id`, [convId, b.gifs.cooldownMinutes]);
+      if (!claim.rowCount) return false;
+      // the official API shows animations only as MP4 (see whatsapp-cloud.ts): only GIFs that have their MP4 copy
+      const g = await pickGif(this.db, moment, this.types.get(channelId) === 'whatsapp_cloud');
+      const d = g ? await detect(g.gif) : null;
+      if (!g || d?.mime !== 'image/gif') { await this.db.query('UPDATE conversations SET last_bot_gif_at = NULL WHERE id = $1', [convId]); return false; }
+      const fileName = sanitizeFileName(`${g.title.replace(/[\\/]+/g, '-')}.gif`, 'animation.gif');
+      const sent = await this.sendMedia(channelId, c.ext, { buffer: g.gif, mime: 'image/gif', fileName, ...(g.mp4 ? { animation: g.mp4 } : {}) });
+      const ins = await this.db.query(`INSERT INTO messages (conversation_id, direction, body, external_id, auto) VALUES ($1,'out','',$2,true) RETURNING id`, [convId, sent.externalMessageId ?? null]);
+      await this.media.storeSent(ins.rows[0].id, g.gif, d, fileName);
+      this.notifyMessage(channelId, convId, ins.rows[0].id);
+      this.hookMessage('message.sent', convId, ins.rows[0].id);
+      return true;
+    } catch {
+      // keep the cool-down even when sending failed: no retry storm on a channel that cannot take media right now
+      return false;
     }
   }
 
   /** Hand a bot conversation to a person: note, assignment (the named person if active, else normal routing), then the hand-over or away notice. */
-  private async handoffNow(channelId: string, convId: string, ext: string, bot: BotConfig, why: string, topic?: { userId: string; topic: string }, customText?: string, extra?: string): Promise<void> {
+  private async handoffNow(channelId: string, convId: string, ext: string, bot: BotConfig, why: string, topic?: { userId: string; topic: string }, customText?: string, extra?: string, gif: GifMoment = 'handoff'): Promise<void> {
     await this.db.query(`INSERT INTO conversation_notes (conversation_id, body) VALUES ($1, $2)`, [convId, `מועבר מהבוט לנציג: ${why}.`]);
     let to: string | null = null;
     if (topic) {
@@ -919,6 +971,7 @@ export class ChannelManager {
     const closed = hours.enabled && !isOpen(hours, new Date());
     await this.botSay(channelId, convId, ext, [closed ? hours.awayMessage : customText || bot.humanMessage, extra].filter(Boolean).join('\n\n'));
     if (closed) await this.db.query('UPDATE conversations SET last_away_at = now() WHERE id = $1', [convId]);
+    else await this.botGif(channelId, convId, gif, bot);   // "a person is on the way" (a thank-you that ends up with a person: "glad to help"); not with the away notice
     void this.autoForward(convId).catch(() => undefined);
   }
 
@@ -996,7 +1049,7 @@ export class ChannelManager {
           if (handoff.showContact) extra = contactText(o);
         }
       }
-      await this.handoffNow(channelId, convId, ext, bot, why, userId ? { userId, topic: handoff.officerTopic ?? 'תרשים זרימה' } : undefined, handoff.text, extra);
+      await this.handoffNow(channelId, convId, ext, bot, why, userId ? { userId, topic: handoff.officerTopic ?? 'תרשים זרימה' } : undefined, handoff.text, extra, input.text && isThanks(input.text) ? 'thanks' : 'handoff');
     }
   }
 
