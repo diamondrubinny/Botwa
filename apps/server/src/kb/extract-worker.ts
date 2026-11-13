@@ -68,6 +68,7 @@ async function readWorkbook(buf: Buffer): Promise<Sheet[]> {
     const rows: string[][] = [];
     ws.eachRow({ includeEmpty: false }, (row, n) => {
       if (n > 5000) return;
+      while (rows.length < n - 1) rows.push([]);   // keep blank rows as empty ones, so rows[i] is spreadsheet row i + 1
       const cells: string[] = [];
       for (let c = 1; c <= Math.min(40, ws.columnCount); c++) {
         const v = row.getCell(c).value;

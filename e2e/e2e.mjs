@@ -163,6 +163,17 @@ await page.click('button:has-text("יצירת משתמש")');
 await page.waitForSelector('td:has-text("dana@e2e.io")');
 check('team: the new person got a username from the e-mail', await page.isVisible('td:has-text("@dana")'));
 await axe('team');
+// many users from a workbook: the template's two people, one first password, created in one click
+{ const tpl = await page.evaluate(async () => { const r = await fetch('/users/import/template.xlsx'); return Array.from(new Uint8Array(await r.arrayBuffer())); });
+  await page.setInputFiles('#ui-file', { name: 'people.xlsx', mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', buffer: Buffer.from(tpl) });
+  await page.waitForSelector('section[aria-labelledby="ui-h"] tbody tr', { timeout: 20000 });
+  check('users import: the people in the workbook are shown before anything is created', (await page.locator('section[aria-labelledby="ui-h"] tbody tr').count()) === 2 && (await page.textContent('section[aria-labelledby="ui-h"] tbody')).includes('ממונת בטיחות'));
+  await page.click('section[aria-labelledby="ui-h"] button:has-text("סיסמה חזקה")');
+  await axe('team: users import preview');
+  await page.click('section[aria-labelledby="ui-h"] button:has-text("יצירת 2 משתמשים")');
+  await page.waitForSelector('section[aria-labelledby="ui-h"] [role=status].ok', { timeout: 20000 });
+  await page.waitForSelector('td:has-text("avi@example.org")');
+  check('users import: created in one click, each must change the first password', (await page.textContent('section[aria-labelledby="ui-h"] [role=status].ok')).includes('נוצרו 2 משתמשים')); }
 
 // reports page
 await page.click('aside.sidebar nav >> text=דוחות');

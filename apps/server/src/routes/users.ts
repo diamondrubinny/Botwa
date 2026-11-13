@@ -6,6 +6,8 @@ import { requireAuth, type AuthUser } from '../auth.js';
 import type { Db } from '../db.js';
 import { hashPassword, PASSWORD_MIN } from '../password.js';
 import { usernameSchema } from '../usernames.js';
+import { sanitizeFileName } from '../media/validate.js';
+import { parseUsersWorkbook, usersTemplate } from '../usersImport.js';
 import { BUILTIN_ROLES, cleanPermissions, isSubset } from '../permissions.js';
 
 const idParam = z.object({ id: z.string().uuid() });
@@ -29,12 +31,86 @@ async function activeAdmins(db: Db, exceptUserId?: string): Promise<number> {
   return rows[0].n;
 }
 
-export function userRoutes(app: FastifyInstance, db: Db) {
+export function userRoutes(app: FastifyInstance, db: Db, scan: (buf: Buffer) => Promise<'clean' | 'infected' | 'unavailable'> = async () => 'unavailable') {
   const manage = requireAuth(db, 'users.manage');
 
   app.get('/users', { preHandler: requireAuth(db, 'users.view') }, async () => {
     const { rows } = await db.query(`SELECT ${publicCols} FROM users ORDER BY created_at`);
     return rows;
+  });
+
+  // ---- many people at once: from a workbook (name, e-mail, job title, permission level), one first password for all ----
+  app.get('/users/import/template.xlsx', { preHandler: manage }, async (_req, reply) => reply
+    .header('content-type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+    .header('content-disposition', 'attachment; filename="users-template.xlsx"').send(await usersTemplate()));
+
+  /** Reads the workbook and shows what would be created; nothing is saved here. */
+  app.post('/users/import/preview', { preHandler: manage, bodyLimit: 5 * 1024 * 1024 + 64 * 1024, config: { rateLimit: { max: 20, timeWindow: '10 minutes' } } }, async (req, reply) => {
+    const file = await req.file({ limits: { fileSize: 5 * 1024 * 1024, files: 1 } });
+    if (!file) return reply.code(400).send({ error: 'bad_request' });
+    if (!/\.xlsx$/i.test(sanitizeFileName(file.filename, 'x'))) return reply.code(415).send({ error: 'unsupported_file_type' });
+    let buf: Buffer;
+    try { buf = await file.toBuffer(); } catch { return reply.code(413).send({ error: 'too_large' }); }
+    if (file.file.truncated) return reply.code(413).send({ error: 'too_large' });
+    const sc = await scan(buf);
+    if (sc === 'infected') return reply.code(422).send({ error: 'file_infected' });
+    if (sc === 'unavailable') return reply.code(503).send({ error: 'scan_unavailable' });
+    const roles = (await db.query('SELECT key, name FROM roles')).rows as { key: string; name: string }[];
+    let parsed;
+    try { parsed = await parseUsersWorkbook(buf, roles); } catch (e) { return reply.code(422).send({ error: (e as Error).message === 'unknown_workbook' ? 'unknown_workbook' : 'extract_failed' }); }
+    const existing = new Set((await db.query('SELECT lower(email) AS e FROM users WHERE lower(email) = ANY($1::text[])', [parsed.rows.map((r) => r.email)])).rows.map((r) => r.e as string));
+    return { ...parsed, rows: parsed.rows.map((r) => ({ ...r, exists: existing.has(r.email) })) };
+  });
+
+  /** Creates the chosen people with one first password; each must change it at the first sign-in. Existing e-mails are skipped (or get their job title). */
+  app.post('/users/import', { preHandler: manage, bodyLimit: 512 * 1024, config: { rateLimit: { max: 10, timeWindow: '10 minutes' } } }, async (req, reply) => {
+    const body = z.object({
+      password: z.string().min(PASSWORD_MIN).max(256),
+      defaultRole: z.string().min(1).max(41),
+      updateExisting: z.boolean().default(false),
+      rows: z.array(z.object({
+        name: z.string().trim().min(1).max(100),
+        email: z.string().trim().email().max(254).transform((s) => s.toLowerCase()),
+        jobTitle: z.string().trim().max(80).nullable().optional(),
+        role: z.string().min(1).max(41).nullable().optional(),
+      })).min(1).max(500),
+    }).safeParse(req.body);
+    if (!body.success) return reply.code(400).send({ error: 'bad_request' });
+    const b = body.data;
+    const actor = req.user!;
+    // every role used must exist and be within the actor's own permissions (no privilege escalation through a spreadsheet)
+    const used = [...new Set([b.defaultRole, ...b.rows.map((r) => r.role).filter((r): r is string => !!r)])];
+    for (const r of used) {
+      if ((await permissionsOfRole(db, r)) === null) return reply.code(400).send({ error: 'unknown_role', detail: r });
+      if (!(await mayUseRole(db, actor, r))) return reply.code(403).send({ error: 'role_exceeds_permissions', detail: r });
+    }
+    const out = { created: 0, updated: 0, skipped: [] as { email: string; reason: 'exists' | 'duplicate' }[] };
+    // the same first password, hashed with its own salt per new person (argon2 is slow on purpose: four at a time)
+    const known = new Set((await db.query('SELECT lower(email) AS e FROM users WHERE lower(email) = ANY($1::text[])', [b.rows.map((r) => r.email)])).rows.map((r) => r.e as string));
+    const fresh = [...new Set(b.rows.map((r) => r.email))].filter((e) => !known.has(e));
+    const hashes = new Map<string, string>();
+    for (let i = 0; i < fresh.length; i += 4) {
+      const part = fresh.slice(i, i + 4);
+      (await Promise.all(part.map(() => hashPassword(b.password)))).forEach((h, k) => hashes.set(part[k]!, h));
+    }
+    const seen = new Set<string>();
+    for (const r of b.rows) {
+      if (seen.has(r.email)) { out.skipped.push({ email: r.email, reason: 'duplicate' }); continue; }
+      seen.add(r.email);
+      const title = r.jobTitle ? r.jobTitle.replace(/[\r\n]+/g, ' ') : null;
+      const h = hashes.get(r.email);
+      const ins = h ? await db.query(
+        `INSERT INTO users (email, name, role, password_hash, must_change_password, job_title) VALUES ($1,$2,$3,$4,true,$5)
+         ON CONFLICT DO NOTHING RETURNING id`, [r.email, r.name, r.role || b.defaultRole, h, title]) : { rowCount: 0 };
+      if (ins.rowCount) { out.created++; continue; }
+      if (b.updateExisting && title) {
+        const u = await db.query('UPDATE users SET job_title = $2, updated_at = now() WHERE lower(email) = $1 RETURNING id', [r.email, title]);
+        if (u.rowCount) { out.updated++; continue; }
+      }
+      out.skipped.push({ email: r.email, reason: 'exists' });
+    }
+    await audit(db, { actorId: actor.id, action: 'user.import', ip: req.ip, meta: { created: out.created, updated: out.updated, skipped: out.skipped.length, roles: used } });
+    return out;
   });
 
   app.post('/users', { preHandler: manage }, async (req, reply) => {

@@ -1,3 +1,4 @@
+import { UsersImport } from '../components/UsersImport';
 import { PageTitle } from '../components/Illustration';
 import { Avatar, AvatarEditor, AvatarGalleryAdmin } from '../components/Avatar';
 import { useRef, useState, type FormEvent } from 'react';
@@ -169,6 +170,8 @@ export function Team({ me }: { me: Me }) {
           <p role="alert" className="error">{panelMsg}</p>
         </section>
       )}
+
+      {isAdmin && <UsersImport assignable={assignable} onDone={() => void reload()} />}
 
       {isAdmin && (
         <form className="card" onSubmit={create}>

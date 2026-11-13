@@ -144,7 +144,7 @@ export async function buildApp(cfg: Config, db: Db, mgr: ChannelManager, media: 
 
   authRoutes(app, db, cfg);
   passkeyRoutes(app, db, cfg);
-  userRoutes(app, db);
+  userRoutes(app, db, (buf) => kb.scanBinary(buf));
   roleRoutes(app, db);
   channelRoutes(app, db, mgr, cfg);
   conversationRoutes(app, db, mgr, media);
