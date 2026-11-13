@@ -1171,6 +1171,16 @@ await page.click('button[aria-label="חזרה לרשימה"]');
 await page.waitForSelector('.list-pane');
 const small = await page.evaluate(() => [...document.querySelectorAll('.chip, .bn-item, .conv-item')].filter((e) => { const r = e.getBoundingClientRect(); return r.width > 0 && Math.min(r.width, r.height) < 44; }).map((e) => e.className));
 check('phone: chips, tabs and list rows are all >= 44px touch targets', small.length === 0, JSON.stringify(small));
+// no page scrolls sideways on a phone (wide tables become cards); every <details> opened so hidden tables are measured too
+{ const wide = [];
+  for (const pg of ['inbox', 'bot', 'flow', 'safety', 'kb', 'forms', 'reports', 'canned', 'channels', 'team', 'roles', 'integrations', 'audit', 'settings', 'account']) {
+    await page.goto(`${BASE}/#/${pg}`); await page.waitForTimeout(700);
+    await page.evaluate(() => document.querySelectorAll('main details').forEach((d) => { d.open = true; }));
+    await page.waitForTimeout(150);
+    const over = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+    if (over > 1) wide.push(`${pg}:${over}`);
+  }
+  check('phone: no page scrolls sideways (tables become cards)', wide.length === 0, wide.join(' ')); }
 for (const route of ['settings', 'team', 'channels', 'reports', 'roles', 'bot', 'kb', 'flow', 'integrations']) {
   await page.goto(BASE + '/#/' + route);
   await page.waitForSelector('main h1');

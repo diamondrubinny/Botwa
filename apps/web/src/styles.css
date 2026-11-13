@@ -870,3 +870,17 @@ button.linkish { min-height: 36px; padding: 0 .2rem; border: 0; background: none
 .conv-forms { margin-top: .8rem; } .conv-forms h3 { font-size: 1rem; margin: 0 0 .3rem; } .conv-forms li { padding: .25rem 0; }
 .batch-bar { height: 8px; border-radius: 99px; background: var(--surface-2); overflow: hidden; margin: .35rem 0 .2rem; max-width: 320px; }
 .batch-bar span { display: block; height: 100%; background: var(--ok, #0b7268); }
+
+/* phones: tables become cards (cells labelled from the header by responsiveTables.ts); no page ever scrolls sideways */
+@media (max-width: 700px) {
+  main table:not([data-cards="off"]) { display: block; border: 0; min-width: 0 !important; width: 100%; }
+  main table:not([data-cards="off"]) caption { display: block; }
+  main table:not([data-cards="off"]) thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+  main table:not([data-cards="off"]) tbody, main table:not([data-cards="off"]) tfoot { display: block; }
+  main table:not([data-cards="off"]) tr { display: block; border: 1px solid var(--border); border-radius: 12px; padding: .5rem .7rem; margin: 0 0 .6rem; background: var(--surface); }
+  main table:not([data-cards="off"]) th, main table:not([data-cards="off"]) td { display: flex; flex-wrap: wrap; gap: .25rem .6rem; align-items: baseline; justify-content: space-between; text-align: start; border: 0; padding: .3rem 0; min-width: 0; overflow-wrap: anywhere; }
+  main table:not([data-cards="off"]) tbody th { font-size: 1.02rem; border-bottom: 1px solid var(--border); padding-bottom: .4rem; margin-bottom: .2rem; }
+  main table:not([data-cards="off"]) td[data-label]::before, main table:not([data-cards="off"]) tbody th[data-label]::before { content: attr(data-label); font-weight: 600; color: var(--muted); font-size: .85rem; flex: 0 0 auto; }
+  main table:not([data-cards="off"]) td > .row, main table:not([data-cards="off"]) td.row { justify-content: flex-start; }
+  main { overflow-x: clip; }
+}
