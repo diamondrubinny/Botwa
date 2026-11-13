@@ -18,8 +18,32 @@ export function isGreeting(text: string | null): boolean {
   return w.length >= 1 && w.length <= 4 && w.some((x) => GREET_HEAD.has(x)) && w.every((x) => GREET_HEAD.has(x) || GREET_TAIL.has(x));
 }
 
+const THANKS = ['תודה', 'תודות', 'תנקס', 'טנקס', 'מודה', 'מודים', 'מודה לכם', 'מעריך', 'מעריכה', 'מעריכים', 'thanks', 'thank you', 'thx', 'ty', 'tnx',
+  'אחלה', 'אין עליכם', 'אין עליך', 'אין עלייך', 'אין כמוכם', 'אלופים', 'אלופה', 'אלוף', 'מעולים', 'מעולה', 'מצוין', 'מצוינים', 'מדהימים', 'מדהים', 'מדהימה',
+  'כל הכבוד', 'יישר כוח', 'ישר כוח', 'תותחים', 'תותח', 'תותחית', 'מלכים', 'מלכה', 'מלך', 'שירות מעולה', 'שירות מצוין', 'עזרתם מאוד', 'great', 'awesome', 'amazing', 'great service'];
+/** words that make it a question, a complaint or a request rather than a thank-you ("תודה, אבל זה לא עובד", "אחלה, ומה עם…") */
+const NOT_THANKS = new Set(['לא', 'אבל', 'בעיה', 'עדיין', 'למה', 'מתי', 'איך', 'מה', 'איפה', 'כמה', 'האם', 'אשמח', 'צריך', 'צריכה', 'אפשר', 'תוכלו', 'תוכל', 'תשלחו', 'שלחו', 'but', 'not', 'no', 'why', 'how', 'what', 'when', 'please']);
+const THANKS_EMOJI = /[\u{1F64F}\u{2764}\u{1F496}\u{1F497}\u{1F49C}\u{1F499}\u{1F49A}\u{1F49B}\u{1F9E1}\u{1F90D}\u{1F44F}\u{1F970}\u{1F60D}\u{1F618}\u{1F64C}\u{1F4AA}]/u;
+/**
+ * A message that thanks or praises the service ("תודה רבה", "אתם אחלה", "אחלה שירות", "אין עליכם", "🙏"): short, no question,
+ * complaint or request in it. Used for the automatic "thanks" reaction (a heart), never to decide anything else.
+ */
+export function isThanks(text: string | null): boolean {
+  if (!text) return false;
+  const t = text.trim();
+  if (!t || t.length > 120 || /[?؟]/.test(t)) return false;
+  // emoji only (🙏, ❤️, 👏…): thanks when one of them is a thank-you / love sign
+  if (!/[\p{L}\p{N}]/u.test(t)) return THANKS_EMOJI.test(t);
+  const words = t.toLowerCase().replace(/([\u0590-\u05FFa-z])\1{2,}/g, '$1')   // "תודהההה" -> "תודה"
+    .replace(/[!.,׳'"״:;()\-–—~*]/g, ' ').replace(/[\p{Extended_Pictographic}\u{FE0F}\u{200D}\u{1F3FB}-\u{1F3FF}]/gu, ' ').split(/\s+/).filter(Boolean)
+    .map((w) => (w.length > 3 && /^[ו][\u0590-\u05FF]/.test(w) && THANKS.includes(w.slice(1)) ? w.slice(1) : w));   // "ותודה" -> "תודה"
+  if (!words.length || words.length > 12 || words.some((w) => NOT_THANKS.has(w) || (w.startsWith('ו') && NOT_THANKS.has(w.slice(1))))) return false;
+  const line = ` ${words.join(' ')} `;
+  return THANKS.some((p) => line.includes(` ${p} `));
+}
+
 /** Automatic reactions to the customer's message by what the bot is doing. Off until switched on. */
-export const DEFAULT_REACTIONS = { enabled: false, ackAll: false, working: '👀', done: '✅', noAnswer: '🤔', handoff: '🙋', greeting: '👋' };
+export const DEFAULT_REACTIONS = { enabled: false, ackAll: false, working: '👀', done: '✅', noAnswer: '🤔', handoff: '🙋', greeting: '👋', thanks: '❤️' };
 
 export const botSchema = z.object({
   enabled: z.boolean(),
@@ -69,7 +93,7 @@ export const botSchema = z.object({
     outro: z.string().trim().max(200).default('אם צריך הבהרה או עזרה נוספת, אפשר לכתוב כאן, או לבקש נציג.'),
   }).default({ enabled: false, minScore: 0.6, maxChars: 700, showSource: true, intro: 'מצאתי את זה במאגר המידע שלנו:', answerMode: 'quote', outro: 'אם צריך הבהרה או עזרה נוספת, אפשר לכתוב כאן, או לבקש נציג.' }),
   /** automatic emoji reactions on the customer's message: "working" while the bot searches, then "done" / "noAnswer", or "handoff" when a person takes over */
-  reactions: z.object({ enabled: z.boolean(), /** react to every message the bot handles (not only to searches) */ ackAll: z.boolean().default(false), working: emoji, done: emoji, noAnswer: emoji, handoff: emoji, /** a greeting (שלום, היי…) gets this reaction and nothing else; empty = none */ greeting: emoji.default('👋') }).default(() => ({ ...DEFAULT_REACTIONS })),
+  reactions: z.object({ enabled: z.boolean(), /** react to every message the bot handles (not only to searches) */ ackAll: z.boolean().default(false), working: emoji, done: emoji, noAnswer: emoji, handoff: emoji, /** a greeting (שלום, היי…) gets this reaction and nothing else; empty = none */ greeting: emoji.default('👋'), /** a thank-you or praise (תודה, אתם אחלה, אין עליכם) gets this reaction, also when a person handles the chat; empty = none */ thanks: emoji.default('❤️') }).default(() => ({ ...DEFAULT_REACTIONS })),
   /** a customer message the bot could not answer (channel down, sending failed) is answered when the channel is back, up to this many hours later (0 = never) */
   catchupHours: z.number().int().min(0).max(72).default(12),
   /** on the official WhatsApp channel, send menus as tappable buttons or lists (falls back to the numbered text) */

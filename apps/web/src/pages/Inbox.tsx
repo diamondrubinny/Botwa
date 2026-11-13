@@ -3,6 +3,7 @@ import { avatarTone } from '../components/Avatar';
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { api, ApiError, can, personLabel, upload, type Attachment, type Canned, type Conversation, type Me, type Message, type Note, type RelatedConv, type Tag, type UserRow } from '../api';
 import { EmojiPicker, GifPicker, motionOff, type GifItem } from '../components/Pickers';
+import { ReactionControl } from '../components/Reactions';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { PersonPanel } from '../components/PersonPanel';
 import { CaseHistory } from '../components/CaseHistory';
@@ -563,6 +564,12 @@ export function Inbox({ me }: { me: Me }) {
                     {m.attachment && <AttachmentView a={m.attachment} />}
                     {m.body && <div className="msg-text" dir="auto">{m.body}</div>}
                     {m.replyMode && <span className={`mchip reply-${m.replyMode}`}>{m.replyMode === 'public' ? 'נענה בפומבי' : 'נענה בפרטי'}</span>}
+                    {m.direction === 'in' && !sel.blocked && <ReactionControl msgId={m.id} current={m.ourReaction} by={m.ourReactionBy} onSet={async (emoji) => {
+                      try {
+                        await api('POST', `/conversations/${sel.id}/messages/${m.id}/reaction`, { emoji });
+                        setMsgs((l) => l.map((x) => (x.id === m.id ? { ...x, ourReaction: emoji || null, ourReactionBy: emoji ? me.name : null } : x)));
+                      } catch (e) { setErr(errText(e instanceof ApiError ? e.code : 'generic')); }
+                    }} />}
                     <small>{m.direction === 'out' && m.auto && botAvatarSrc(brand) && <img className="bot-face" src={botAvatarSrc(brand)!} alt="" width={20} height={20} />}{m.direction === 'out' ? (m.auto ? `${botLabel(brand)} / מענה אוטומטי` : (m.senderName ?? 'צוות')) : 'לקוח'} · {fmt(m.createdAt)}</small>
                   </div>
                 ))}

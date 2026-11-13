@@ -8,7 +8,7 @@ import QRCode from 'qrcode';
 import type { Config } from '../config.js';
 import type { Db } from '../db.js';
 import { ingestInbound } from '../inbox.js';
-import { decide, isGreeting, loadBot, normalize, type BotConfig } from '../bot.js';
+import { decide, isGreeting, isThanks, loadBot, normalize, type BotConfig } from '../bot.js';
 import { isStopMessage } from '../optout.js';
 import { isOpen } from '../business-hours.js';
 import { autoAssign } from '../routing.js';
@@ -337,6 +337,11 @@ export class ChannelManager {
             await this.db.query('UPDATE contacts SET opted_out = false, opted_out_at = NULL WHERE id = $1', [r.contactId]); // they wrote again: conversation is welcome
           }
           const bot = r.messageId ? await loadBot(this.db) : null;
+          // a thank-you or praise ("תודה רבה", "אתם אחלה") gets a heart (or the chosen emoji), whoever handles the conversation
+          let thanked = '';
+          if (r.messageId && !stop && !m.media && bot?.reactions.thanks && !isCommentContact(m.externalContactId) && isThanks(m.text)) {
+            if ((await this.setOurReaction(r.messageId, bot.reactions.thanks, null).catch(() => 'error')) === 'ok') thanked = bot.reactions.thanks;
+          }
           if (r.messageId && stop) {
             // customer said stop: no bot, no away reply - a person decides what happens next
             if (r.needsRouting) await autoAssign(this.db, r.conversationId).catch(() => null);
@@ -345,7 +350,7 @@ export class ChannelManager {
             if (r.needsRouting) { const to = await autoAssign(this.db, r.conversationId).catch(() => null); if (to) this.onAssigned?.(r.conversationId, to); }
           } else if (r.messageId && bot?.enabled) {
             // the menu bot owns new conversations; people are assigned only at hand-over
-            await this.attemptBot(channelId, r.conversationId, m.externalContactId, bot, { text: m.text, media: !!m.media, ext: m.externalMessageId }, true);
+            await this.attemptBot(channelId, r.conversationId, m.externalContactId, bot, { text: m.text, media: !!m.media, ext: m.externalMessageId, thanked }, true);
           } else if (r.messageId) {
             if (r.needsRouting) {
               const to = await autoAssign(this.db, r.conversationId).catch(() => null);
@@ -435,31 +440,57 @@ export class ChannelManager {
    * waits in the pacing queue (it must appear at once), and never throws: a reaction is a courtesy, not part of the answer.
    */
   async react(channelId: string, externalContactId: string, externalMessageId: string, emoji: string): Promise<boolean> {
+    return (await this.reactOutcome(channelId, externalContactId, externalMessageId, emoji)) === 'sent';
+  }
+
+  /** Same as react(), with the reason when it was not sent: no_support, not_connected, paused, rate_limited, error. */
+  async reactOutcome(channelId: string, externalContactId: string, externalMessageId: string, emoji: string): Promise<'sent' | 'no_support' | 'not_connected' | 'paused' | 'rate_limited' | 'error'> {
     const a = this.adapters.get(channelId);
-    if (!a?.react) { this.noteReact(channelId, emoji, 'no_support'); return false; }
-    if (this.statuses.get(channelId) !== 'connected') { this.noteReact(channelId, emoji, 'not_connected'); return false; }
-    try { await this.assertNotPaused(channelId); } catch { this.noteReact(channelId, emoji, 'paused'); return false; }
+    if (!a?.react) { this.noteReact(channelId, emoji, 'no_support'); return 'no_support'; }
+    if (this.statuses.get(channelId) !== 'connected') { this.noteReact(channelId, emoji, 'not_connected'); return 'not_connected'; }
+    try { await this.assertNotPaused(channelId); } catch { this.noteReact(channelId, emoji, 'paused'); return 'paused'; }
     const now = Date.now();
     const l = this.reactLog.get(channelId) ?? { minute: [], day: 0, dayStart: now };
     if (now - l.dayStart > 86_400_000) { l.day = 0; l.dayStart = now; }
     l.minute = l.minute.filter((t) => now - t < 60_000);
-    if (l.minute.length >= 30 || l.day >= 600) { this.reactLog.set(channelId, l); this.noteReact(channelId, emoji, 'rate_limited'); return false; }
+    if (l.minute.length >= 30 || l.day >= 600) { this.reactLog.set(channelId, l); this.noteReact(channelId, emoji, 'rate_limited'); return 'rate_limited'; }
     l.minute.push(now); l.day++; this.reactLog.set(channelId, l);
     try {
       await Promise.race([a.react(externalContactId, externalMessageId, emoji), new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 4000))]);
       this.noteReact(channelId, emoji, 'sent');
-      return true;
-    } catch (e) { this.noteReact(channelId, emoji, `error:${(e as Error).message.slice(0, 80)}`); return false; }
+      return 'sent';
+    } catch (e) { this.noteReact(channelId, emoji, `error:${(e as Error).message.slice(0, 80)}`); return 'error'; }
+  }
+
+  /**
+   * Our emoji on one customer message (a staff member's choice, or the automatic thank-you heart when `by` is null); empty removes it.
+   * Sent to the platform where it has reactions; the website chat shows it in the widget. Stored on the message so the inbox shows it.
+   */
+  async setOurReaction(messageId: string, emoji: string, by: string | null): Promise<'ok' | 'not_found' | 'no_support' | 'not_connected' | 'paused' | 'rate_limited' | 'error'> {
+    const m = (await this.db.query(
+      `SELECT m.id, m.external_id, m.conversation_id, m.our_reaction, ct.external_id AS contact, c.channel_id, ch.type
+         FROM messages m JOIN conversations c ON c.id = m.conversation_id JOIN contacts ct ON ct.id = c.contact_id JOIN channels ch ON ch.id = c.channel_id
+        WHERE m.id = $1 AND m.direction = 'in'`, [messageId])).rows[0] as { id: string; external_id: string | null; conversation_id: string; our_reaction: string | null; contact: string; channel_id: string; type: string } | undefined;
+    if (!m) return 'not_found';
+    if ((m.our_reaction ?? '') === emoji) return 'ok';
+    if (m.type !== 'webchat') {
+      if (!m.external_id || isCommentContact(m.contact)) return 'no_support';
+      const out = await this.reactOutcome(m.channel_id, m.contact, m.external_id, emoji);
+      if (out !== 'sent') return out;
+    }
+    await this.db.query(`UPDATE messages SET our_reaction = NULLIF($2, ''), our_reaction_by = CASE WHEN $2 = '' THEN NULL ELSE $3::uuid END, our_reaction_at = CASE WHEN $2 = '' THEN NULL ELSE now() END WHERE id = $1`, [m.id, emoji, by]);
+    this.emit({ channelId: m.channel_id, type: 'message', conversationId: m.conversation_id, messageId: m.id });
+    return 'ok';
   }
 
   /** What the bot does with the reactions of one incoming message: show it is working, then replace that by how it went. */
-  private reactor(channelId: string, ext: string, inboundId: string | undefined, bot: BotConfig) {
-    let cur = '';
-    let greeted = false;
+  private reactor(channelId: string, ext: string, inboundId: string | undefined, bot: BotConfig, thanked = '') {
+    let cur = thanked;
+    let greeted = !!thanked;   // a thank-you heart stays, like the greeting wave
     return {
       /** a greeting gets its own reaction (👋) and keeps it: later working/done marks are skipped, a hand-over still shows */
       greet: async (text: string | null): Promise<void> => {
-        if (!bot.reactions.enabled || !inboundId || !bot.reactions.greeting || !isGreeting(text)) return;
+        if (greeted || !bot.reactions.enabled || !inboundId || !bot.reactions.greeting || !isGreeting(text)) return;
         if (await this.react(channelId, ext, inboundId, bot.reactions.greeting)) { cur = bot.reactions.greeting; greeted = true; }
       },
       set: async (ev: 'working' | 'done' | 'noAnswer' | 'handoff'): Promise<void> => {
@@ -698,7 +729,7 @@ export class ChannelManager {
     return next;
   }
 
-  private attemptBot(channelId: string, convId: string, contact: string, bot: BotConfig, p: { text: string | null; media: boolean; ext: string }, fresh: boolean): Promise<boolean> {
+  private attemptBot(channelId: string, convId: string, contact: string, bot: BotConfig, p: { text: string | null; media: boolean; ext: string; thanked?: string }, fresh: boolean): Promise<boolean> {
     return this.serial(convId, async () => {
       if (!fresh) {
         // a catch-up: answer only if that exact message is still waiting (a run that just finished may have answered it)
@@ -709,10 +740,10 @@ export class ChannelManager {
     });
   }
 
-  private async attemptBotNow(channelId: string, convId: string, contact: string, bot: BotConfig, p: { text: string | null; media: boolean; ext: string }, fresh: boolean): Promise<boolean> {
+  private async attemptBotNow(channelId: string, convId: string, contact: string, bot: BotConfig, p: { text: string | null; media: boolean; ext: string; thanked?: string }, fresh: boolean): Promise<boolean> {
     if (fresh && bot.catchupHours > 0) await this.db.query('UPDATE conversations SET bot_pending_at = now(), bot_pending_ext = $2, bot_pending_text = $3, bot_pending_media = $4, bot_tries = 0 WHERE id = $1', [convId, p.ext, p.text, p.media]).catch(() => undefined);
     try {
-      await this.runBot(channelId, convId, contact, bot, p.text, p.media, p.ext);
+      await this.runBot(channelId, convId, contact, bot, p.text, p.media, p.ext, p.thanked);
       await this.db.query('UPDATE conversations SET bot_pending_at = NULL, bot_pending_text = NULL, bot_pending_ext = NULL WHERE id = $1 AND bot_pending_ext = $2', [convId, p.ext]).catch(() => undefined);
       return true;
     } catch {
@@ -748,8 +779,8 @@ export class ChannelManager {
     return answered;
   }
 
-  private async runBot(channelId: string, convId: string, ext: string, bot: BotConfig, rawText: string | null, hasMedia = false, inboundId?: string): Promise<void> {
-    const rx = this.reactor(channelId, ext, inboundId, bot);
+  private async runBot(channelId: string, convId: string, ext: string, bot: BotConfig, rawText: string | null, hasMedia = false, inboundId?: string, thanked = ''): Promise<void> {
+    const rx = this.reactor(channelId, ext, inboundId, bot, thanked);
     let text: string | null = hasMedia ? null : rawText;
     const { rows } = await this.db.query('SELECT bot_state, bot_invalid, bot_item, assigned_to FROM conversations WHERE id = $1', [convId]);
     const c = rows[0];

@@ -524,6 +524,20 @@ await page.fill('#reply', 'שלום דנה, אנחנו בודקים');
 await page.click('button:has-text("שליחה")');
 await chat.locator('.msg.them:has-text("אנחנו בודקים")').waitFor({ timeout: 15000 });
 check('widget: staff reply reaches the visitor', true);
+// the agent puts an emoji on the visitor's message: chosen from a short list in the inbox, shown on the visitor's bubble in the widget
+await page.click('.msg.in:has-text("יש לי שאלה על הזמנה") button.rx-add');
+await page.waitForSelector('.rx-quick button[aria-label="🙏"]');
+await axe('reaction picker');
+await page.click('.rx-quick button[aria-label="🙏"]');
+await page.waitForSelector('.msg.in:has-text("יש לי שאלה על הזמנה") button.rx-badge:has-text("🙏")');
+await chat.locator('.msg.me:has-text("יש לי שאלה על הזמנה") .rx:has-text("🙏")').waitFor({ timeout: 15000 });
+check('reactions: an agent picks an emoji on the customer message and the visitor sees it', true);
+// a thank-you from the visitor gets the heart automatically
+await chat.locator('textarea').fill('תודה רבה, אתם אחלה');
+await chat.locator('button.send').click();
+await chat.locator('.msg.me:has-text("אתם אחלה") .rx:has-text("❤️")').waitFor({ timeout: 15000 });
+await page.waitForSelector('.msg.in:has-text("אתם אחלה") button.rx-badge:has-text("❤️")', { timeout: 15000 });
+check('reactions: a thank-you gets a heart automatically, in the widget and in the inbox', true);
 
 // a site that is not on the list gets no launcher (the config call is refused cross-origin) and cannot frame the chat page either
 const bp = await visitorCtx.newPage();
@@ -612,7 +626,7 @@ psql(`INSERT INTO messages (conversation_id, direction, body, external_id) SELEC
 
 await page.click('aside.sidebar nav >> text=שיחות');
 await page.waitForSelector('.conv-list button');
-check('conversation listed with unread', (await page.textContent('.unread')).includes('2'));
+check('conversation listed with unread', (await page.textContent('.conv-list button:has-text("יוסי לקוח") .unread')).includes('2'));
 await page.click('.conv-list button:has-text("יוסי לקוח")');
 await page.waitForSelector('.msg.in');
 await axe('inbox open conversation');

@@ -226,6 +226,22 @@ describe('website chat widget', () => {
     expect((await pub('GET', '/widget/messages?after=0', other)).json().messages).toEqual([]);
     // a token of channel A does not work to reach channel B's config
     expect((await pub('GET', '/widget/messages?after=0&wait=abc', token)).statusCode).toBe(400);
+
+    // the team's emoji on the visitor's message shows in the widget (no platform to send it to), and wakes the long poll
+    const inId = (await db.query(`SELECT id FROM messages WHERE conversation_id = $1 AND direction = 'in' ORDER BY seq LIMIT 1`, [conv])).rows[0].id as string;
+    const inSeq = String(first[0]!.seq);
+    const now = (await pub('GET', '/widget/messages?after=0', token)).json();
+    const after = Math.max(...(now.messages as { seq: number }[]).map((m) => m.seq));
+    const t1 = Date.now();
+    const poll = pub('GET', `/widget/messages?after=${after}&wait=10`, token);
+    await new Promise((r) => setTimeout(r, 300));
+    expect((await staff('POST', `/conversations/${conv}/messages/${inId}/reaction`, 'a1@t.io', { emoji: '❤️' })).json()).toEqual({ ok: true, emoji: '❤️' });
+    const woke = (await poll).json();
+    expect(Date.now() - t1).toBeLessThan(4000);
+    expect(woke.reactions).toEqual({ [inSeq]: '❤️' });
+    expect((await pub('GET', '/widget/messages?after=0', other)).json().reactions).toEqual({});   // nobody else's
+    await staff('POST', `/conversations/${conv}/messages/${inId}/reaction`, 'a1@t.io', { emoji: '' });
+    expect((await pub('GET', '/widget/messages?after=0', token)).json().reactions).toEqual({});
   });
 
   it('verified identity links devices to one customer; a wrong signature is ignored', async () => {

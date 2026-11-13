@@ -797,3 +797,17 @@ button.linkish { min-height: 36px; padding: 0 .2rem; border: 0; background: none
 .answer-mode fieldset label { display: flex; gap: .5rem; align-items: center; min-height: 40px; font-weight: 600; }
 .answer-preview { margin-top: .5rem; padding: .7rem .9rem; border-radius: 12px; border: 1px solid var(--border); background: var(--surface-2); }
 .answer-text { white-space: pre-wrap; margin: .3rem 0 0; }
+
+/* our emoji on a customer's message: a badge, or a quiet "add" button; the short list opens next to it */
+.msg-react { position: relative; display: inline-flex; margin-inline-end: .35rem; vertical-align: middle; }
+.msg-react .rx-add, .msg-react .rx-badge { min-height: 32px; min-width: 32px; padding: 0 .45rem; border-radius: 999px; line-height: 1; font-size: 1rem; }
+.msg-react .rx-add { background: transparent; border: 1px dashed var(--border); color: var(--muted); font-size: .9rem; }
+.msg-react .rx-badge { background: var(--bg); border: 1px solid var(--border); box-shadow: 0 1px 2px rgba(0,0,0,.08); }
+@media (hover: hover) { .msg:hover .msg-react .rx-add, .msg-react .rx-add:focus-visible { border-style: solid; color: var(--text); } }
+.msg-react .picker { position: absolute; z-index: 30; inset-block-start: calc(100% + 4px); inset-inline-start: 0; width: max-content; max-width: min(92vw, 360px); }
+.rx-quick { display: flex; flex-wrap: wrap; gap: .25rem; }
+.rx-quick button { min-height: 40px; min-width: 40px; padding: 0 .35rem; font-size: 1.25rem; border-radius: 10px; background: transparent; border-color: transparent; }
+.rx-quick button[aria-pressed=true], .rx-quick button[aria-checked=true] { background: var(--accent-soft, color-mix(in srgb, var(--accent) 14%, var(--surface))); border-color: var(--accent); }
+.rx-quick .rx-more { font-size: .9rem; }
+.msg.in small { display: inline-block; }
+.label-like { display: block; font-weight: 600; margin-block-end: .25rem; }

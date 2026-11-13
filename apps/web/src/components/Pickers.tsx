@@ -11,7 +11,7 @@ export function motionOff(): boolean {
 }
 
 /** A small panel above the composer: labelled, closes on Escape or a click outside, and gives focus back to the button that opened it. */
-function Popover({ id, label, onClose, children, returnTo }: { id: string; label: string; onClose: () => void; children: ReactNode; returnTo: React.RefObject<HTMLButtonElement | null> }) {
+export function Popover({ id, label, onClose, children, returnTo }: { id: string; label: string; onClose: () => void; children: ReactNode; returnTo: React.RefObject<HTMLButtonElement | null> }) {
   const ref = useRef<HTMLDivElement>(null);
   const closeRef = useRef(onClose);
   closeRef.current = onClose;

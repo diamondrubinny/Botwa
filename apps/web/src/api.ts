@@ -37,7 +37,7 @@ export interface Attachment { id: string; kind: string; mime: string | null; siz
 export interface Tag { id: string; name: string }
 export interface AuditRow { id: string; actorName: string | null; action: string; target: string | null; ip: string | null; createdAt: string }
 export interface BusinessHours { enabled: boolean; timezone: string; days: ({ open: string; close: string } | null)[]; awayMessage: string }
-export interface Message { id: string; auto?: boolean; direction: 'in' | 'out'; body: string; senderName: string | null; createdAt: string; attachment?: Attachment | null; replyMode?: 'public' | 'private' | null }
+export interface Message { id: string; auto?: boolean; direction: 'in' | 'out'; body: string; senderName: string | null; createdAt: string; attachment?: Attachment | null; replyMode?: 'public' | 'private' | null; ourReaction?: string | null; ourReactionBy?: string | null }
 
 export async function upload(url: string, file: File, caption: string): Promise<void> {
   const fd = new FormData();

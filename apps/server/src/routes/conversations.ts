@@ -12,6 +12,7 @@ import type { Db } from '../db.js';
 import { MediaService } from '../media/store.js';
 import { isCommentContact } from '../channels/meta-messaging.js';
 import { askFeedback, sendClosingMessage } from '../automations.js';
+import { isSingleEmoji } from '../bot.js';
 
 const idParam = z.object({ id: z.string().uuid() });
 export function conversationRoutes(app: FastifyInstance, db: Db, mgr: ChannelManager, media: MediaService) {
@@ -83,9 +84,10 @@ export function conversationRoutes(app: FastifyInstance, db: Db, mgr: ChannelMan
     if (!(await loadAccessible(db, req.user!, p.data.id))) return reply.code(404).send({ error: 'not_found' });
     const { rows } = await db.query(
       `SELECT m.id, m.direction, m.body, m.sender_user_id AS "senderUserId", u.name AS "senderName", m.created_at AS "createdAt", m.auto, m.reply_mode AS "replyMode",
+              m.our_reaction AS "ourReaction", CASE WHEN m.our_reaction IS NULL THEN NULL ELSE COALESCE(ru.name, 'אוטומטית') END AS "ourReactionBy",
               CASE WHEN a.id IS NULL THEN NULL ELSE json_build_object('id', a.id, 'kind', a.kind, 'mime', a.mime, 'size', a.size,
                 'fileName', a.file_name, 'status', a.status, 'detail', a.detail) END AS attachment
-         FROM messages m LEFT JOIN users u ON u.id = m.sender_user_id LEFT JOIN attachments a ON a.message_id = m.id
+         FROM messages m LEFT JOIN users u ON u.id = m.sender_user_id LEFT JOIN users ru ON ru.id = m.our_reaction_by LEFT JOIN attachments a ON a.message_id = m.id
         WHERE m.conversation_id = $1 AND ($2::timestamptz IS NULL OR m.created_at < $2)
           AND ($4::text IS NULL OR m.body ILIKE $4 OR a.file_name ILIKE $4)
         ORDER BY m.created_at DESC LIMIT $3`,
@@ -104,6 +106,23 @@ export function conversationRoutes(app: FastifyInstance, db: Db, mgr: ChannelMan
     await db.query('UPDATE conversations SET unread_count = 0 WHERE id = $1', [p.data.id]);
     if (!conv.blocked) await mgr.markRead(conv.channel_id, conv.id, conv.external_id); // "seen" receipts, like a person opening the chat
     return { ok: true };
+  });
+
+  // Our emoji on one of the customer's messages (empty removes it). Sent to the platform where it has reactions.
+  app.post('/conversations/:id/messages/:messageId/reaction', { preHandler: any, config: { rateLimit: { max: 30, timeWindow: '1 minute' } } }, async (req, reply) => {
+    const p = z.object({ id: z.string().uuid(), messageId: z.string().uuid() }).safeParse(req.params);
+    const b = z.object({ emoji: z.string().refine(isSingleEmoji) }).safeParse(req.body);
+    if (!p.success || !b.success) return reply.code(400).send({ error: 'bad_request' });
+    const conv = await loadAccessible(db, req.user!, p.data.id);
+    if (!conv) return reply.code(404).send({ error: 'not_found' });
+    const owns = (await db.query(`SELECT 1 FROM messages WHERE id = $1 AND conversation_id = $2 AND direction = 'in'`, [p.data.messageId, conv.id])).rowCount;
+    if (!owns) return reply.code(404).send({ error: 'not_found' });
+    const blockedBy = await sendBlock(db, conv, (await loadSending(db)).replyWindowHours);
+    if (blockedBy) return reply.code(409).send({ error: blockedBy });
+    const out = await mgr.setOurReaction(p.data.messageId, b.data.emoji, req.user!.id);
+    if (out === 'ok') return { ok: true, emoji: b.data.emoji || null };
+    if (out === 'not_found') return reply.code(404).send({ error: 'not_found' });
+    return reply.code(409).send({ error: out === 'no_support' ? 'reaction_not_supported' : out === 'error' ? 'reaction_failed' : `reaction_${out}` });
   });
 
   app.post('/conversations/:id/messages', { preHandler: any, config: { rateLimit: { max: 60, timeWindow: '1 minute' } } }, async (req, reply) => {

@@ -1,7 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { buildApp } from '../src/app.js';
-import { DEFAULT_BOT, DEFAULT_REACTIONS, isSingleEmoji } from '../src/bot.js';
+import { DEFAULT_BOT, DEFAULT_REACTIONS, isSingleEmoji, isThanks } from '../src/bot.js';
 import { ChannelManager } from '../src/channels/manager.js';
 import type { AdapterContext, AdapterFactory, ChannelAdapter } from '../src/channels/types.js';
 import { loadConfig } from '../src/config.js';
@@ -13,6 +13,15 @@ describe('emoji check', () => {
   it('accepts one emoji (with joiners and skin tones) or nothing, and refuses text and several', () => {
     for (const ok of ['', '👀', '✅', '🙋', '👍🏽', '👨‍💻', '❤️']) expect(isSingleEmoji(ok), ok).toBe(true);
     for (const bad of ['a', 'ok', '👀👀', '👀 ', '<b>', 'x'.repeat(30), '١']) expect(isSingleEmoji(bad), bad).toBe(false);
+  });
+});
+
+describe('thank-you detection', () => {
+  it('finds thanks and praise, and leaves questions, requests and complaints alone', () => {
+    for (const t of ['תודה', 'תודה רבה!!', 'אתם אחלה', 'אחלה שירות', 'אין עליכם', 'תודהההה 🙏', '🙏', '❤️', 'ותודה רבה', 'כל הכבוד לכם!', 'Thanks a lot', 'יישר כוח לצוות', 'מעולה, תודה'])
+      expect(isThanks(t), t).toBe(true);
+    for (const t of ['', '👍', 'תודה, אבל זה לא עובד', 'לא תודה', 'אחלה, ומה עם הטופס', 'תודה אשמח לקבל את הטופס', 'תודה?', 'מה השעה?', 'שלום', 'אני צריך עזרה', 'תודה '.repeat(30)])
+      expect(isThanks(t), t).toBe(false);
   });
 });
 
@@ -175,5 +184,62 @@ describe('automatic reactions', () => {
     expect(log[0]!.channel).toContain('WA');
     expect(log.some((l) => l.outcome === 'sent')).toBe(true);
     await setBot({ reactions: { ...DEFAULT_REACTIONS, enabled: true } });
+  });
+});
+
+describe('our emoji on the customer message: thank-you heart and a staff member\'s choice', () => {
+  it('a thank-you gets the heart (on by default, also when a person handles the chat), shown in the inbox as automatic', async () => {
+    (mgr as unknown as { reactLog: Map<string, unknown> }).reactLog.clear();
+    await setBot({ reactions: { ...DEFAULT_REACTIONS, enabled: false } });
+    const r = await say('9725000901', 'תודה רבה, אתם אחלה');
+    expect(r.reactions.map((x) => x.emoji)).toEqual(['❤️']);
+    const conv = (await db.query(`SELECT c.id FROM conversations c JOIN contacts ct ON ct.id = c.contact_id WHERE ct.external_id = '9725000901'`)).rows[0].id;
+    const msgs = (await call('GET', `/conversations/${conv}/messages`)).json() as { direction: string; body: string; ourReaction: string | null; ourReactionBy: string | null }[];
+    expect(msgs.find((m) => m.direction === 'in')).toMatchObject({ ourReaction: '❤️', ourReactionBy: 'אוטומטית' });
+    // with a person handling it: the bot is silent, the heart still comes
+    await db.query(`UPDATE conversations SET bot_state = 'human' WHERE id = $1`, [conv]);
+    expect((await say('9725000901', 'אין עליכם')).reactions.map((x) => x.emoji)).toEqual(['❤️']);
+    // with the automatic reactions on, the heart stays: no eyes or tick on top of it
+    await setBot({ reactions: { ...DEFAULT_REACTIONS, enabled: true, ackAll: true } });
+    expect((await say('9725000902', 'תודה רבה')).reactions.map((x) => x.emoji)).toEqual(['❤️']);
+    // another emoji, or none
+    await setBot({ reactions: { ...DEFAULT_REACTIONS, thanks: '🙏' } });
+    expect((await say('9725000903', 'תודה')).reactions.map((x) => x.emoji)).toEqual(['🙏']);
+    await setBot({ reactions: { ...DEFAULT_REACTIONS, thanks: '' } });
+    expect((await say('9725000904', 'תודה')).reactions).toEqual([]);
+    expect((await say('9725000905', 'תודה, אבל זה לא עובד')).reactions.map((x) => x.emoji).includes('❤️')).toBe(false);
+    await setBot({ reactions: { ...DEFAULT_REACTIONS } });
+  });
+
+  it('a staff member picks any emoji on a customer message, changes or removes it; checked access and input', async () => {
+    (mgr as unknown as { reactLog: Map<string, unknown> }).reactLog.clear();
+    const r = await say('9725000911', 'אפשר לקבל את הנוהל?');
+    const conv = (await db.query(`SELECT c.id FROM conversations c JOIN contacts ct ON ct.id = c.contact_id WHERE ct.external_id = '9725000911'`)).rows[0].id as string;
+    const all = (await call('GET', `/conversations/${conv}/messages`)).json() as { id: string; direction: string }[];
+    const inMsg = all.find((m) => m.direction === 'in')!.id;
+    reactions.length = 0;
+    const put = (emoji: string, m = inMsg, c = conv) => call('POST', `/conversations/${c}/messages/${m}/reaction`, { emoji });
+    expect((await put('😊')).json()).toEqual({ ok: true, emoji: '😊' });
+    expect(reactions).toEqual([{ to: '9725000911', id: r.id, emoji: '😊' }]);
+    expect((await call('GET', `/conversations/${conv}/messages`)).json().find((m: { id: string }) => m.id === inMsg)).toMatchObject({ ourReaction: '😊', ourReactionBy: 'a' });
+    reactions.length = 0;
+    expect((await put('😊')).statusCode).toBe(200);
+    expect(reactions).toEqual([]);                                     // same emoji again: nothing re-sent
+    expect((await put('')).json()).toEqual({ ok: true, emoji: null });
+    expect(reactions.map((x) => x.emoji)).toEqual(['']);               // removed on the platform too
+    expect((await put('nice')).statusCode).toBe(400);
+    expect((await put('😊😊')).statusCode).toBe(400);
+    const out = all.find((m) => m.direction === 'out');
+    if (out) expect((await put('😊', out.id)).statusCode).toBe(404);   // only the customer's own messages
+    expect((await put('😊', inMsg, '00000000-0000-4000-8000-000000000000')).statusCode).toBe(404);
+    // an agent who may not see this conversation gets 404
+    await db.query('INSERT INTO users (email,name,role,password_hash) VALUES ($1,$2,$3,$4) ON CONFLICT DO NOTHING', ['ag@t.io', 'ag', 'agent', await hashPassword(PW)]);
+    const agCookie = `botwa_sid=${(await app.inject({ method: 'POST', url: '/auth/login', payload: { email: 'ag@t.io', password: PW }, remoteAddress: '10.74.9.8', headers: { origin: ORIGIN } })).cookies[0]!.value}`;
+    await db.query(`UPDATE conversations SET assigned_to = (SELECT id FROM users WHERE email = 'a@t.io') WHERE id = $1`, [conv]);
+    expect((await app.inject({ method: 'POST', url: `/conversations/${conv}/messages/${inMsg}/reaction`, payload: { emoji: '👍' }, remoteAddress: '10.74.9.7', headers: { origin: ORIGIN, cookie: agCookie } })).statusCode).toBe(404);
+    // a blocked customer: refused
+    await db.query(`UPDATE contacts SET blocked = true WHERE external_id = '9725000911'`);
+    expect((await put('👍')).json().error).toBe('contact_blocked');
+    await db.query(`UPDATE contacts SET blocked = false WHERE external_id = '9725000911'`);
   });
 });

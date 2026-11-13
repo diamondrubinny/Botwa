@@ -83,3 +83,8 @@ header .logo { width: 36px; height: 36px; border-radius: 50%; object-fit: cover;
 .hello-who { display: grid; text-align: start; line-height: 1.35; }
 .hello-who span { font-size: 13px; color: var(--muted); }
 .who-face { width: 20px; height: 20px; border-radius: 50%; object-fit: cover; vertical-align: middle; margin-inline-end: 5px; }
+
+/* the team's emoji on the visitor's message (a heart on "thanks") */
+.msg.me { position: relative; }
+.msg .rx { position: absolute; inset-block-end: -10px; inset-inline-start: -8px; font-size: 15px; line-height: 1; padding: 3px 5px; border-radius: 999px; background: var(--bg); border: 1px solid var(--border); box-shadow: 0 1px 3px rgba(0,0,0,.15); }
+.msg.me:has(.rx) { margin-block-end: 8px; }

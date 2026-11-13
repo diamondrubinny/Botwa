@@ -4,8 +4,8 @@
   var key = decodeURIComponent((location.pathname.match(/^\/w\/([\w-]+)/) || [])[1] || '');
   var app = document.getElementById('app');
   var T = {
-    he: { sugLabel: 'שאלות נפוצות מתאימות', sugCount: ' שאלות נפוצות מתאימות. חצים למעלה ולמטה לבחירה, Enter לתשובה.', faq: 'תשובה מהמאגר', faqHint: 'לא מה שחיפשתם? כתבו לנו ונחזור אליכם.', loading: 'טוען…', send: 'שליחה', msg: 'כתבו הודעה…', msgLabel: 'ההודעה שלכם', start: 'התחלת שיחה', name: 'שם', email: 'אימייל', phone: 'טלפון', optional: ' (לא חובה)', close: 'סגירת הצ׳אט', you: 'אתם', team: 'הצוות', bot: 'הבוט', consent: 'יש לאשר כדי להמשיך.', required: 'שדה חובה', badEmail: 'כתובת אימייל לא תקינה', badPhone: 'מספר טלפון לא תקין', failed: 'השליחה נכשלה. נסו שוב.', offline: 'לא ניתן להתחבר כרגע. נסו שוב מאוחר יותר.', limit: 'שלחתם הרבה הודעות. נסו שוב בעוד רגע.', privacy: 'מדיניות הפרטיות', log: 'שיחה', newmsg: 'הודעה חדשה', social: 'אפשר גם לכתוב לנו ב:', botTag: 'בוט', ext: ' (נפתח מחוץ לצ׳אט)', nets: { whatsapp: 'WhatsApp', messenger: 'Messenger', instagram: 'Instagram', telegram: 'Telegram', email: 'אימייל', phone: 'טלפון' } },
-    en: { sugLabel: 'Matching common questions', sugCount: ' matching common questions. Use up and down arrows, Enter for the answer.', faq: 'Answer from our help center', faqHint: 'Not what you were looking for? Write to us and we will get back to you.', loading: 'Loading…', send: 'Send', msg: 'Type a message…', msgLabel: 'Your message', start: 'Start chat', name: 'Name', email: 'Email', phone: 'Phone', optional: ' (optional)', close: 'Close chat', you: 'You', team: 'Team', bot: 'Bot', consent: 'Please accept to continue.', required: 'Required', badEmail: 'Invalid email address', badPhone: 'Invalid phone number', failed: 'Sending failed. Please try again.', offline: 'Cannot connect right now. Please try again later.', limit: 'You are sending too fast. Try again in a moment.', privacy: 'Privacy policy', log: 'Conversation', newmsg: 'New message', social: 'You can also reach us on:', botTag: 'bot', ext: ' (opens outside this chat)', nets: { whatsapp: 'WhatsApp', messenger: 'Messenger', instagram: 'Instagram', telegram: 'Telegram', email: 'Email', phone: 'Phone' } }
+    he: { sugLabel: 'שאלות נפוצות מתאימות', sugCount: ' שאלות נפוצות מתאימות. חצים למעלה ולמטה לבחירה, Enter לתשובה.', faq: 'תשובה מהמאגר', faqHint: 'לא מה שחיפשתם? כתבו לנו ונחזור אליכם.', loading: 'טוען…', send: 'שליחה', msg: 'כתבו הודעה…', msgLabel: 'ההודעה שלכם', start: 'התחלת שיחה', name: 'שם', email: 'אימייל', phone: 'טלפון', optional: ' (לא חובה)', close: 'סגירת הצ׳אט', you: 'אתם', team: 'הצוות', bot: 'הבוט', consent: 'יש לאשר כדי להמשיך.', required: 'שדה חובה', badEmail: 'כתובת אימייל לא תקינה', badPhone: 'מספר טלפון לא תקין', failed: 'השליחה נכשלה. נסו שוב.', offline: 'לא ניתן להתחבר כרגע. נסו שוב מאוחר יותר.', limit: 'שלחתם הרבה הודעות. נסו שוב בעוד רגע.', privacy: 'מדיניות הפרטיות', log: 'שיחה', newmsg: 'הודעה חדשה', social: 'אפשר גם לכתוב לנו ב:', botTag: 'בוט', reacted: 'הצוות הגיב', ext: ' (נפתח מחוץ לצ׳אט)', nets: { whatsapp: 'WhatsApp', messenger: 'Messenger', instagram: 'Instagram', telegram: 'Telegram', email: 'אימייל', phone: 'טלפון' } },
+    en: { sugLabel: 'Matching common questions', sugCount: ' matching common questions. Use up and down arrows, Enter for the answer.', faq: 'Answer from our help center', faqHint: 'Not what you were looking for? Write to us and we will get back to you.', loading: 'Loading…', send: 'Send', msg: 'Type a message…', msgLabel: 'Your message', start: 'Start chat', name: 'Name', email: 'Email', phone: 'Phone', optional: ' (optional)', close: 'Close chat', you: 'You', team: 'Team', bot: 'Bot', consent: 'Please accept to continue.', required: 'Required', badEmail: 'Invalid email address', badPhone: 'Invalid phone number', failed: 'Sending failed. Please try again.', offline: 'Cannot connect right now. Please try again later.', limit: 'You are sending too fast. Try again in a moment.', privacy: 'Privacy policy', log: 'Conversation', newmsg: 'New message', social: 'You can also reach us on:', botTag: 'bot', reacted: 'The team reacted', ext: ' (opens outside this chat)', nets: { whatsapp: 'WhatsApp', messenger: 'Messenger', instagram: 'Instagram', telegram: 'Telegram', email: 'Email', phone: 'Phone' } }
   };
   var L = T.he, cfg = null, token = null, identity = null, after = 0, polling = false, shown = {}, started = false, formShownAt = Date.now();
   var els = {};
@@ -95,15 +95,30 @@
     // each message takes its own direction: an English question in a Hebrew chat keeps its full stop at the end
     var body = h('div', { class: 'text', dir: 'auto' }); linkify(m.text, body); box.appendChild(body);
     els.log.appendChild(box);
+    if (mine) mineBySeq[m.seq] = box;
     els.log.scrollTop = els.log.scrollHeight;
     if (!mine) parent({ type: 'botwa:message' });
+  }
+
+  // the team's emoji on the visitor's own messages (e.g. a heart on "תודה"): the server sends the full current set every time
+  var mineBySeq = {};
+  function applyReactions(map) {
+    if (!map) return;
+    Object.keys(mineBySeq).forEach(function (seq) {
+      var box = mineBySeq[seq], emoji = map[seq] || '';
+      var badge = box.querySelector('.rx');
+      if (!emoji) { if (badge) box.removeChild(badge); return; }
+      if (!badge) { badge = h('span', { class: 'rx', role: 'img' }); box.appendChild(badge); }
+      badge.textContent = emoji;
+      badge.setAttribute('aria-label', L.reacted + ' ' + emoji);
+    });
   }
 
   function poll() {
     if (polling || !token) return;
     polling = true;
     api('GET', '/widget/messages?after=' + after + '&wait=20', null, true)
-      .then(function (r) { (r.messages || []).forEach(addMessage); polling = false; setTimeout(poll, 300); })
+      .then(function (r) { (r.messages || []).forEach(addMessage); applyReactions(r.reactions); polling = false; setTimeout(poll, 300); })
       .catch(function (e) { polling = false; if (e.status === 401) { store('token', null); token = null; return; } setTimeout(poll, 5000); });
   }
 
@@ -211,7 +226,7 @@
     });
     kids.push(els.log, err, sug, sugLive, form);
     kids.forEach(function (k) { app.appendChild(k); });
-    api('GET', '/widget/messages?after=0', null, true).then(function (r) { (r.messages || []).forEach(addMessage); started = (r.messages || []).length > 0; poll(); }).catch(function () { /* retried by poll */ });
+    api('GET', '/widget/messages?after=0', null, true).then(function (r) { (r.messages || []).forEach(addMessage); applyReactions(r.reactions); started = (r.messages || []).length > 0; poll(); }).catch(function () { /* retried by poll */ });
     ta.focus();
   }
   var pending = null;

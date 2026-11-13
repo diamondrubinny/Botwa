@@ -10,12 +10,12 @@ interface BotCfg {
   enabled: boolean; welcome: string; items: { title: string; answer: string; contact?: { name: string; phone: string; message: string }; route?: { userId: string; byArea?: boolean } }[]; humanOption: boolean; humanLabel: string;
   humanKeywords: string[]; humanMessage: string; invalidMessage: string; invalidRetries: number; footer: string; preview?: string; mode?: 'menu' | 'flow';
   kb: { enabled: boolean; minScore: number; maxChars: number; showSource: boolean; intro: string; answerMode?: 'quote' | 'local'; outro?: string };
-  reactions?: { enabled: boolean; ackAll?: boolean; working: string; done: string; noAnswer: string; handoff: string; greeting?: string };
+  reactions?: { enabled: boolean; ackAll?: boolean; working: string; done: string; noAnswer: string; handoff: string; greeting?: string; thanks?: string };
   catchupHours?: number;
   interactiveMenus?: boolean;
 }
 
-const RX = { enabled: false, ackAll: false, working: '👀', done: '✅', noAnswer: '🤔', handoff: '🙋', greeting: '👋' };
+const RX = { enabled: false, ackAll: false, working: '👀', done: '✅', noAnswer: '🤔', handoff: '🙋', greeting: '👋', thanks: '❤️' };
 const menuText = (b: BotCfg) =>
   `${b.welcome}\n\n${[...b.items.map((it, i) => `${i + 1}. ${it.title}`), ...(b.humanOption ? [`0. ${b.humanLabel}`] : [])].join('\n')}`;
 
@@ -186,8 +186,18 @@ export function Bot({ me }: { me: Me }) {
               ))}
             </div>
           )}
+          <div className="field">
+            <span id="rx-thanks-l" className="label-like">לב על תודה ומחמאה (גם כשנציג מטפל בשיחה)</span>
+            <p className="hint" id="rx-thanks-h">כשהלקוח כותב "תודה", "תודה רבה", "אתם אחלה", "אחלה שירות" או "אין עליכם", ההודעה שלו מקבלת את הרגשון שבחרתם. הודעה עם שאלה, בקשה או תלונה ("תודה, אבל זה לא עובד") לא מקבלת לב. נציגים יכולים גם לבחור רגשון בעצמם על כל הודעה של לקוח, ישירות מהשיחה.</p>
+            <div className="rx-quick" role="group" aria-labelledby="rx-thanks-l" aria-describedby="rx-thanks-h">
+              {['❤️', '🙏', '😊', '👍', '🥰', ''].map((e) => (
+                <button type="button" key={e || 'none'} aria-pressed={(b.reactions?.thanks ?? '❤️') === e} aria-label={e || 'בלי תגובה'}
+                  onClick={() => set({ reactions: { ...(b.reactions ?? RX), thanks: e } })}>{e ? <span aria-hidden="true">{e}</span> : <span className="small">בלי</span>}</button>
+              ))}
+            </div>
+          </div>
           <ReactionDiagnostics />
-          <p id="rx-hint" className="hint">אימוג׳י אחד בכל שדה. עובד בווצאפ (QR ורשמי) ובטלגרם (טלגרם מאפשר רק קבוצה קבועה של אימוג׳י, למשל 👀 👍 🤔 🙏; אחרים לא יוצגו). בצ׳אט באתר אין תגובות. התגובות נשלחות רק בתגובה להודעה שהלקוח כתב, עד 30 בדקה לערוץ, ולכן הן לא מגדילות סיכון לחסימה כמו הודעות יזומות.</p>
+          <p id="rx-hint" className="hint">אימוג׳י אחד בכל שדה. עובד בווצאפ (QR ורשמי) ובטלגרם (טלגרם מאפשר רק קבוצה קבועה של אימוג׳י, למשל 👀 👍 🤔 🙏; אחרים לא יוצגו). בצ׳אט באתר מוצגים רק הלב על תודה ורגשונים שנציג בחר. התגובות נשלחות רק בתגובה להודעה שהלקוח כתב, עד 30 בדקה לערוץ, ולכן הן לא מגדילות סיכון לחסימה כמו הודעות יזומות.</p>
         </fieldset>
 
         <fieldset className="card" disabled={!canEdit}>
