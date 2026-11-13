@@ -74,6 +74,16 @@ await page.click('li.card:has-text("רשמי") >> button:has-text("הגדרת ה
 await page.waitForSelector('text=כתובת Webhook (Callback URL)');
 check('official channel shows webhook URL and verify token', (await page.textContent('li.card:has-text("רשמי")'))?.includes('/webhooks/whatsapp/') && (await page.textContent('li.card:has-text("רשמי")'))?.includes('Verify token'));
 await axe('channels: official WhatsApp setup');
+// monthly outgoing count of the official number: shown on the card, the limit (1000 by default) can be changed
+await page.waitForSelector('li.card:has-text("רשמי") .usage meter');
+check('official channel: monthly outgoing count against 1000 by default', /0\s*מתוך\s*1,000/.test(await page.textContent('li.card:has-text("רשמי") .usage-num')), await page.textContent('li.card:has-text("רשמי") .usage-num'));
+await page.click('li.card:has-text("רשמי") >> button:has-text("שינוי המגבלה")');
+await page.fill('li.card:has-text("רשמי") input[id^="us-l-"]', '500');
+await page.check('li.card:has-text("רשמי") input[type=radio][name^="us-a-"] >> nth=1');
+await axe('channels: monthly limit form');
+await page.click('li.card:has-text("רשמי") .usage button:has-text("שמירה")');
+await page.waitForSelector('li.card:has-text("רשמי") .usage-num:has-text("500")');
+check('official channel: monthly limit saved', (await page.textContent('li.card:has-text("רשמי") .usage')).includes('לעצור הודעות אוטומטיות'));
 await page.click('li.card:has-text("רשמי") >> button:has-text("מחיקת ערוץ")');
 await page.click('dialog[open] button:has-text("אישור")');
 await page.waitForFunction(() => !document.body.textContent?.includes('ווצאפ רשמי (Cloud API)'));

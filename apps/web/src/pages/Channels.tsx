@@ -3,6 +3,7 @@ import { EmptyState, PageTitle } from '../components/Illustration';
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { api, ApiError, can, CHANNEL_NAMES, type Channel, type ChannelKind, type ChannelHealth, type Me } from '../api';
 import { ConfirmDialog } from '../components/ConfirmDialog';
+import { UsageMeter } from '../components/UsageMeter';
 import { usePoll } from '../hooks';
 import { errText, t } from '../strings';
 
@@ -143,6 +144,7 @@ export function Channels({ me }: { me: Me }) {
                 <button className="danger" onClick={() => setPending({ kind: 'delete', ch })}>מחיקת ערוץ</button>
               </div>
             )}
+            {ch.type === 'whatsapp_cloud' && <UsageMeter channelId={ch.id} canEdit={isAdmin} />}
             {pairFor === ch.id && (
               <form className="card" onSubmit={(e) => { e.preventDefault(); setLinking(ch.id); setPairFor(null); void run(() => api('POST', `/channels/${ch.id}/start`, { phone })); }}>
                 <p className="hint">מתאים כשיש לכם רק מכשיר אחד (אי אפשר לסרוק QR מאותו מסך). נקבל קוד בן 8 תווים שמקלידים בווצאפ.</p>

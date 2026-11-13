@@ -25,6 +25,7 @@ import { parseNumberedMenu, type CloudTemplate, type TemplateSend } from './clou
 import { loadFlow } from '../flow/store.js';
 import { loadBusinessHours } from '../routes/settings.js';
 import { sendAlert } from '../alerts.js';
+import { countUsage, usageAllows, type UsageKind } from '../usage.js';
 import { createAuthStore } from './auth-store.js';
 import { ChannelSender, loadSending as loadSendingRaw, SendError, TEST_SENDING, type SendingSettings } from './sender.js';
 import type { AdapterFactory, ChannelAdapter, ChannelStatus, ChannelType, OutboundMedia, StartOptions } from './types.js';
@@ -212,16 +213,20 @@ export class ChannelManager {
     const a = this.cloudAdapter(channelId);
     if (!a || this.statuses.get(channelId) !== 'connected') throw new Error('channel_not_connected');
     await this.assertNotPaused(channelId);
+    await this.usageGate(channelId, false);
     const settings = this.effective(channelId, await this.loadSending());
-    return this.sender.run(channelId, settings, async () => a.sendTemplate(externalContactId, t), { maxWaitMs: 8_000 });
+    const out = await this.sender.run(channelId, settings, async () => a.sendTemplate(externalContactId, t), { maxWaitMs: 8_000 });
+    await this.usageCount(channelId, 'template');
+    return out;
   }
   /** A menu as buttons or a list. Returns false when the channel cannot, or the menu does not fit, or Meta refuses it: the caller then sends the numbered text. */
   async sendMenu(channelId: string, externalContactId: string, body: string, options: { id: string; title: string }[]): Promise<{ externalMessageId?: string } | null> {
     const a = this.adapters.get(channelId);
     if (!a?.sendInteractive || this.statuses.get(channelId) !== 'connected') return null;
     await this.assertNotPaused(channelId);
+    await this.usageGate(channelId, true);
     const settings = this.effective(channelId, await this.loadSending());
-    try { return await this.sender.run(channelId, settings, async () => a.sendInteractive!(externalContactId, body, options), { maxWaitMs: 45_000 }); } catch (e) {
+    try { const out = await this.sender.run(channelId, settings, async () => a.sendInteractive!(externalContactId, body, options), { maxWaitMs: 45_000 }); await this.usageCount(channelId, 'interactive'); return out; } catch (e) {
       if (e instanceof SendError) throw e;
       return null;
     }
@@ -411,13 +416,42 @@ export class ChannelManager {
     a.submitPassword(password);
   }
 
+  /** Official WhatsApp: the key of the number's monthly count (its phone number id), or null for other channels. */
+  usageKey(channelId: string): string | null {
+    if (this.types.get(channelId) !== 'whatsapp_cloud') return null;
+    return this.cloudAdapter(channelId)?.numberId ?? `channel:${channelId}`;
+  }
+
+  /** Refuses a message when the number's monthly limit is reached and the channel is set to stop (all, or automatic messages only). */
+  private async usageGate(channelId: string, auto: boolean): Promise<void> {
+    const key = this.usageKey(channelId);
+    if (key && !(await usageAllows(this.db, key, channelId, auto))) throw new SendError('monthly_limit');
+  }
+
+  /** Counts a message that went out and alerts once at the warning level and once at the limit. Never fails the send. */
+  private async usageCount(channelId: string, kind: UsageKind): Promise<void> {
+    const key = this.usageKey(channelId);
+    if (!key) return;
+    try {
+      const r = await countUsage(this.db, key, channelId, kind);
+      if (!r.crossed) return;
+      const label = (await this.db.query('SELECT label FROM channels WHERE id = $1', [channelId])).rows[0]?.label ?? '';
+      const what = r.crossed === 'reached'
+        ? `הגיע למגבלה החודשית: ${r.total} מתוך ${r.limit.limit} הודעות יוצאות.${r.limit.action === 'block_all' ? ' השליחה בערוץ נעצרה עד תחילת החודש הבא.' : r.limit.action === 'block_auto' ? ' הודעות אוטומטיות (בוט, מענה מחוץ לשעות, אוטומציות) נעצרו עד תחילת החודש הבא; נציגים עדיין יכולים לענות.' : ' השליחה ממשיכה (מוגדר "התראה בלבד").'}`
+        : `הגיע ל-${r.limit.warnAt}% מהמגבלה החודשית: ${r.total} מתוך ${r.limit.limit} הודעות יוצאות.`;
+      await this.db.query('INSERT INTO channel_events (channel_id, kind, detail) VALUES ($1,$2,$3)', [channelId, r.crossed === 'reached' ? 'monthly_limit_reached' : 'monthly_limit_warning', what]).catch(() => undefined);
+      void sendAlert(this.cfg, `📊 ווצאפ רשמי "${label}" ${what}`, { channelId });
+    } catch { /* counting must never break sending */ }
+  }
+
   /** All outbound traffic goes through the per-channel lane: human-like spacing, per-minute/day caps, typing indicator. */
   async sendText(channelId: string, externalContactId: string, text: string, opts: { background?: boolean } = {}) {
     const a = this.adapters.get(channelId);
     if (!a || this.statuses.get(channelId) !== 'connected') throw new Error('channel_not_connected');
     await this.assertNotPaused(channelId);
+    await this.usageGate(channelId, !!opts.background);
     const settings = this.effective(channelId, await this.loadSending());
-    return this.sender.run(
+    const out = await this.sender.run(
       channelId,
       settings,
       async () => {
@@ -426,6 +460,8 @@ export class ChannelManager {
       },
       { maxWaitMs: opts.background ? 45_000 : 8_000 },
     );
+    await this.usageCount(channelId, 'text');
+    return out;
   }
 
   private reactLog = new Map<string, { minute: number[]; day: number; dayStart: number }>();
@@ -440,15 +476,16 @@ export class ChannelManager {
    * waits in the pacing queue (it must appear at once), and never throws: a reaction is a courtesy, not part of the answer.
    */
   async react(channelId: string, externalContactId: string, externalMessageId: string, emoji: string): Promise<boolean> {
-    return (await this.reactOutcome(channelId, externalContactId, externalMessageId, emoji)) === 'sent';
+    return (await this.reactOutcome(channelId, externalContactId, externalMessageId, emoji, true)) === 'sent';
   }
 
   /** Same as react(), with the reason when it was not sent: no_support, not_connected, paused, rate_limited, error. */
-  async reactOutcome(channelId: string, externalContactId: string, externalMessageId: string, emoji: string): Promise<'sent' | 'no_support' | 'not_connected' | 'paused' | 'rate_limited' | 'error'> {
+  async reactOutcome(channelId: string, externalContactId: string, externalMessageId: string, emoji: string, auto = true): Promise<'sent' | 'no_support' | 'not_connected' | 'paused' | 'rate_limited' | 'monthly_limit' | 'error'> {
     const a = this.adapters.get(channelId);
     if (!a?.react) { this.noteReact(channelId, emoji, 'no_support'); return 'no_support'; }
     if (this.statuses.get(channelId) !== 'connected') { this.noteReact(channelId, emoji, 'not_connected'); return 'not_connected'; }
     try { await this.assertNotPaused(channelId); } catch { this.noteReact(channelId, emoji, 'paused'); return 'paused'; }
+    try { await this.usageGate(channelId, auto); } catch { this.noteReact(channelId, emoji, 'monthly_limit'); return 'monthly_limit'; }
     const now = Date.now();
     const l = this.reactLog.get(channelId) ?? { minute: [], day: 0, dayStart: now };
     if (now - l.dayStart > 86_400_000) { l.day = 0; l.dayStart = now; }
@@ -458,6 +495,7 @@ export class ChannelManager {
     try {
       await Promise.race([a.react(externalContactId, externalMessageId, emoji), new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 4000))]);
       this.noteReact(channelId, emoji, 'sent');
+      await this.usageCount(channelId, 'reaction');
       return 'sent';
     } catch (e) { this.noteReact(channelId, emoji, `error:${(e as Error).message.slice(0, 80)}`); return 'error'; }
   }
@@ -466,7 +504,7 @@ export class ChannelManager {
    * Our emoji on one customer message (a staff member's choice, or the automatic thank-you heart when `by` is null); empty removes it.
    * Sent to the platform where it has reactions; the website chat shows it in the widget. Stored on the message so the inbox shows it.
    */
-  async setOurReaction(messageId: string, emoji: string, by: string | null): Promise<'ok' | 'not_found' | 'no_support' | 'not_connected' | 'paused' | 'rate_limited' | 'error'> {
+  async setOurReaction(messageId: string, emoji: string, by: string | null): Promise<'ok' | 'not_found' | 'no_support' | 'not_connected' | 'paused' | 'rate_limited' | 'monthly_limit' | 'error'> {
     const m = (await this.db.query(
       `SELECT m.id, m.external_id, m.conversation_id, m.our_reaction, ct.external_id AS contact, c.channel_id, ch.type
          FROM messages m JOIN conversations c ON c.id = m.conversation_id JOIN contacts ct ON ct.id = c.contact_id JOIN channels ch ON ch.id = c.channel_id
@@ -475,7 +513,7 @@ export class ChannelManager {
     if ((m.our_reaction ?? '') === emoji) return 'ok';
     if (m.type !== 'webchat') {
       if (!m.external_id || isCommentContact(m.contact)) return 'no_support';
-      const out = await this.reactOutcome(m.channel_id, m.contact, m.external_id, emoji);
+      const out = await this.reactOutcome(m.channel_id, m.contact, m.external_id, emoji, by === null);
       if (out !== 'sent') return out;
     }
     await this.db.query(`UPDATE messages SET our_reaction = NULLIF($2, ''), our_reaction_by = CASE WHEN $2 = '' THEN NULL ELSE $3::uuid END, our_reaction_at = CASE WHEN $2 = '' THEN NULL ELSE now() END WHERE id = $1`, [m.id, emoji, by]);
@@ -963,8 +1001,11 @@ export class ChannelManager {
     if (!a || this.statuses.get(channelId) !== 'connected') throw new Error('channel_not_connected');
     if (!a.sendMedia) throw new Error('media_unsupported');
     await this.assertNotPaused(channelId);
+    await this.usageGate(channelId, false);
     const send = a.sendMedia.bind(a);
-    return this.sender.run(channelId, this.effective(channelId, await this.loadSending()), () => send(externalContactId, media), { maxWaitMs: 8_000 });
+    const out = await this.sender.run(channelId, this.effective(channelId, await this.loadSending()), () => send(externalContactId, media), { maxWaitMs: 8_000 });
+    await this.usageCount(channelId, 'media');
+    return out;
   }
 
   async startAll(): Promise<void> {

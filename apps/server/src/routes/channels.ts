@@ -9,6 +9,7 @@ import type { Config } from '../config.js';
 import { createDefaultWebchat } from './webchat.js';
 import type { Db } from '../db.js';
 import { warmupCap } from '../channels/sender.js';
+import { monthOf, usageLimitSchema, usageReport } from '../usage.js';
 
 /** Digits with country code, no leading 0/00. Israeli local format (05XXXXXXXX) is converted to 972. */
 export function normalizePhone(d: string): string {
@@ -331,6 +332,32 @@ export function channelRoutes(app: FastifyInstance, db: Db, mgr: ChannelManager,
   });
 
   // Server-Sent Events: live status + QR for the link screen. Admin only (QR = account takeover).
+  // Official WhatsApp: outgoing messages this month for the channel's business number, against the limit set for it.
+  app.get('/channels/:id/usage', { preHandler: view }, async (req, reply) => {
+    const p = idParam.safeParse(req.params);
+    if (!p.success) return reply.code(400).send({ error: 'bad_request' });
+    const ch = (await db.query('SELECT type FROM channels WHERE id = $1', [p.data.id])).rows[0];
+    if (!ch) return reply.code(404).send({ error: 'not_found' });
+    if (ch.type !== 'whatsapp_cloud') return reply.code(409).send({ error: 'not_official_whatsapp' });
+    const key = mgr.usageKey(p.data.id) ?? `channel:${p.data.id}`;
+    return { ...(await usageReport(db, key, p.data.id)), numberKnown: !key.startsWith('channel:') };
+  });
+
+  app.put('/channels/:id/usage-limit', { preHandler: adminOnly, config: { rateLimit: { max: 20, timeWindow: '1 minute' } } }, async (req, reply) => {
+    const p = idParam.safeParse(req.params);
+    const b = usageLimitSchema.safeParse(req.body);
+    if (!p.success || !b.success) return reply.code(400).send({ error: 'bad_request' });
+    const ch = (await db.query('SELECT type FROM channels WHERE id = $1', [p.data.id])).rows[0];
+    if (!ch) return reply.code(404).send({ error: 'not_found' });
+    if (ch.type !== 'whatsapp_cloud') return reply.code(409).send({ error: 'not_official_whatsapp' });
+    await db.query('UPDATE channels SET usage_limit = $2 WHERE id = $1', [p.data.id, JSON.stringify(b.data)]);
+    // a changed limit gets its alerts again this month, measured against the new number
+    const key = mgr.usageKey(p.data.id) ?? `channel:${p.data.id}`;
+    await db.query('UPDATE wa_monthly_usage SET warned = false, reached = false WHERE number_key = $1 AND month = $2', [key, monthOf().month]);
+    await audit(db, { actorId: req.user!.id, action: 'channel.usage_limit', target: p.data.id, ip: req.ip, meta: b.data }).catch(() => undefined);
+    return usageReport(db, key, p.data.id);
+  });
+
   app.get('/channels/:id/events', { preHandler: adminOnly }, async (req, reply) => {
     const p = idParam.safeParse(req.params);
     if (!p.success) return reply.code(400).send({ error: 'bad_request' });

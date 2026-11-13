@@ -35,7 +35,7 @@ export async function loadSending(db: Db, fallback: SendingSettings = DEFAULT_SE
 export const warmupCap = (s: SendingSettings, channelAgeDays: number) => (s.warmup ? Math.min(s.perDay, 20 + 40 * Math.max(0, Math.floor(channelAgeDays))) : s.perDay);
 
 export class SendError extends Error {
-  constructor(public code: 'send_throttled' | 'daily_limit' | 'queue_full' | 'channel_paused') { super(code); }
+  constructor(public code: 'send_throttled' | 'daily_limit' | 'queue_full' | 'channel_paused' | 'monthly_limit') { super(code); }
 }
 
 /** The platform refused a message for policy reasons (e.g. outside the 24h window). Not a failure of the channel: never counts toward auto-pause. */

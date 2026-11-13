@@ -811,3 +811,13 @@ button.linkish { min-height: 36px; padding: 0 .2rem; border: 0; background: none
 .rx-quick .rx-more { font-size: .9rem; }
 .msg.in small { display: inline-block; }
 .label-like { display: block; font-weight: 600; margin-block-end: .25rem; }
+
+/* official WhatsApp: outgoing messages this month against the limit */
+.usage { margin-top: .75rem; padding: .6rem .8rem; border: 1px solid var(--border); border-radius: 12px; background: var(--bg); }
+.usage-h { margin: 0 0 .35rem; font-size: 1rem; }
+.usage meter { width: 100%; height: 14px; }
+.usage-num { margin: .3rem 0; display: flex; gap: .5rem; align-items: center; flex-wrap: wrap; }
+.usage-full { border-color: var(--danger); }
+.usage-warn { border-color: var(--warn); }
+.usage-kinds { margin: .3rem 0; padding-inline-start: 1.2rem; }
+.mchip.warn { background: color-mix(in srgb, var(--warn) 12%, var(--surface)); color: var(--warn); border: 1px solid var(--warn); }

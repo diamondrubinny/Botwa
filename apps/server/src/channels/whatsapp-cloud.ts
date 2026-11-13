@@ -62,6 +62,8 @@ export interface WaWebhook { object?: string; entry?: { changes?: { field?: stri
 
 export class WhatsAppCloudAdapter implements ChannelAdapter {
   private creds?: CloudCreds;
+  /** The business phone number id (the key of the monthly usage count), once the credentials are loaded. */
+  get numberId(): string | null { return this.creds?.phoneNumberId ?? null; }
   private active = false;
 
   constructor(private readonly ctx: AdapterContext, private readonly fetchImpl: FetchLike = (u, i) => fetch(u, i), private readonly version = 'v21.0') {}
