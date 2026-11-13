@@ -290,8 +290,9 @@ export function channelRoutes(app: FastifyInstance, db: Db, mgr: ChannelManager,
     if (scan.status === 'infected') return reply.code(422).send({ error: 'file_infected' });
     if (scan.status !== 'clean') return reply.code(503).send({ error: 'scanner_unavailable' });
     const result = await mgr.setProfilePhoto(p.data.id, img.data, img.mime);
-    await audit(db, { actorId: req.user!.id, action: 'channel.profile_photo', target: p.data.id, ip: req.ip, meta: { result, bytes: img.data.length } });
-    return { result };
+    const detail = result === 'ok' ? null : mgr.cloudAdapter(p.data.id)?.lastPhotoDetail ?? null;
+    await audit(db, { actorId: req.user!.id, action: 'channel.profile_photo', target: p.data.id, ip: req.ip, meta: { result, bytes: img.data.length, ...(detail ? { detail } : {}) } });
+    return { result, ...(detail ? { detail } : {}) };
   });
 
   // Telegram two-step verification password during QR login. Not persisted, not logged.

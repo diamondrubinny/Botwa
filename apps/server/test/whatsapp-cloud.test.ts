@@ -46,9 +46,9 @@ describe('official WhatsApp channel', () => {
     calls.push({ url, init });
     if (init?.method === 'POST' && url.endsWith('/messages')) return sendResponse();
     if (url.includes('/app?fields=id')) return Response.json({ id: '5550001112' });
-    if (init?.method === 'POST' && url.includes('/5550001112/uploads?')) return Response.json({ id: 'upload:MTIzNDU2' });
-    if (init?.method === 'POST' && url.endsWith('/upload:MTIzNDU2')) return Response.json({ h: 'HANDLE_1' });
-    if (init?.method === 'POST' && url.endsWith('/1234567890/whatsapp_business_profile')) return Response.json({ success: true });
+    if (init?.method === 'POST' && url.includes('/5550001112/uploads?')) return Response.json({ id: 'upload:MTphdHRhY2htZW50OjEyMw==?sig=ARZx-9_q' });   // Meta's real shape
+    if (init?.method === 'POST' && url.endsWith('/upload:MTphdHRhY2htZW50OjEyMw==?sig=ARZx-9_q')) return Response.json({ h: 'HANDLE_1' });
+    if (init?.method === 'POST' && url.endsWith('/1234567890/whatsapp_business_profile')) return profileResponse();
     if (url.includes('/5550001112/subscriptions')) {
       if (init?.method === 'POST') { appSubPosts.push({ body: String(init.body), auth: (init.headers as Record<string, string>).authorization ?? '' }); appSubs = [{ object: 'whatsapp_business_account', callback_url: `${ORIGIN}/webhooks/whatsapp/${channelId}`, active: true, fields: [{ name: 'messages' }] }]; return Response.json({ success: true }); }
       return Response.json({ data: appSubs });
@@ -63,6 +63,7 @@ describe('official WhatsApp channel', () => {
   let webhookConf: Record<string, string> = { application: 'https://old-provider.example/hook' };
   const routed: unknown[] = [];
   let appSubs: unknown[] = [];
+  let profileResponse: () => Response = () => Response.json({ success: true });
   const appSubPosts: { body: string; auth: string }[] = [];
   let infoResponse: () => Response = () => Response.json({ display_phone_number: '+972 50-000-0000', verified_name: 'Shop' });
   const cookies: Record<string, string> = {};
@@ -265,11 +266,17 @@ describe('official WhatsApp channel', () => {
     const up = calls.find((c) => c.url.includes('/uploads?'))!;
     expect(up.url).toContain(`file_length=${PNG200.length}`);
     expect(up.url).toContain('file_type=image%2Fpng');
-    const bytes = calls.find((c) => c.url.endsWith('/upload:MTIzNDU2'))!;
+    const bytes = calls.find((c) => c.url.includes('/upload:MTphdHRhY2htZW50OjEyMw==?sig='))!;
     expect((bytes.init!.headers as Record<string, string>).authorization).toBe(`OAuth ${TOKEN}`);
     expect((bytes.init!.headers as Record<string, string>).file_offset).toBe('0');
     const prof = calls.find((c) => c.url.endsWith('/whatsapp_business_profile'))!;
     expect(JSON.parse(prof.init!.body as string)).toEqual({ messaging_product: 'whatsapp', profile_picture_handle: 'HANDLE_1' });
-    expect((await db.query(`SELECT count(*)::int AS n FROM audit_log WHERE action = 'channel.profile_photo'`)).rows[0].n).toBe(1);
+    // a refusal says at which step and what Meta said
+    profileResponse = () => Response.json({ error: { code: 100, error_subcode: 2494102, message: 'Invalid parameter', error_user_msg: 'The image is too small' } }, { status: 400 });
+    const bad = (await send('adm@t.io', PNG200)).json();
+    expect(bad.result).toBe('meta_phone_not_found');
+    expect(bad.detail).toContain('שמירה בפרופיל העסקי (HTTP 400, code 100/2494102): The image is too small');
+    profileResponse = () => Response.json({ success: true });
+    expect((await db.query(`SELECT count(*)::int AS n FROM audit_log WHERE action = 'channel.profile_photo'`)).rows[0].n).toBe(2);
   });
 });

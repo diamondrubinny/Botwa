@@ -390,9 +390,10 @@ function ProfilePhotoPanel({ channel }: { channel: Channel }) {
     try {
       const fd = new FormData(); fd.append('file', file);
       const res = await fetch(`/channels/${channel.id}/profile-photo`, { method: 'POST', credentials: 'same-origin', body: fd });
-      const j = (await res.json().catch(() => ({}))) as { result?: string; error?: string };
+      const j = (await res.json().catch(() => ({}))) as { result?: string; error?: string; detail?: string };
       if (!res.ok) throw new ApiError(res.status, j.error ?? 'error');
-      setMsg(j.result === 'ok' ? { ok: true, text: 'התמונה עודכנה. ייתכן שיעברו כמה דקות עד שלקוחות יראו אותה.' } : { ok: false, text: errText(j.result ?? 'profile_photo_failed') });
+      setMsg(j.result === 'ok' ? { ok: true, text: 'התמונה עודכנה. ייתכן שיעברו כמה דקות עד שלקוחות יראו אותה.' }
+        : { ok: false, text: `העדכון נכשל: ${errText(j.result ?? 'profile_photo_failed')}${j.detail ? ` פרטים מ-Meta: ${j.detail}` : ''}` });
       if (j.result === 'ok') { setFile(null); if (input.current) input.current.value = ''; }
     } catch (e) { setMsg({ ok: false, text: errText(e instanceof ApiError ? e.code : 'generic') }); }
     setBusy(false);

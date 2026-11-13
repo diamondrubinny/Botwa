@@ -201,25 +201,38 @@ export class WhatsAppCloudAdapter implements ChannelAdapter {
    * to the upload session, which returns a handle), and the handle is set on the number's business profile
    * (POST /{phone-number-id}/whatsapp_business_profile). Per Meta's docs; verify against the official reference.
    */
+  /** For the admin: at which step the last profile-picture change failed and what Meta said (no tokens, short). */
+  lastPhotoDetail: string | null = null;
+
   async setProfilePhoto(image: Buffer, mime: 'image/png' | 'image/jpeg'): Promise<string> {
+    this.lastPhotoDetail = null;
     if (!this.creds || !this.active) return 'channel_not_connected';
     const t = await this.appToken();
     if (!t) return 'meta_app_unknown';
+    type MetaErr = { error?: { code?: number; error_subcode?: number; message?: string; error_user_msg?: string } };
+    const fail = (step: string, status: number, j: MetaErr): string => {
+      const e = j.error ?? {};
+      const said = String(e.error_user_msg ?? e.message ?? '').replace(/[\u0000-\u001f]/g, ' ').slice(0, 300);
+      this.lastPhotoDetail = `${step} (HTTP ${status}${e.code !== undefined ? `, code ${e.code}` : ''}${e.error_subcode ? `/${e.error_subcode}` : ''})${said ? `: ${said}` : ''}`;
+      return metaCheckError(status, e.code);
+    };
     try {
       const q = new URLSearchParams({ file_name: mime === 'image/png' ? 'profile.png' : 'profile.jpg', file_length: String(image.length), file_type: mime });
       const s1 = await this.fetchImpl(this.url(`${t.appId}/uploads?${q}`), { method: 'POST', headers: this.auth(), signal: AbortSignal.timeout(15_000) });
-      const j1 = (await s1.json().catch(() => ({}))) as { id?: string; error?: { code?: number } };
-      if (!s1.ok || !j1.id || !/^upload:[\w=+/-]{4,400}$/.test(j1.id)) return metaCheckError(s1.status, j1.error?.code);
+      const j1 = (await s1.json().catch(() => ({}))) as { id?: string } & MetaErr;
+      // the session id looks like "upload:<base64>?sig=<signature>": it becomes part of the next URL, so only those characters pass
+      if (!s1.ok || !j1.id) return fail('פתיחת העלאה', s1.status, j1);
+      if (!/^upload:[A-Za-z0-9_\-=+/:?&%.]{4,1500}$/.test(j1.id) || j1.id.includes('..')) { this.lastPhotoDetail = 'פתיחת העלאה: מזהה העלאה בפורמט לא צפוי'; return 'meta_check_failed'; }
       const s2 = await this.fetchImpl(this.url(j1.id), { method: 'POST', headers: { authorization: `OAuth ${this.creds.accessToken}`, file_offset: '0', 'content-type': mime }, body: new Uint8Array(image), signal: AbortSignal.timeout(60_000) });
-      const j2 = (await s2.json().catch(() => ({}))) as { h?: string; error?: { code?: number } };
-      if (!s2.ok || !j2.h) return metaCheckError(s2.status, j2.error?.code);
+      const j2 = (await s2.json().catch(() => ({}))) as { h?: string } & MetaErr;
+      if (!s2.ok || !j2.h) return fail('שליחת הקובץ', s2.status, j2);
       const s3 = await this.fetchImpl(this.url(`${this.creds.phoneNumberId}/whatsapp_business_profile`), {
         method: 'POST', headers: { ...this.auth(), 'content-type': 'application/json' },
         body: JSON.stringify({ messaging_product: 'whatsapp', profile_picture_handle: j2.h }), signal: AbortSignal.timeout(20_000),
       });
-      const j3 = (await s3.json().catch(() => ({}))) as { success?: boolean; error?: { code?: number } };
-      return s3.ok && j3.success !== false ? 'ok' : metaCheckError(s3.status, j3.error?.code);
-    } catch { return 'meta_unreachable'; }
+      const j3 = (await s3.json().catch(() => ({}))) as { success?: boolean } & MetaErr;
+      return s3.ok && j3.success !== false ? 'ok' : fail('שמירה בפרופיל העסקי', s3.status, j3);
+    } catch { this.lastPhotoDetail = 'אין חיבור ל-Meta'; return 'meta_unreachable'; }
   }
 
   /** Is any app subscribed to the business account? null when it cannot be told (no account id, or Meta did not answer). */
