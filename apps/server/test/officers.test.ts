@@ -166,3 +166,39 @@ describe('officers by topic', () => {
     expect((await db.query('SELECT count(*)::int AS n FROM officer_topics WHERE officer_id = $1', [id])).rows[0].n).toBe(0);
   });
 });
+
+describe('accounts for officers in one click', () => {
+  it('creates an account with the same first password for each officer without one, links existing ones, and reports the rest', async () => {
+    await db.query('DELETE FROM officers');
+    const mk = (name: string, email: string | null, active = true, userId: string | null = null) =>
+      db.query('INSERT INTO officers (name, email, active, user_id) VALUES ($1,$2,$3,$4) RETURNING id', [name, email, active, userId]).then((r) => r.rows[0].id as string);
+    const dana = await mk('דנה לוי', 'Dana@Uni.ac.il');
+    const dup = await mk('דנה לוי (קרינה)', 'dana@uni.ac.il');          // the same person listed twice
+    const laser = await mk('ממונה לייזר', 'laser@t.io');                 // already has an account by e-mail
+    await mk('בלי אימייל', null);
+    await mk('לא פעיל', 'off@uni.ac.il', false);
+    await mk('יש חשבון', 'b12@t.io', true, ids.b12!);
+    // supervisors cannot create accounts; agents neither
+    expect((await call('GET', '/safety/officers/accounts', 'laser')).statusCode).toBe(403);
+    const plan = (await call('GET', '/safety/officers/accounts', 'admin')).json();
+    expect(plan.create).toEqual([{ name: 'דנה לוי', email: 'dana@uni.ac.il' }]);
+    expect(plan.link.map((x: { email: string }) => x.email).sort()).toEqual(['dana@uni.ac.il', 'laser@t.io']);
+    expect(plan.noEmail).toEqual([{ name: 'בלי אימייל' }]);
+    expect((await call('POST', '/safety/officers/accounts', 'admin', { password: 'short', role: 'agent' })).json()).toEqual({ error: 'weak_password' });
+    expect((await call('POST', '/safety/officers/accounts', 'admin', { password: 'first-password-1', role: 'nope' })).json()).toEqual({ error: 'unknown_role' });
+    const r = await call('POST', '/safety/officers/accounts', 'admin', { password: 'first-password-1', role: 'agent' });
+    expect(r.json()).toEqual({ created: 1, linked: 2, noEmail: ['בלי אימייל'], inactive: [] });
+    const u = (await db.query(`SELECT id, name, role, must_change_password FROM users WHERE email = 'dana@uni.ac.il'`)).rows[0];
+    expect(u).toMatchObject({ name: 'דנה לוי', role: 'agent', must_change_password: true });
+    const uid = async (id: string) => (await db.query('SELECT user_id FROM officers WHERE id = $1', [id])).rows[0].user_id;
+    expect(await uid(dana)).toBe(u.id);
+    expect(await uid(dup)).toBe(u.id);
+    expect(await uid(laser)).toBe(ids.laser);
+    // the new person signs in with the shared first password and must change it
+    const login = await call('POST', '/auth/login', undefined, { email: 'dana@uni.ac.il', password: 'first-password-1' });
+    expect(login.statusCode).toBe(200);
+    // a second click has nothing left to do, and the action is audited
+    expect((await call('POST', '/safety/officers/accounts', 'admin', { password: 'first-password-1', role: 'agent' })).json()).toMatchObject({ created: 0, linked: 0 });
+    expect((await db.query(`SELECT count(*)::int AS n FROM audit_log WHERE action = 'safety.officer_accounts'`)).rows[0].n).toBe(2);
+  });
+});

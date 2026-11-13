@@ -7,7 +7,7 @@ interface Preview { rows: PRow[]; invalid: { row: number; reason: string; value:
 const WHY: Record<string, string> = { missing_name: 'חסר שם', missing_email: 'חסר אימייל', bad_email: 'אימייל לא תקין', duplicate: 'אימייל שמופיע פעמיים' };
 
 /** A strong first password that is still easy to dictate: four groups of letters and digits, no look-alike characters. */
-function strongPassword(): string {
+export function strongPassword(): string {
   const abc = 'abcdefghjkmnpqrstuvwxyzABCDEFGHJKMNPQRSTUVWXYZ23456789';
   const r = crypto.getRandomValues(new Uint32Array(16));
   const s = [...r].map((x) => abc[x % abc.length]).join('');

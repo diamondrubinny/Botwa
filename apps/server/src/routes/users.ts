@@ -21,7 +21,7 @@ export async function permissionsOfRole(db: Db, key: string): Promise<string[] |
 }
 
 /** Nobody can hand out (or take away) more than they hold themselves. */
-async function mayUseRole(db: Db, actor: AuthUser, roleKey: string): Promise<boolean> {
+export async function mayUseRole(db: Db, actor: AuthUser, roleKey: string): Promise<boolean> {
   const perms = await permissionsOfRole(db, roleKey);
   return perms !== null && isSubset(perms, actor.permissions);
 }

@@ -11,6 +11,8 @@ import { importWorkbook, reapplyCategories } from '../safety/importer.js';
 import { areasTemplate, importAreas } from '../safety/areasImport.js';
 import { cleanTopics, importOfficers, listOfficers, normalizePhone, officersTemplate } from '../safety/officers.js';
 import { TEMPLATE_TAGS } from '../flow/safetyTemplate.js';
+import { hashPassword, PASSWORD_MIN } from '../password.js';
+import { mayUseRole, permissionsOfRole } from './users.js';
 
 const idParam = z.object({ id: z.string().uuid() });
 
@@ -251,6 +253,58 @@ export function safetyRoutes(app: FastifyInstance, db: Db, kb: KnowledgeBase) {
       await audit(db, { actorId: req.user!.id, action: 'safety.officers_import', ip: req.ip, meta: { created: r.created, updated: r.updated, skipped: r.skipped.length } });
       return r;
     } catch (e) { return reply.code(422).send({ error: (e as Error).message === 'unknown_workbook' ? 'unknown_workbook' : 'extract_failed' }); }
+  });
+
+  // ---- accounts for officers in one click: everyone listed with an e-mail and no account gets one, all with the same first
+  // password that must be changed at the first sign-in. An existing account with the same e-mail is linked instead. ----
+  const usersManage = requireAuth(db, 'users.manage');
+  async function officerAccountsPlan() {
+    const rows = (await db.query(`SELECT o.id, o.name, lower(o.email) AS email, u.id AS existing, u.active AS existing_active
+        FROM officers o LEFT JOIN users u ON lower(u.email) = lower(o.email)
+       WHERE o.user_id IS NULL AND o.active ORDER BY o.sort, o.name`)).rows as { id: string; name: string; email: string | null; existing: string | null; existing_active: boolean | null }[];
+    const create: { id: string; name: string; email: string }[] = [], link: { id: string; name: string; email: string; userId: string }[] = [], noEmail: { id: string; name: string }[] = [], inactive: { id: string; name: string; email: string }[] = [];
+    const seen = new Set<string>();
+    for (const r of rows) {
+      if (!r.email) noEmail.push({ id: r.id, name: r.name });
+      else if (r.existing) (r.existing_active ? link.push({ id: r.id, name: r.name, email: r.email, userId: r.existing }) : inactive.push({ id: r.id, name: r.name, email: r.email }));
+      else if (seen.has(r.email)) link.push({ id: r.id, name: r.name, email: r.email, userId: '' });   // the same person listed twice: linked to the account made for the first row
+      else { seen.add(r.email); create.push({ id: r.id, name: r.name, email: r.email }); }
+    }
+    return { create, link, noEmail, inactive };
+  }
+  app.get('/safety/officers/accounts', { preHandler: usersManage }, async (req, reply) => {
+    if (!req.user!.permissions.includes('bot.manage')) return reply.code(403).send({ error: 'forbidden' });
+    const p = await officerAccountsPlan();
+    return { create: p.create.map(({ name, email }) => ({ name, email })), link: p.link.map(({ name, email }) => ({ name, email })), noEmail: p.noEmail.map(({ name }) => ({ name })), inactive: p.inactive.map(({ name, email }) => ({ name, email })) };
+  });
+  app.post('/safety/officers/accounts', { preHandler: usersManage, config: { rateLimit: { max: 5, timeWindow: '10 minutes' } } }, async (req, reply) => {
+    const actor = req.user!;
+    if (!actor.permissions.includes('bot.manage')) return reply.code(403).send({ error: 'forbidden' });
+    const b = z.object({ password: z.string().min(PASSWORD_MIN).max(256), role: z.string().min(1).max(41) }).strict().safeParse(req.body);
+    if (!b.success) return reply.code(400).send({ error: b.error.issues.some((i) => i.path[0] === 'password') ? 'weak_password' : 'bad_request' });
+    if ((await permissionsOfRole(db, b.data.role)) === null) return reply.code(400).send({ error: 'unknown_role' });
+    if (!(await mayUseRole(db, actor, b.data.role))) return reply.code(403).send({ error: 'role_exceeds_permissions' });
+    const plan = await officerAccountsPlan();
+    const made = new Map<string, string>();   // email -> new user id
+    // one hash per person (own salt), four at a time: argon2 is slow on purpose
+    for (let i = 0; i < plan.create.length; i += 4) {
+      const part = plan.create.slice(i, i + 4);
+      const hashes = await Promise.all(part.map(() => hashPassword(b.data.password)));
+      for (let k = 0; k < part.length; k++) {
+        const o = part[k]!;
+        const ins = await db.query(`INSERT INTO users (email, name, role, password_hash, must_change_password) VALUES ($1,$2,$3,$4,true) ON CONFLICT DO NOTHING RETURNING id`, [o.email, o.name, b.data.role, hashes[k]]);
+        const id = (ins.rows[0]?.id as string | undefined) ?? (await db.query('SELECT id FROM users WHERE lower(email) = $1 AND active', [o.email])).rows[0]?.id;
+        if (id) { made.set(o.email, id); await db.query('UPDATE officers SET user_id = $2 WHERE id = $1 AND user_id IS NULL', [o.id, id]); }
+      }
+    }
+    let linked = 0;
+    for (const l of plan.link) {
+      const uid = l.userId || made.get(l.email);
+      if (uid && (await db.query('UPDATE officers SET user_id = $2 WHERE id = $1 AND user_id IS NULL', [l.id, uid])).rowCount) linked++;
+    }
+    const out = { created: made.size, linked, noEmail: plan.noEmail.map((o) => o.name), inactive: plan.inactive.map((o) => o.email) };
+    await audit(db, { actorId: actor.id, action: 'safety.officer_accounts', ip: req.ip, meta: { created: out.created, linked, noEmail: out.noEmail.length, inactive: out.inactive.length, role: b.data.role } });
+    return out;
   });
 
   app.post('/safety/officers', { preHandler: areaManage }, async (req, reply) => {

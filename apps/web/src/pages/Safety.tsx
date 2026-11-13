@@ -1,3 +1,4 @@
+import { OfficerAccounts } from '../components/OfficerAccounts';
 import { Loading } from '../components/Loading';
 import { EmptyState, PageTitle } from '../components/Illustration';
 import { useEffect, useState, type FormEvent } from 'react';
@@ -129,7 +130,7 @@ export function Safety({ me }: { me: Me }) {
       )}
 
       {manage && <Manage cats={cats} onChanged={loadCats} stats={stats} />}
-      {can(me, 'bot.view') && <Officers canEdit={can(me, 'bot.manage')} />}
+      {can(me, 'bot.view') && <Officers canEdit={can(me, 'bot.manage')} me={can(me, 'bot.manage') && can(me, 'users.manage') ? me : null} />}
       {can(me, 'bot.view') && <Areas canEdit={can(me, 'bot.manage')} />}
     </>
   );
@@ -303,7 +304,7 @@ function Areas({ canEdit }: { canEdit: boolean }) {
 
 interface OfficerRow { id: string; name: string; email: string | null; phone: string | null; userId: string | null; userName: string | null; userActive: boolean; notes: string; active: boolean; topics: string[] }
 
-function Officers({ canEdit }: { canEdit: boolean }) {
+function Officers({ canEdit, me }: { canEdit: boolean; me: Me | null }) {
   const [list, setList] = useState<OfficerRow[]>([]);
   const [users, setUsers] = useState<{ id: string; name: string; username?: string }[]>([]);
   const [topics, setTopics] = useState<string[]>([]);
@@ -380,6 +381,7 @@ function Officers({ canEdit }: { canEdit: boolean }) {
           <div className="row"><button className="primary" type="submit">שמירה</button><button type="button" onClick={() => setEditId(null)}>ביטול</button></div>
         </form>
       )}
+      {me && <OfficerAccounts me={me} onDone={load} />}
       {canEdit && (
         <form onSubmit={importOfficers} style={{ marginTop: '.75rem' }}>
           <h3>ייבוא מאקסל</h3>

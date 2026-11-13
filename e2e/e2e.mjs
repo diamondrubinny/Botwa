@@ -418,6 +418,15 @@ await page.click('#of-t ~ .chips >> text=לייזרים');
 await axe('safety board: officers form');
 await page.click('form:has(#of-n) button:has-text("שמירה")');
 await page.waitForSelector('th:has-text("ממונה לדוגמה")');
+// one click: an account for every officer without one, same first password for all
+await page.click('button:has-text("יצירת חשבונות לממונים בלי חשבון")');
+await page.waitForSelector('section[aria-labelledby="oa-h"] li:has-text("officer@example.org")');
+await page.click('section[aria-labelledby="oa-h"] button:has-text("יצירת סיסמה")');
+await axe('safety board: officer accounts');
+await page.click('section[aria-labelledby="oa-h"] button:has-text("יצירת 1 חשבונות")');
+await page.waitForSelector('section[aria-labelledby="oa-h"] [role=status]:has-text("נוצרו 1 חשבונות")');
+await page.waitForSelector('tr:has(th:has-text("ממונה לדוגמה")) td:has-text("ממונה לדוגמה")');
+check('officer accounts: created in one click and linked to the officer', true);
 check('safety board: an officer with topics is added', (await page.textContent('tr:has(th:has-text("ממונה לדוגמה"))')).includes('לייזרים') && (await page.getAttribute('tr:has(th:has-text("ממונה לדוגמה")) a[href^="https://wa.me/"]', 'href')) === 'https://wa.me/972501234567');
 await axe('safety board: officers');
 
