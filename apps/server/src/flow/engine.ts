@@ -1,4 +1,4 @@
-import { normalize, waLink } from '../bot.js';
+import { isBackRequest, isMenuRequest, normalize, waLink } from '../bot.js';
 import { NODE_WAITS, type Flow, type FlowNode } from './schema.js';
 
 export type Vars = Record<string, string>;
@@ -22,6 +22,8 @@ export interface FlowState {
   freeText?: { node: string; text: string };
   /** a topic the customer already named (e.g. during identification): the menu that offers it opens straight at it */
   pendingTopic?: { node: string; index: number };
+  /** the nodes the customer answered on the way here (newest last), so "back" can return one step */
+  history?: string[];
 }
 export const NEW_FLOW_STATE: FlowState = { node: null, vars: {}, invalid: 0, done: false };
 
@@ -62,19 +64,22 @@ export interface FlowContext {
 export interface FlowResult { replies: string[]; state: FlowState; effects: Effect[]; /** the last reply is a menu node's numbered menu */ menu?: boolean }
 const MAX_STEPS = 60;
 export const RESTART_AFTER_MS = 30 * 60_000;
-const MENU_WORDS = new Set(['תפריט', 'menu', 'start', 'התחלה', 'תפריט ראשי']);
+const MENU_WORDS = { has: (t: string) => isMenuRequest(t) };
+/** shown under a step that is not the first, so customers know they can go back */
+export const NAV_HINT = 'לחזרה לשלב הקודם כתבו "אחורה". לתפריט הראשי כתבו "תפריט".';
 const SKIP_WORDS = new Set(['דלג', 'דלגי', 'skip', 'לא', 'אין']);
 const YES = new Set(['כן', 'yes', 'y', '1', 'עוד']);
 const NO = new Set(['לא', 'no', 'n', '2', 'די', 'זהו', 'סיימתי']);
 const GREETINGS = new Set(['שלום', 'היי', 'הי', 'הלו', 'אהלן', 'בוקר טוב', 'ערב טוב', 'צהריים טובים', 'תודה', 'תודה רבה', 'ok', 'אוקיי', 'אוקי', 'hello', 'hi']);
 const LETTERS = ['א', 'ב', 'ג'];
 /** added under a knowledge-base answer instead of repeating the menu or the pending question */
-export const ANSWER_HINT = 'לשאלה נוספת פשוט כתבו אותה. לתפריט כתבו "תפריט".';
+export const ANSWER_HINT = 'לשאלה נוספת פשוט כתבו אותה. לתפריט כתבו "תפריט", ולשלב הקודם "אחורה".';
 const withHint = (a: string) => `${a}\n\n${ANSWER_HINT}`;
 const DEFAULT_LABELS: Record<string, string> = { name: 'שם', phone: 'טלפון', email: 'אימייל', text: 'פירוט' };
 
-const menuText = (n: Extract<FlowNode, { type: 'menu' }>, humanOption: boolean, humanLabel = 'נציג אנושי') =>
-  `${n.text}\n\n${[...n.options.map((o, i) => `${i + 1}. ${o.label}`), ...(humanOption ? [`0. ${humanLabel}`] : [])].join('\n')}`;
+// the hint goes between the text and the options: the numbered options must stay the last lines (they become buttons)
+const menuText = (n: Extract<FlowNode, { type: 'menu' }>, humanOption: boolean, humanLabel = 'נציג אנושי', hint = '') =>
+  `${n.text}${hint ? `\n\n${hint}` : ''}\n\n${[...n.options.map((o, i) => `${i + 1}. ${o.label}`), ...(humanOption ? [`0. ${humanLabel}`] : [])].join('\n')}`;
 
 function validate(kind: string, raw: string): string | null {
   const t = raw.trim();
@@ -149,8 +154,27 @@ export async function runFlow(flow: Flow, prev: FlowState | null, input: FlowInp
   const t = hasText ? normalize(inp.text!) : '';
   if (hasText && state.node !== null) {
     if (ctx.humanKeywords.some((k) => t.includes(normalize(k)))) return handoff('requested');
-    if (MENU_WORDS.has(t)) state = { ...state, node: null, invalid: 0, list: undefined }; // restart
+    if (MENU_WORDS.has(t)) state = { ...state, node: null, invalid: 0, list: undefined, history: [] }; // restart
+    else if (isBackRequest(t)) {
+      // one step back: ask the previous step again (the first step has nothing before it: start over)
+      const hist = [...(state.history ?? [])];
+      let target: FlowNode | undefined;
+      while (hist.length && !target) { const id = hist.pop()!; const n = nodes.get(id); if (n && NODE_WAITS.has(n.type)) target = n; }
+      if (!target) state = { ...state, node: null, invalid: 0, list: undefined, history: [] };
+      else {
+        state = { ...state, node: target.id, invalid: 0, list: target.type === 'list' ? { items: [], phase: 'item' } : undefined, history: hist, suggest: undefined, suggestFor: undefined };
+        if (target.type === 'menu') return { replies: [menuText(target, ctx.humanOption, humanLabel, hist.length ? NAV_HINT : '')], state, effects, menu: true };
+        if (target.type === 'question' || target.type === 'media' || target.type === 'list') return { replies: [target.text], state, effects };
+      }
+    }
   }
+  // the step being answered now: remembered when the flow moves on to the next one, for "back"
+  const answering = state.node;
+  const histFor = (next: string): string[] => {
+    const h = state.history ?? [];
+    return answering && answering !== next ? [...h.filter((x) => x !== answering), answering].slice(-20) : h;
+  };
+  const hintFor = (h: string[]) => (h.length ? NAV_HINT : '');
 
   // 1. handle the answer to the node we were waiting at
   let cursor: string | undefined;
@@ -335,10 +359,11 @@ export async function runFlow(flow: Flow, prev: FlowState | null, input: FlowInp
           if (!cursor) return finished();
           break;
         }
-        replies.push(menuText(n, ctx.humanOption, humanLabel)); return { replies, state: { ...state, node: n.id, invalid: 0 }, effects, menu: true };
+        { const h = histFor(n.id); replies.push(menuText(n, ctx.humanOption, humanLabel, hintFor(h))); return { replies, state: { ...state, node: n.id, invalid: 0, history: h }, effects, menu: true }; }
       }
-      case 'question': case 'media': replies.push(n.text); return { replies, state: { ...state, node: n.id, invalid: 0 }, effects };
-      case 'list': replies.push(n.text); return { replies, state: { ...state, node: n.id, invalid: 0, list: { items: [], phase: 'item' } }, effects };
+      // questions stay short (a hint under every question of a form is noise); "back" still works there
+      case 'question': case 'media': replies.push(n.text); return { replies, state: { ...state, node: n.id, invalid: 0, history: histFor(n.id) }, effects };
+      case 'list': replies.push(n.text); return { replies, state: { ...state, node: n.id, invalid: 0, list: { items: [], phase: 'item' }, history: histFor(n.id) }, effects };
       case 'handoff': {
         let who = n.userId;
         let viaArea = false;

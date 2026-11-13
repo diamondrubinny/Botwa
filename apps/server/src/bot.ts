@@ -135,7 +135,18 @@ export interface BotState { state: 'menu' | 'human' | 'area' | null; invalid: nu
 export type HandoffReason = 'requested' | 'unrecognized' | 'media' | 'topic';
 export interface Decision { replies: string[]; /** the last reply is the numbered menu (so a channel that can may send it as buttons) */ menu?: boolean; next: BotState; handoff?: HandoffReason; /** topic hand-over: the menu item chosen and the person responsible */ topic?: { title: string; userId: string; /** the place the customer wrote, when the topic is routed by area ('' = skipped) */ place?: string } }
 
-const MENU_WORDS = new Set(['תפריט', 'menu', 'תפריט ראשי', 'start', 'התחלה']);
+/**
+ * Navigation the customer can ask for in words, on any channel: back one step ("תחזור אחורה", "אחורה", "לשלב הקודם", "back")
+ * and the main menu ("תחזור לתפריט", "תפריט", "לתפריט הראשי", "menu"). Matched on the whole (normalized) message only, so a
+ * sentence that merely contains the word ("מה התפריט במסעדה?") is not a command.
+ */
+const POLITE = '(?:בבקשה |אפשר |אפשר ל|רוצה |אני רוצה |תוכל |תוכלי |אפשר בבקשה )?';
+const GO = '(?:ל?תחזור|ל?תחזרי|חזור|חזרי|חזרו|חזרה|לחזור|תחזיר|תחזירי|תחזירו|תעביר|תעבירי|קח|קחי|צעד|שלב)?';
+const MENU_RE = new RegExp(`^${POLITE}${GO} ?(?:ל|אל |אל ה|ל ה)?(?:ה)?תפריט(?: (?:ה)?ראשי)?(?: בבקשה)?$|^(?:menu|main menu|start|home|התחלה|מההתחלה|להתחלה|חזרה להתחלה|להתחיל מחדש|התחל מחדש)$`);
+const BACK_RE = new RegExp(`^${POLITE}${GO} ?(?:אחורה|לאחור|אחורנית|(?:ל|אל )?(?:ה)?(?:שלב|שאלה|תפריט|מסך) (?:ה)?קוד(?:ם|מת)|(?:ל|אל )?(?:ה)?קודם)(?: בבקשה)?$|^(?:back|go back|previous|prev)$`);
+export const isMenuRequest = (normalized: string): boolean => MENU_RE.test(normalized.trim());
+export const isBackRequest = (normalized: string): boolean => BACK_RE.test(normalized.trim());
+const MENU_WORDS = { has: (t: string) => isMenuRequest(t) || isBackRequest(t) };   // the menu bot has one level: "back" is the menu
 
 /** Pure decision function: what the bot answers to one customer message, and the next state. */
 /** `kbAnswer`: a confident answer from the knowledge base for this text (computed by the caller; the function itself stays pure). */
