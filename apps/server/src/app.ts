@@ -9,6 +9,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { authRoutes } from './routes/auth.js';
+import { formRoutes } from './routes/forms.js';
 import { userRoutes } from './routes/users.js';
 import { channelRoutes } from './routes/channels.js';
 import multipart from '@fastify/multipart';
@@ -190,6 +191,7 @@ export async function buildApp(cfg: Config, db: Db, mgr: ChannelManager, media: 
   forwardRoutes(app, db, mgr, cfg);
   templateRoutes(app, db, mgr);
   widgetRoutes(app, db, mgr, cfg);
+  formRoutes(app, db, mgr, cfg, media);
   const hooks = new WebhookService(db, cfg, webhookSender);
   mgr.webhooks = hooks;
   if (cfg.NODE_ENV !== 'test') hooks.start();

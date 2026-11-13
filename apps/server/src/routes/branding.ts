@@ -10,7 +10,7 @@ import type { Db } from '../db.js';
 import { checkUrl, FetchError, safeGet } from '../kb/fetch.js';
 import type { KnowledgeBase } from '../kb/service.js';
 
-async function loadBrand(db: Db): Promise<Brand> {
+export async function loadBrand(db: Db): Promise<Brand> {
   const { rows } = await db.query(`SELECT value FROM settings WHERE key = 'branding'`);
   const p = brandSchema.safeParse(rows[0]?.value);
   return p.success ? p.data : DEFAULT_BRAND;
