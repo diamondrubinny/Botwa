@@ -125,3 +125,12 @@ cd /opt/botwa && ./scripts/backup.sh && git pull && docker compose up -d --build
 | ה-QR לא מופיע | `docker compose logs server`; ודאו שהשרת מגיע לרשת (`curl -I https://web.whatsapp.com`) |
 | "מנותק" אחרי יום-יומיים | המכשיר הוסר בטלפון, או שהחשבון נחסם. קשרו מחדש |
 | `Invalid configuration` | `docker compose logs server` מציג איזה משתנה סביבה חסר |
+
+## Adding another app under the same domain (nginx)
+The installer writes `/etc/nginx/conf.d/botwa-<domain>.conf` again on every update, so do not edit it by hand.
+Put your own additions for that domain (for example another app under `/test/`) in `/etc/botwa/nginx-extra/*.conf`: that folder is included in the domain's server block and is never overwritten.
+
+```bash
+sudo ln -s /etc/suboard/nginx-location.conf /etc/botwa/nginx-extra/suboard.conf   # example: an app's own location file
+sudo nginx -t && sudo systemctl reload nginx
+```

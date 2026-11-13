@@ -207,7 +207,10 @@ setup_nginx() { # reverse proxy for DOMAIN -> 127.0.0.1:3000, with Let's Encrypt
     }
 LOC
   }
-  { printf 'server {\n    %s\n    server_name %s;\n' "$listen80" "$names"; printf '    location /.well-known/acme-challenge/ { root /var/www/letsencrypt; }\n'; locs; printf '}\n'; } | $SUDO tee "$conf" >/dev/null
+  # /etc/botwa/nginx-extra/*.conf: the operator's own additions for this domain (e.g. another app under /test/). This file is
+  # rewritten on every update, so additions belong there and survive. A pattern that matches no file is fine for nginx.
+  $SUDO mkdir -p /etc/botwa/nginx-extra
+  { printf 'server {\n    %s\n    server_name %s;\n' "$listen80" "$names"; printf '    location /.well-known/acme-challenge/ { root /var/www/letsencrypt; }\n'; printf '    include /etc/botwa/nginx-extra/*.conf;\n'; locs; printf '}\n'; } | $SUDO tee "$conf" >/dev/null
   $SUDO mkdir -p /var/www/letsencrypt
   if ! $SUDO nginx -t >/dev/null 2>&1; then $SUDO rm -f "$conf"; warn "nginx config test failed - removed $conf, nothing changed. Add the proxy rule manually (see docs/DEPLOY.md)"; return; fi
   $SUDO systemctl reload nginx && ok "nginx: HTTP proxy for $dom added ($conf)"
