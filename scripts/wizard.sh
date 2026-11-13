@@ -193,7 +193,9 @@ else
   if [ "${BOTWA_LOCAL_LLM:-}" = 1 ]; then LOCALLLM=y
   else yesno LOCALLLM "Install a local AI model so the bot words answers from the knowledge base (no external service; needs ~4-8 GB RAM, ~5 GB disk)?" "n"; fi
   if [ "$LOCALLLM" = y ]; then
-    bash scripts/enable-local-llm.sh || warn "The local model was not installed (see the message above). Botwa works without it; try later: bash scripts/enable-local-llm.sh"
+    bash scripts/enable-local-llm.sh || warn "The local model was not installed (see the message above). Botwa works without it; try later: sudo bash scripts/enable-local-llm.sh"
+  else
+    ok "Local model not installed (Enter = no). To install it any time: cd $(pwd) && sudo bash scripts/enable-local-llm.sh"
   fi
 fi
 
