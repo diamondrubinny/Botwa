@@ -1,6 +1,7 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { api, ApiError, can, FORM_AUDIENCES, FORM_FIELD_TYPES, FORM_STATUS, type FormRequestRow, type FormTemplate, type Me } from '../api';
 import { FormEditor } from '../components/FormEditor';
+import { BatchPanel, Batches } from '../components/FormBatch';
 import { PageTitle } from '../components/Illustration';
 import { errText } from '../strings';
 
@@ -12,6 +13,8 @@ export function Forms({ me }: { me: Me }) {
   const manager = can(me, 'forms.manage');
   const [tab, setTab] = useState<'sent' | 'templates' | 'verify'>('sent');
   const [editing, setEditing] = useState<string | null>(null);
+  const [batchFor, setBatchFor] = useState<FormTemplate | null>(null);
+  const [focusBatch, setFocusBatch] = useState<string | null>(null);
   const tabs: [typeof tab, string][] = [['sent', 'טפסים שנשלחו'], ...(manager ? [['templates', 'תבניות'] as [typeof tab, string]] : []), ['verify', 'בדיקת קובץ חתום']];
   return (
     <>
@@ -20,14 +23,15 @@ export function Forms({ me }: { me: Me }) {
         {tabs.map(([k, l]) => <button key={k} className="chip" aria-pressed={tab === k} onClick={() => { setTab(k); setEditing(null); }}>{l}</button>)}
       </div>
       {editing ? <FormEditor templateId={editing} onClose={() => setEditing(null)} />
-        : tab === 'templates' ? <Templates onEdit={setEditing} />
+        : batchFor ? <BatchPanel tpl={batchFor} onClose={() => setBatchFor(null)} onDone={(id) => { setFocusBatch(id); setBatchFor(null); setTab('sent'); }} />
+        : tab === 'templates' ? <Templates onEdit={setEditing} onBatch={setBatchFor} />
         : tab === 'verify' ? <VerifyFile />
-        : <Sent />}
+        : <>{manager && <Batches focus={focusBatch} />}<Sent /></>}
     </>
   );
 }
 
-function Templates({ onEdit }: { onEdit: (id: string) => void }) {
+function Templates({ onEdit, onBatch }: { onEdit: (id: string) => void; onBatch: (t: FormTemplate) => void }) {
   const [list, setList] = useState<FormTemplate[]>([]);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [busy, setBusy] = useState(false);
@@ -36,8 +40,9 @@ function Templates({ onEdit }: { onEdit: (id: string) => void }) {
   const [file, setFile] = useState<File | null>(null);
   const [pageUrl, setPageUrl] = useState(SAFETY_FORMS_PAGE);
   const [found, setFound] = useState<{ url: string; title: string; kind: 'pdf' | 'word'; imported: boolean }[] | null>(null);
+  const [word, setWord] = useState<{ word: boolean; installed: boolean } | null>(null);
   const load = async () => setList(await api<FormTemplate[]>('GET', '/forms/templates').catch(() => []));
-  useEffect(() => { void load(); }, []);
+  useEffect(() => { void load(); void api<{ word: boolean; installed: boolean }>('GET', '/forms/converter').then(setWord).catch(() => setWord(null)); }, []);
   const fail = (e: unknown) => setMsg({ ok: false, text: errText(e instanceof ApiError ? e.code : 'generic') });
 
   async function upload(e: FormEvent) {
@@ -85,6 +90,7 @@ function Templates({ onEdit }: { onEdit: (id: string) => void }) {
                   {!t.fields.some((f) => f.type === 'signature' || f.type === 'initials') && <div className="hint warn-text">אין בתבנית שדה חתימה.</div>}</div>
                 <div className="row">
                   <button type="button" onClick={() => onEdit(t.id)}>עריכת שדות<span className="sr-only"> {t.title}</span></button>
+                  {t.active && t.fields.length > 0 && <button type="button" onClick={() => onBatch(t)}>שליחה לקבוצה<span className="sr-only"> {t.title}</span></button>}
                   <a className="btn-link" href={`/forms/templates/${t.id}/source.pdf`} target="_blank" rel="noopener">המקור<span className="sr-only"> של {t.title}</span></a>
                   <button type="button" onClick={() => void toggle(t)}>{t.active ? 'כיבוי' : 'הפעלה'}<span className="sr-only"> {t.title}</span></button>
                   {!t.requests && <button type="button" className="danger" onClick={() => void del(t)}>מחיקה<span className="sr-only"> {t.title}</span></button>}
@@ -96,9 +102,12 @@ function Templates({ onEdit }: { onEdit: (id: string) => void }) {
       </section>
 
       <form className="card" onSubmit={upload} aria-labelledby="fu-h">
-        <h2 id="fu-h">תבנית חדשה מקובץ PDF</h2>
-        <p className="hint">המערכת מזהה לבד שדות לפי הכיתוב בטופס (שם, ת.ז., תאריך, טלפון, חתימה, קווים ריקים), ואחר כך מתקנים בעורך. קבצי Word: המירו ל-PDF (שמירה בשם ← PDF) לפני ההעלאה.</p>
-        <div className="field"><label htmlFor="fu-file">קובץ PDF (עד 10MB)</label><input id="fu-file" type="file" accept="application/pdf,.pdf" required onChange={(e) => setFile(e.target.files?.[0] ?? null)} /></div>
+        <h2 id="fu-h">תבנית חדשה מקובץ {word?.word ? 'PDF או Word' : 'PDF'}</h2>
+        <p className="hint">המערכת מזהה לבד שדות לפי הכיתוב בטופס (שם, ת.ז., תאריך, טלפון, חתימה, קווים ריקים), ואחר כך מתקנים בעורך.{' '}
+          {word?.word ? 'קובץ Word (docx) מומר ל-PDF בממיר המבודד בשרת לפני היצירה.'
+            : word?.installed ? 'ממיר ה-Word מותקן אבל לא עונה כרגע. בינתיים אפשר להעלות PDF.'
+            : 'קבצי Word: המירו ל-PDF (שמירה בשם ← PDF), או התקינו בשרת את ממיר ה-Word: sudo bash scripts/enable-office.sh'}</p>
+        <div className="field"><label htmlFor="fu-file">קובץ {word?.word ? 'PDF או Word (docx)' : 'PDF'} (עד 10MB)</label><input id="fu-file" type="file" accept={word?.word ? 'application/pdf,.pdf,.docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document' : 'application/pdf,.pdf'} required onChange={(e) => setFile(e.target.files?.[0] ?? null)} /></div>
         <div className="field"><label htmlFor="fu-title">שם הטופס</label><input id="fu-title" maxLength={120} value={title} onChange={(e) => setTitle(e.target.value)} placeholder="ריק = לפי שם הקובץ" /></div>
         <fieldset><legend>למי הטופס מיועד (לא חובה)</legend>
           <div className="row">{Object.entries(FORM_AUDIENCES).map(([k, v]) => <label key={k} style={{ fontWeight: 400 }}><input type="checkbox" style={{ width: 'auto', minHeight: 'auto' }} checked={aud.includes(k)} onChange={(e) => setAud((l) => (e.target.checked ? [...l, k] : l.filter((x) => x !== k)))} /> {v}</label>)}</div></fieldset>
@@ -119,8 +128,8 @@ function Templates({ onEdit }: { onEdit: (id: string) => void }) {
               <li key={f.url}>
                 <span>{f.title} <span className="mchip">{f.kind === 'pdf' ? 'PDF' : 'Word'}</span></span>
                 {f.imported ? <span className="mchip ok-chip">יובא</span>
-                  : f.kind === 'pdf' ? <button type="button" disabled={busy} onClick={() => void importOne(f, i)}>ייבוא<span className="sr-only"> {f.title}</span></button>
-                  : <span className="hint">Word: הורידו, שמרו כ-PDF והעלו למעלה</span>}
+                  : f.kind === 'pdf' || word?.word ? <button type="button" disabled={busy} onClick={() => void importOne(f, i)}>ייבוא<span className="sr-only"> {f.title}</span></button>
+                  : <span className="hint">Word: צריך את ממיר ה-Word בשרת, או להמיר ל-PDF ולהעלות למעלה</span>}
               </li>
             ))}
           </ul>

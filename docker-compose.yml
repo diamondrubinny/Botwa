@@ -25,7 +25,7 @@ services:
       BACKUP_DIR: /data/backups
       MODEL_DIR: /data/models
       CLAMAV_HOST: ${CLAMAV_HOST:-}   # set to "clamav" (and run with --profile media) to enable attachments
-    networks: [default, webrender]
+    networks: [default, webrender, officenet]
     volumes: [media:/data/media, backups:/data/backups, models:/data/models]     # quarantine/ + clean/ attachment storage (not web-accessible)
     depends_on: { db: { condition: service_healthy } }
     healthcheck:
@@ -92,6 +92,20 @@ services:
       retries: 5
       start_period: 30s
 
+  # Optional Word -> PDF converter for digital forms: `bash scripts/enable-office.sh`. LibreOffice in a locked-down container on an
+  # internal network with no way out (it cannot reach the internet or the database); it keeps nothing and never runs macros.
+  office:
+    build: { context: apps/office-converter }
+    profiles: ["office"]
+    restart: unless-stopped
+    networks: [officenet]
+    read_only: true
+    tmpfs: ["/tmp:size=512m"]
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    mem_limit: 1g
+    pids_limit: 200
+
   caddy:
     image: caddy:2
     # Built-in HTTPS reverse proxy. Skipped (not in COMPOSE_PROFILES) when an existing nginx fronts Botwa: see docker-compose.external.yml
@@ -109,6 +123,7 @@ services:
 
 networks:
   webrender: {}
+  officenet: { internal: true }   # the server and the Word converter only; no route out
 
 volumes:
   ollama:

@@ -185,6 +185,20 @@ done; echo
 [ -n "$healthy" ] || { $DOCKER compose logs --tail=40 server; die "App did not become healthy. Fix the error above and re-run: docker compose up -d --build"; }
 ok "App is healthy"
 
+# ---------- optional: Word files for digital forms ----------
+if grep -qE '^COMPOSE_PROFILES=(.*,)?office(,|$)' .env; then
+  ok "Word converter for forms: on (kept as is)"
+else
+  OFFICE=n
+  if [ "${BOTWA_OFFICE:-}" = 1 ]; then OFFICE=y
+  else yesno OFFICE "Allow Word (.docx) forms? Installs an isolated converter (~1 GB disk)" "n"; fi
+  if [ "$OFFICE" = y ]; then
+    bash scripts/enable-office.sh || warn "The Word converter was not installed (see above). PDF forms work without it; try later: sudo bash scripts/enable-office.sh"
+  else
+    ok "Word converter not installed (Enter = no). PDF forms work; to add Word any time: cd $(pwd) && sudo bash scripts/enable-office.sh"
+  fi
+fi
+
 # ---------- optional: local language model for the bot's answers ----------
 if grep -qE '^COMPOSE_PROFILES=(.*,)?llm(,|$)' .env; then
   ok "Local language model: on (kept as is)"

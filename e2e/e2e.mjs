@@ -603,6 +603,18 @@ check('reactions: a thank-you gets a heart automatically, in the widget and in t
   check('forms: the editor moves a field with the keyboard and saves', true);
   await page.click('.form-editor button:has-text("סגירה")');
   await axe('forms: templates');
+  // one form to a group: the people pasted from a spreadsheet; whoever never wrote gets a link to pass on, not an unsolicited message
+  await page.click('.form-tpls li:has-text("הצהרת בטיחות למבקר") button:has-text("שליחה לקבוצה")');
+  await page.waitForSelector('#fb-p');
+  await page.fill('#fb-p', 'רון קבלן\t053-9990001\nמיכל עובדת\t053-9990002');
+  await axe('forms: send to a group');
+  await page.click('section[aria-labelledby="fb-h"] button:has-text("שליחה ל-2 אנשים")');
+  await page.waitForSelector('section[aria-labelledby="fbl-h"] li:has-text("הצהרת בטיחות למבקר")', { timeout: 20000 });
+  await page.waitForSelector('section[aria-labelledby="fbl-h"] table tbody tr', { timeout: 20000 });
+  await page.waitForFunction(() => !document.querySelector('section[aria-labelledby="fbl-h"] tbody')?.textContent?.includes('בתור'), null, { timeout: 30000 }).catch(() => undefined);
+  { const d = await page.$$eval('section[aria-labelledby="fbl-h"] tbody td:nth-child(3)', (tds) => tds.map((x) => x.textContent ?? ''));
+    check('forms: a group gets personal links; nobody who never wrote is messaged out of the blue', d.length === 2 && d.every((x) => x.startsWith('קישור להעברה')), JSON.stringify(d)); }
+  await axe('forms: group report');
   // send it from the website-chat conversation
   await page.click('aside.sidebar nav >> text=שיחות');
   await page.click('.conv-list button:has-text("דנה מהאתר")');
@@ -715,7 +727,7 @@ check('GIF library: the 12 built-in GIFs are there (e.g. "בטיחות קודם!
 // seed an inbound conversation directly (adapter can't reach WhatsApp here)
 const ch = psql("SELECT id FROM channels LIMIT 1");
 psql(`INSERT INTO contacts (channel_id, external_id, display_name) VALUES ('${ch}','972501234567@s.whatsapp.net','יוסי לקוח')`);
-psql(`INSERT INTO conversations (channel_id, contact_id, unread_count) SELECT '${ch}', id, 2 FROM contacts`);
+psql(`INSERT INTO conversations (channel_id, contact_id, unread_count) SELECT '${ch}', id, 2 FROM contacts WHERE external_id = '972501234567@s.whatsapp.net'`);
 psql(`INSERT INTO messages (conversation_id, direction, body, external_id) SELECT id, 'in', 'היי, צריך עזרה בהזמנה', 'x1' FROM conversations`);
 
 // same customer (same phone) also writing on a second WhatsApp channel

@@ -55,6 +55,8 @@ const schema = z.object({
   SEMANTIC_SEARCH: z.enum(['off', 'local']).default('off'),
   /** Optional local language model (Ollama API on this server) that words the bot's answers from knowledge-base passages only.
    *  Empty = not available (the bot quotes the passage). Never an external service. */
+  /** Optional Word -> PDF converter for digital forms (apps/office-converter, set by scripts/enable-office.sh). Empty = PDF only. */
+  OFFICE_CONVERTER_URL: z.string().trim().default('').refine((v) => v === '' || /^https?:\/\/[\w.-]+(:\d{1,5})?\/?$/.test(v), 'OFFICE_CONVERTER_URL must be like http://office:8090'),
   LOCAL_LLM_URL: z.string().trim().default('').refine((v) => v === '' || /^https?:\/\/[\w.-]+(:\d{1,5})?\/?$/.test(v), 'LOCAL_LLM_URL must be like http://ollama:11434'),
   LOCAL_LLM_MODEL: z.string().trim().max(100).regex(/^[\w.:/-]*$/).default('qwen2.5:7b-instruct'),
   LOCAL_LLM_TIMEOUT_MS: z.coerce.number().int().min(3000).max(120_000).default(30_000),

@@ -69,8 +69,14 @@ async function prefillValues(db: Db, fields: Field[], conv: ConvInfo, userId: st
   return out;
 }
 
-/** Creates a request for one conversation and sends its personal link there. Returns the request (and the link, for the panel). */
-export async function sendRequest(db: Db, cfg: Config, out: Sender, a: { templateId: string; conversationId: string; userId: string; days: number; values?: Record<string, string>; batchId?: string | null; note?: string }): Promise<{ id: string; number: number; url: string; messageId: string }> {
+/** The message that carries a personal link. */
+export function linkMessage(name: string | null, title: string, url: string, expires: Date, note?: string): string {
+  return [`${name ? `שלום ${name}, ` : 'שלום, '}נשלח אליך הטופס "${title}" למילוי וחתימה דיגיטלית:`, url,
+    `הקישור אישי ובתוקף עד ${dateHe(expires)}. לפני החתימה יישלח לכאן קוד אימות.`, note?.trim() ?? ''].filter(Boolean).join('\n');
+}
+
+/** A request for one conversation, without sending anything (group sending decides how each one is delivered). */
+export async function createRequest(db: Db, cfg: Config, a: { templateId: string; conversationId: string; userId: string; days: number; values?: Record<string, string>; batchId?: string | null; keepLink?: boolean }): Promise<{ id: string; number: number; url: string; expires: Date; title: string; conv: ConvInfo }> {
   const t = await getTemplate(db, a.templateId);
   if (!t || !t.active) throw new Error('template_not_found');
   if (!t.fields.length) throw new Error('template_has_no_fields');
@@ -81,23 +87,29 @@ export async function sendRequest(db: Db, cfg: Config, out: Sender, a: { templat
   const pre = { ...(await prefillValues(db, t.fields, conv, a.userId)), ...Object.fromEntries(Object.entries(a.values ?? {}).filter(([k, v]) => t.fields.some((f) => f.id === k) && typeof v === 'string' && v.length <= 300)) };
   const token = `f_${randomBytes(24).toString('base64url')}`;
   const expires = new Date(Date.now() + a.days * 86_400_000);
-  const r = (await db.query(
-    `INSERT INTO form_requests (template_id, template_sha256, fields, conversation_id, signer_name, signer_phone, token_hash, prefill, expires_at, sent_by, batch_id)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING id, number`,
-    [t.id, t.sha256, JSON.stringify(t.fields), conv.id, conv.display_name, conv.external_id.split('@')[0], tokenHash(token), JSON.stringify(pre), expires, a.userId, a.batchId ?? null])).rows[0];
   const url = publicUrl(cfg, token);
-  const text = [`${conv.display_name ? `שלום ${conv.display_name}, ` : 'שלום, '}נשלח אליך הטופס "${t.title}" למילוי וחתימה דיגיטלית:`, url,
-    `הקישור אישי ובתוקף עד ${dateHe(expires)}. לפני החתימה יישלח לכאן קוד אימות.`, a.note?.trim() ?? ''].filter(Boolean).join('\n');
+  const r = (await db.query(
+    `INSERT INTO form_requests (template_id, template_sha256, fields, conversation_id, signer_name, signer_phone, token_hash, prefill, expires_at, sent_by, batch_id, link_enc, delivery)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING id, number`,
+    [t.id, t.sha256, JSON.stringify(t.fields), conv.id, conv.display_name, conv.external_id.split('@')[0], tokenHash(token), JSON.stringify(pre), expires, a.userId, a.batchId ?? null,
+      a.keepLink ? encrypt(url, cfg.ENCRYPTION_KEY) : null, a.batchId ? 'queued' : null])).rows[0];
+  return { id: r.id, number: Number(r.number), url, expires, title: t.title, conv };
+}
+
+/** Creates a request for one conversation and sends its personal link there. Returns the request (and the link, for the panel). */
+export async function sendRequest(db: Db, cfg: Config, out: Sender, a: { templateId: string; conversationId: string; userId: string; days: number; values?: Record<string, string>; batchId?: string | null; note?: string }): Promise<{ id: string; number: number; url: string; messageId: string }> {
+  const r = await createRequest(db, cfg, a);
+  const text = linkMessage(r.conv.display_name, r.title, r.url, r.expires, a.note);
   let sent: { externalMessageId?: string };
-  try { sent = await out.sendText(conv.channel_id, conv.external_id, text); } catch (e) {
+  try { sent = await out.sendText(r.conv.channel_id, r.conv.external_id, text); } catch (e) {
     await db.query('DELETE FROM form_requests WHERE id = $1', [r.id]);
     throw e;
   }
-  const m = await db.query(`INSERT INTO messages (conversation_id, direction, body, external_id, sender_user_id) VALUES ($1,'out',$2,$3,$4) RETURNING id`, [conv.id, text, sent.externalMessageId ?? null, a.userId]);
-  await db.query(`UPDATE conversations SET last_message_at = now(), assigned_to = COALESCE(assigned_to, $2), bot_state = 'human' WHERE id = $1`, [conv.id, a.userId]);
-  await event(db, r.id, 'sent', `נשלח ע"י משתמש, בתוקף עד ${dateHe(expires)}`);
-  out.notifyMessage(conv.channel_id, conv.id, m.rows[0].id);
-  return { id: r.id, number: Number(r.number), url, messageId: m.rows[0].id };
+  const m = await db.query(`INSERT INTO messages (conversation_id, direction, body, external_id, sender_user_id) VALUES ($1,'out',$2,$3,$4) RETURNING id`, [r.conv.id, text, sent.externalMessageId ?? null, a.userId]);
+  await db.query(`UPDATE conversations SET last_message_at = now(), assigned_to = COALESCE(assigned_to, $2), bot_state = 'human' WHERE id = $1`, [r.conv.id, a.userId]);
+  await event(db, r.id, 'sent', `נשלח ע"י משתמש, בתוקף עד ${dateHe(r.expires)}`);
+  out.notifyMessage(r.conv.channel_id, r.conv.id, m.rows[0].id);
+  return { id: r.id, number: r.number, url: r.url, messageId: m.rows[0].id };
 }
 
 export async function event(db: Db, requestId: string, kind: string, detail?: string): Promise<void> {

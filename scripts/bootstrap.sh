@@ -30,6 +30,6 @@ $SUDO mkdir -p "$DEST"
 $SUDO tar xzf "$tmp" --strip-components=1 -C "$DEST"
 cd "$DEST"
 [ -f setup.sh ] || { echo "Archive does not look like Botwa (setup.sh missing)" >&2; exit 1; }
-# options passed through sudo (which drops the environment): BOTWA_LOCAL_LLM=1 installs the local language model without asking
-pass=(); [ -n "${BOTWA_LOCAL_LLM:-}" ] && pass=(env "BOTWA_LOCAL_LLM=$BOTWA_LOCAL_LLM")
+# options passed through sudo (which drops the environment): BOTWA_LOCAL_LLM=1 / BOTWA_OFFICE=1 install the local model / the Word converter without asking
+pass=(env); [ -n "${BOTWA_LOCAL_LLM:-}" ] && pass+=("BOTWA_LOCAL_LLM=$BOTWA_LOCAL_LLM"); [ -n "${BOTWA_OFFICE:-}" ] && pass+=("BOTWA_OFFICE=$BOTWA_OFFICE")
 if has_tty; then exec $SUDO "${pass[@]}" bash setup.sh </dev/tty; else exec $SUDO "${pass[@]}" bash setup.sh; fi

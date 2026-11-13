@@ -14,6 +14,8 @@ import { detect, sanitizeFileName } from '../media/validate.js';
 import { can } from '../permissions.js';
 import { loadBrand } from './branding.js';
 import { AUDIENCES, fieldsSchema } from '../forms/schema.js';
+import { remindBatch, startBatch } from '../forms/batch.js';
+import { decrypt } from '../crypto.js';
 import { byToken, createTemplate, decryptValues, event, getTemplate, keyOk, listTemplates, markOpened, sendOtp, sendRequest, sha256, signedPdf, submit, verifyOtp, type PublicReq } from '../forms/service.js';
 
 const MAX_PDF = 10 * 1024 * 1024;
@@ -33,19 +35,39 @@ export function formRoutes(app: FastifyInstance, db: Db, mgr: ChannelManager, cf
   const manage = requireAuth(db, 'forms.manage');
   const canSeeAll = (u: AuthUser) => can(u, 'forms.manage') || isManager(u);
 
-  /** A PDF from an upload or a link: by content, antivirus, then the template (pages and suggested fields). */
-  async function intake(buf: Buffer, name: string): Promise<{ ok: true } | { ok: false; code: number; error: string }> {
+  const DOCX = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+  const converter = cfg.OFFICE_CONVERTER_URL.replace(/\/$/, '');
+  /**
+   * A form file from an upload or a link: checked by content and by the antivirus; a Word document is turned into a PDF by the
+   * isolated converter (when it is installed). Returns the PDF to make the template from.
+   */
+  async function intake(buf: Buffer, name: string): Promise<{ ok: true; pdf: Buffer; name: string } | { ok: false; code: number; error: string }> {
     if (buf.length > MAX_PDF) return { ok: false, code: 413, error: 'file_too_large' };
     const d = await detect(buf);
-    if (d?.mime !== 'application/pdf') return { ok: false, code: 415, error: /\.docx?$/i.test(name) ? 'word_needs_converter' : 'pdf_only' };
+    const word = d?.mime === DOCX;
+    if (d?.mime !== 'application/pdf' && !word) return { ok: false, code: 415, error: /\.docx?$/i.test(name) ? 'word_old_format' : 'pdf_only' };
+    if (word && !converter) return { ok: false, code: 415, error: 'word_needs_converter' };
     const scan = await media.scanBuffer(buf);
     if (scan.status === 'infected') return { ok: false, code: 422, error: 'file_infected' };
     if (scan.status !== 'clean') return { ok: false, code: 503, error: 'scanner_unavailable' };
-    return { ok: true };
+    if (!word) return { ok: true, pdf: buf, name };
+    try {
+      const res = await fetch(`${converter}/convert`, { method: 'POST', headers: { 'content-type': 'application/octet-stream' }, body: new Uint8Array(buf), signal: AbortSignal.timeout(120_000) });
+      const pdf = Buffer.from(await res.arrayBuffer());
+      if (!res.ok || pdf.subarray(0, 4).toString() !== '%PDF' || pdf.length > 4 * MAX_PDF) return { ok: false, code: 422, error: 'convert_failed' };
+      return { ok: true, pdf, name: name.replace(/\.docx?$/i, '') + '.pdf' };
+    } catch { return { ok: false, code: 503, error: 'converter_unavailable' }; }
   }
   const tplMeta = z.object({ title: z.string().trim().min(1).max(120), description: z.string().trim().max(1000).default(''), audience: z.array(z.enum(AUDIENCES)).max(5).default([]) });
 
   // ---- templates ----
+  /** Can Word files be used (the converter is installed and answering)? */
+  app.get('/forms/converter', { preHandler: any }, async () => {
+    if (!converter) return { word: false, installed: false };
+    const ok = await fetch(`${converter}/health`, { signal: AbortSignal.timeout(3000) }).then((r) => r.ok).catch(() => false);
+    return { word: ok, installed: true };
+  });
+
   app.get('/forms/templates', { preHandler: any }, async () => (await listTemplates(db)).map((t) => ({ ...t, pages: t.pages.length })));
   app.get('/forms/templates/:id', { preHandler: any }, async (req, reply) => {
     const p = idParam.safeParse(req.params);
@@ -71,7 +93,7 @@ export function formRoutes(app: FastifyInstance, db: Db, mgr: ChannelManager, cf
     const ok = await intake(buf, part.filename);
     if (!ok.ok) return reply.code(ok.code).send({ error: ok.error });
     try {
-      const t = await createTemplate(db, { ...meta.data, pdf: buf, sourceName: sanitizeFileName(part.filename, 'form.pdf'), userId: req.user!.id });
+      const t = await createTemplate(db, { ...meta.data, title: meta.data.title.replace(/\.docx?$/i, ''), pdf: ok.pdf, sourceName: sanitizeFileName(ok.name, 'form.pdf'), userId: req.user!.id });
       await audit(db, { actorId: req.user!.id, action: 'forms.template_create', target: t.id, ip: req.ip, meta: { title: t.title, fields: t.fields.length } });
       return reply.code(201).send(t);
     } catch (e) { return reply.code(422).send({ error: (e as Error).message === 'too_many_pages' ? 'too_many_pages' : 'pdf_unreadable' }); }
@@ -106,11 +128,11 @@ export function formRoutes(app: FastifyInstance, db: Db, mgr: ChannelManager, cf
     const b = z.object({ url: z.string().url().max(2000) }).merge(tplMeta).safeParse(req.body);
     if (!b.success) return reply.code(400).send({ error: 'bad_request' });
     let got;
-    try { checkUrl(b.data.url); got = await safeGet(b.data.url, { maxBytes: MAX_PDF, accept: 'application/pdf,*/*;q=0.1' }); } catch { return reply.code(422).send({ error: 'fetch_failed' }); }
+    try { checkUrl(b.data.url); got = await safeGet(b.data.url, { maxBytes: MAX_PDF, accept: 'application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,*/*;q=0.1' }); } catch { return reply.code(422).send({ error: 'fetch_failed' }); }
     const ok = await intake(got.body, new URL(got.url).pathname);
     if (!ok.ok) return reply.code(ok.code).send({ error: ok.error });
     try {
-      const t = await createTemplate(db, { title: b.data.title, description: b.data.description, audience: b.data.audience, pdf: got.body, sourceName: decodeURIComponent(new URL(got.url).pathname.split('/').pop() ?? 'form.pdf'), sourceUrl: b.data.url, userId: req.user!.id });
+      const t = await createTemplate(db, { title: b.data.title, description: b.data.description, audience: b.data.audience, pdf: ok.pdf, sourceName: decodeURIComponent(ok.name.split('/').pop() ?? 'form.pdf'), sourceUrl: b.data.url, userId: req.user!.id });
       await audit(db, { actorId: req.user!.id, action: 'forms.template_create', target: t.id, ip: req.ip, meta: { title: t.title, from: b.data.url } });
       return reply.code(201).send(t);
     } catch (e) { return reply.code(422).send({ error: (e as Error).message === 'too_many_pages' ? 'too_many_pages' : 'pdf_unreadable' }); }
@@ -139,6 +161,56 @@ export function formRoutes(app: FastifyInstance, db: Db, mgr: ChannelManager, cf
     if (!r.rowCount) return reply.code(404).send({ error: 'not_found' });
     await audit(db, { actorId: req.user!.id, action: 'forms.template_delete', target: p.data.id, ip: req.ip });
     return { ok: true };
+  });
+
+  // ---- one form to a group (employees, contractors) ----
+  app.post('/forms/templates/:id/batch', { preHandler: manage, bodyLimit: 256 * 1024, config: { rateLimit: { max: 10, timeWindow: '10 minutes' } } }, async (req, reply) => {
+    const p = idParam.safeParse(req.params);
+    const b = z.object({
+      channelId: z.string().uuid(), days: z.number().int().min(1).max(60).default(14), note: z.string().max(300).optional(),
+      people: z.array(z.object({ name: z.string().trim().max(100).default(''), phone: z.string().trim().min(6).max(30) })).min(1).max(500),
+      waTemplate: z.object({ name: z.string().min(1).max(512), language: z.string().min(2).max(15) }).nullish(),
+    }).safeParse(req.body);
+    if (!p.success || !b.success) return reply.code(400).send({ error: 'bad_request' });
+    try {
+      const r = await startBatch(db, cfg, mgr, { templateId: p.data.id, channelId: b.data.channelId, userId: req.user!.id, days: b.data.days, note: b.data.note, people: b.data.people, waTemplate: b.data.waTemplate ?? null });
+      await audit(db, { actorId: req.user!.id, action: 'forms.batch', target: r.batchId, ip: req.ip, meta: { template: p.data.id, total: r.total, invalid: r.invalid.length } });
+      return reply.code(201).send(r);
+    } catch (e) {
+      const m = (e as Error).message;
+      if (['template_not_found', 'template_has_no_fields', 'channel_not_found', 'channel_type_unsupported', 'template_needs_official', 'no_valid_people'].includes(m)) return reply.code(409).send({ error: m });
+      throw e;
+    }
+  });
+
+  app.get('/forms/batches', { preHandler: manage }, async () => (await db.query(
+    `SELECT b.id, b.title, b.total, b.done, b.created_at AS "createdAt", ch.label AS "channelLabel", COALESCE(u.name_he, u.name) AS "createdBy",
+            count(r.id) FILTER (WHERE r.status = 'signed')::int AS signed,
+            count(r.id) FILTER (WHERE r.delivery IN ('sent','template'))::int AS delivered,
+            count(r.id) FILTER (WHERE r.delivery = 'link_only')::int AS "linkOnly",
+            count(r.id) FILTER (WHERE r.delivery = 'failed')::int AS failed,
+            count(r.id) FILTER (WHERE r.delivery = 'queued')::int AS queued
+       FROM form_batches b LEFT JOIN form_requests r ON r.batch_id = b.id LEFT JOIN channels ch ON ch.id = b.channel_id LEFT JOIN users u ON u.id = b.created_by
+      GROUP BY b.id, ch.label, u.name_he, u.name ORDER BY b.created_at DESC LIMIT 100`)).rows);
+
+  app.get('/forms/batches/:id', { preHandler: manage }, async (req, reply) => {
+    const p = idParam.safeParse(req.params);
+    if (!p.success) return reply.code(400).send({ error: 'bad_request' });
+    const rows = (await db.query(`SELECT r.id, r.number, r.signer_name AS "signerName", r.signer_phone AS "signerPhone", r.status, r.delivery, r.delivery_detail AS "deliveryDetail",
+        r.signed_at AS "signedAt", r.expires_at AS "expiresAt", r.reminded_at AS "remindedAt", r.link_enc FROM form_requests r WHERE r.batch_id = $1 ORDER BY r.number`, [p.data.id])).rows;
+    if (!rows.length) return reply.code(404).send({ error: 'not_found' });
+    // the personal links, so the staff can pass on those that could not be sent (forms managers only)
+    return rows.map(({ link_enc, ...r }) => ({ ...r, number: Number(r.number), link: link_enc && ['sent', 'opened', 'verified'].includes(r.status) ? decrypt(link_enc, cfg.ENCRYPTION_KEY) : null }));
+  });
+
+  app.post('/forms/batches/:id/remind', { preHandler: manage, config: { rateLimit: { max: 10, timeWindow: '10 minutes' } } }, async (req, reply) => {
+    const p = idParam.safeParse(req.params);
+    if (!p.success) return reply.code(400).send({ error: 'bad_request' });
+    try {
+      const r = await remindBatch(db, cfg, mgr, p.data.id, req.user!.id);
+      await audit(db, { actorId: req.user!.id, action: 'forms.remind', target: p.data.id, ip: req.ip, meta: r });
+      return r;
+    } catch (e) { if ((e as Error).message === 'not_found') return reply.code(404).send({ error: 'not_found' }); throw e; }
   });
 
   // ---- sending from a conversation ----
@@ -181,14 +253,15 @@ export function formRoutes(app: FastifyInstance, db: Db, mgr: ChannelManager, cf
   });
 
   app.get('/forms/requests', { preHandler: any }, async (req, reply) => {
-    const q = z.object({ templateId: z.string().uuid().optional(), status: z.enum(['sent', 'opened', 'verified', 'signed', 'expired', 'cancelled']).optional(), q: z.string().trim().max(80).optional(), limit: z.coerce.number().int().min(1).max(200).default(100), offset: z.coerce.number().int().min(0).default(0) }).safeParse(req.query);
+    const q = z.object({ batchId: z.string().uuid().optional(), templateId: z.string().uuid().optional(), status: z.enum(['sent', 'opened', 'verified', 'signed', 'expired', 'cancelled']).optional(), q: z.string().trim().max(80).optional(), limit: z.coerce.number().int().min(1).max(200).default(100), offset: z.coerce.number().int().min(0).default(0) }).safeParse(req.query);
     if (!q.success) return reply.code(400).send({ error: 'bad_request' });
     const like = q.data.q ? `%${q.data.q.replace(/[\\%_]/g, '\\$&')}%` : null;
     const rows = (await db.query(
       `SELECT ${REQ} ${REQ_FROM} WHERE ${VISIBLE} AND ($1::uuid IS NULL OR r.template_id = $1) AND ($4::text IS NULL OR r.status = $4)
          AND ($5::text IS NULL OR r.signer_name ILIKE $5 OR r.signer_phone ILIKE $5 OR t.title ILIKE $5 OR r.number::text = $6)
+         AND ($9::uuid IS NULL OR r.batch_id = $9)
        ORDER BY r.created_at DESC LIMIT $7 OFFSET $8`,
-      [q.data.templateId ?? null, canSeeAll(req.user!), req.user!.id, q.data.status ?? null, like, q.data.q ?? '', q.data.limit, q.data.offset])).rows;
+      [q.data.templateId ?? null, canSeeAll(req.user!), req.user!.id, q.data.status ?? null, like, q.data.q ?? '', q.data.limit, q.data.offset, q.data.batchId ?? null])).rows;
     return rows.map((r) => ({ ...r, number: Number(r.number) }));
   });
 

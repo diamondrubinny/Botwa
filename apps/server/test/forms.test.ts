@@ -207,3 +207,71 @@ describe('digital forms end to end', () => {
     expect((await call(null, 'GET', `/f/${tok2}/info`)).json().status).toBe('expired');
   });
 });
+
+describe('Word forms through the converter', () => {
+  it('without the converter a Word file is refused with a clear reason; with it, it becomes a template', async () => {
+    const JSZip = (await import('jszip')).default;
+    const z = new JSZip();
+    z.file('[Content_Types].xml', '<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="xml" ContentType="application/xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>');
+    z.file('_rels/.rels', '<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="r1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>');
+    z.file('word/document.xml', '<?xml version="1.0"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p><w:r><w:t>Name:</w:t></w:r></w:p></w:body></w:document>');
+    const docx = await z.generateAsync({ type: 'nodebuffer' });
+    const m = multipart(docx, { title: 'טופס וורד' }, 'form.docx');
+    expect((await call('admin@t.io', 'POST', '/forms/templates', m.body, m.headers)).json().error).toBe('word_needs_converter');
+    expect((await call('admin@t.io', 'GET', '/forms/converter')).json()).toEqual({ word: false, installed: false });
+
+    // a stand-in for apps/office-converter: answers /convert with a PDF
+    const { createServer } = await import('node:http');
+    const pdf = await samplePdf();
+    let got = 0;
+    const srv = createServer((req, res) => {
+      if (req.url === '/health') { res.end('ok'); return; }
+      const parts: Buffer[] = []; req.on('data', (c: Buffer) => parts.push(c)); req.on('end', () => { got = Buffer.concat(parts).length; res.setHeader('content-type', 'application/pdf'); res.end(pdf); });
+    });
+    await new Promise<void>((r) => srv.listen(0, '127.0.0.1', () => r()));
+    const port = (srv.address() as { port: number }).port;
+    const cfg2 = loadConfig({ NODE_ENV: 'test', DATABASE_URL: cfg.DATABASE_URL, ENCRYPTION_KEY: cfg.ENCRYPTION_KEY, APP_ORIGIN: ORIGIN, COOKIE_SECURE: 'false', REQUIRE_MFA_FOR_PRIVILEGED: 'false', MEDIA_ALLOW_UNSCANNED: 'true', OFFICE_CONVERTER_URL: `http://127.0.0.1:${port}` });
+    const app2 = await buildApp(cfg2, db, mgr);
+    try {
+      const r = await app2.inject({ method: 'POST', url: '/forms/templates', payload: m.body, headers: { ...m.headers, origin: ORIGIN, cookie: cookies['admin@t.io']! }, remoteAddress: '10.79.200.1' });
+      expect(r.statusCode).toBe(201);
+      expect(got).toBe(docx.length);                                                                  // the Word file went to the converter
+      expect(r.json()).toMatchObject({ title: 'טופס וורד', sourceName: 'form.pdf' });
+      expect(r.json().fields.length).toBe(3);                                                         // fields suggested from the converted PDF
+      expect((await app2.inject({ url: '/forms/converter', headers: { cookie: cookies['admin@t.io']! } })).json()).toEqual({ word: true, installed: true });
+    } finally { await app2.close(); srv.close(); }
+  });
+});
+
+describe('one form to a group', () => {
+  it('within the reply window the link is sent; otherwise it is kept for the staff to pass on; reminders once a day', async () => {
+    const tpl = (await call('admin@t.io', 'GET', '/forms/templates')).json().find((t: { title: string }) => t.title === 'הרשאת עבודה לקבלן');
+    const ch = (await db.query(`SELECT id FROM channels WHERE type = 'whatsapp' LIMIT 1`)).rows[0].id;
+    texts.length = 0;
+    const body = { channelId: ch, days: 7, people: [{ name: 'יוסי כהן', phone: '+972 50-000-0301' }, { name: 'קבלן חדש', phone: '052-111-1111' }, { name: 'שגוי', phone: 'abc123' }] };
+    expect((await call('ag@t.io', 'POST', `/forms/templates/${tpl.id}/batch`, body)).statusCode).toBe(403);
+    const r = await call('admin@t.io', 'POST', `/forms/templates/${tpl.id}/batch`, body);
+    expect(r.statusCode).toBe(201);
+    expect(r.json()).toMatchObject({ total: 2, invalid: [{ row: 3, value: 'abc123' }] });
+    const id = r.json().batchId;
+    for (let i = 0; i < 50 && !(await db.query('SELECT done FROM form_batches WHERE id = $1', [id])).rows[0].done; i++) await new Promise((x) => setTimeout(x, 50));
+    const rows = (await call('admin@t.io', 'GET', `/forms/batches/${id}`)).json() as { signerPhone: string; delivery: string; deliveryDetail: string | null; link: string | null }[];
+    const yossi = rows.find((x) => x.signerPhone === '972500000301')!, newbie = rows.find((x) => x.signerPhone === '972521111111')!;
+    expect(yossi.delivery).toBe('sent');                                         // wrote to us recently: a plain message
+    expect(newbie).toMatchObject({ delivery: 'link_only', deliveryDetail: 'outside_reply_window' });   // never wrote: not messaged out of the blue
+    expect(newbie.link).toMatch(/^https:\/\/panel\.test\/f\/f_/);               // the link is there to pass on
+    expect(texts.filter((t) => t.includes('הרשאת עבודה לקבלן'))).toHaveLength(1);
+    const list = (await call('admin@t.io', 'GET', '/forms/batches')).json();
+    expect(list[0]).toMatchObject({ total: 2, delivered: 1, linkOnly: 1, signed: 0, done: true });
+    // the new person's conversation stays out of the open inbox until they answer
+    expect((await db.query(`SELECT c.status FROM conversations c JOIN contacts ct ON ct.id = c.contact_id WHERE ct.external_id = '972521111111@s.whatsapp.net'`)).rows[0].status).toBe('closed');
+    texts.length = 0;
+    expect((await call('admin@t.io', 'POST', `/forms/batches/${id}/remind`)).json()).toEqual({ reminded: 1, skipped: 0 });
+    expect(texts[0]).toContain('תזכורת');
+    expect((await call('admin@t.io', 'POST', `/forms/batches/${id}/remind`)).json()).toEqual({ reminded: 0, skipped: 0 });   // not twice a day
+    expect((await call('admin@t.io', 'GET', `/forms/requests?batchId=${id}`)).json()).toHaveLength(2);
+    // a channel that cannot be addressed by phone is refused
+    const tg = (await call('admin@t.io', 'POST', '/channels', { type: 'webchat', label: 'אתר' })).json().id;
+    expect((await call('admin@t.io', 'POST', `/forms/templates/${tpl.id}/batch`, { ...body, channelId: tg })).json().error).toBe('channel_type_unsupported');
+  });
+});
