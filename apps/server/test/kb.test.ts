@@ -218,7 +218,7 @@ describe('knowledge base', () => {
   });
 
   it('the bot answers free-text questions from the base, hands over when unsure, and gaps are collected', async () => {
-    const bot: BotConfig = { ...DEFAULT_BOT, enabled: true, kb: { enabled: true, minScore: 0.6, maxChars: 700, showSource: true, intro: 'מצאתי:' } };
+    const bot: BotConfig = { ...DEFAULT_BOT, enabled: true, kb: { enabled: true, minScore: 0.6, maxChars: 700, showSource: true, intro: 'מצאתי:', answerMode: 'quote', outro: '' } };
     expect((await call('PUT', '/settings/bot', 'admin@t.io', bot)).statusCode).toBe(200);
     const first = await say('kc1', 'מתי אתם פתוחים?'); // very first message is answered, not met with the menu
     expect(first).toHaveLength(1);

@@ -184,7 +184,7 @@ export async function buildApp(cfg: Config, db: Db, mgr: ChannelManager, media: 
   securityRoutes(app, db, cfg, fw, media);
   avatarRoutes(app, db, kb);
   peopleRoutes(app, db);
-  flowRoutes(app, db, kb);
+  flowRoutes(app, db, kb, cfg);
   safetyRoutes(app, db, kb);
   brandingRoutes(app, db, kb);
   forwardRoutes(app, db, mgr, cfg);

@@ -1,4 +1,5 @@
 import { BotPersona } from '../components/BotPersona';
+import { AnswerMode } from '../components/AnswerMode';
 import { Loading } from '../components/Loading';
 import { PageTitle } from '../components/Illustration';
 import { useEffect, useState, type FormEvent } from 'react';
@@ -8,7 +9,7 @@ import { usePoll } from '../hooks';
 interface BotCfg {
   enabled: boolean; welcome: string; items: { title: string; answer: string; contact?: { name: string; phone: string; message: string }; route?: { userId: string; byArea?: boolean } }[]; humanOption: boolean; humanLabel: string;
   humanKeywords: string[]; humanMessage: string; invalidMessage: string; invalidRetries: number; footer: string; preview?: string; mode?: 'menu' | 'flow';
-  kb: { enabled: boolean; minScore: number; maxChars: number; showSource: boolean; intro: string };
+  kb: { enabled: boolean; minScore: number; maxChars: number; showSource: boolean; intro: string; answerMode?: 'quote' | 'local'; outro?: string };
   reactions?: { enabled: boolean; ackAll?: boolean; working: string; done: string; noAnswer: string; handoff: string; greeting?: string };
   catchupHours?: number;
   interactiveMenus?: boolean;
@@ -191,7 +192,7 @@ export function Bot({ me }: { me: Me }) {
 
         <fieldset className="card" disabled={!canEdit}>
           <legend>מענה ממאגר הידע</legend>
-          <p className="hint">הבוט עונה על שאלה חופשית מתוך המסמכים, הקישורים והשאלות והתשובות שב<a href="#/kb">מאגר הידע</a>. זה חיפוש מילים בשרת שלכם, בלי בינה מלאכותית ובלי לשלוח מידע החוצה. כשאין התאמה טובה הבוט ממשיך כרגיל (תפריט, ואז העברה לנציג).</p>
+          <p className="hint">הבוט עונה <strong>רק</strong> מתוך מה שיש ב<a href="#/kb">מאגר הידע</a>: מסמכים, חקיקה, תקנים, קישורים ושאלות ותשובות. כשאין התאמה בטוחה, הבוט לא מנחש: הוא ממשיך כרגיל (תפריט, ואז העברה לנציג). שום מידע לא נשלח לשירות חיצוני.</p>
           <div className="field">
             <label><input type="checkbox" role="switch" style={{ width: 'auto', minHeight: 'auto' }} checked={b.kb.enabled} onChange={(e) => set({ kb: { ...b.kb, enabled: e.target.checked } })} /> לאפשר מענה ממאגר הידע</label>
           </div>
@@ -207,6 +208,11 @@ export function Bot({ me }: { me: Me }) {
           <div className="field">
             <label htmlFor="b-kmc">אורך תשובה מרבי (תווים)</label>
             <input id="b-kmc" type="number" min={200} max={1500} step={50} value={b.kb.maxChars} onChange={(e) => set({ kb: { ...b.kb, maxChars: Number(e.target.value) } })} />
+          </div>
+          <AnswerMode mode={b.kb.answerMode ?? 'quote'} canEdit={canEdit} onChange={(m) => set({ kb: { ...b.kb, answerMode: m } })} />
+          <div className="field">
+            <label htmlFor="b-kout">שורת סיום מתחת לתשובה (ריק = בלי)</label>
+            <input id="b-kout" maxLength={200} value={b.kb.outro ?? ''} onChange={(e) => set({ kb: { ...b.kb, outro: e.target.value } })} />
           </div>
           <div className="field">
             <label><input type="checkbox" style={{ width: 'auto', minHeight: 'auto' }} checked={b.kb.showSource} onChange={(e) => set({ kb: { ...b.kb, showSource: e.target.checked } })} /> להציג את המקור (כתובת או שם המסמך) מתחת לתשובה</label>

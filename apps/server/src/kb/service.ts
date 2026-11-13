@@ -542,7 +542,7 @@ export class KnowledgeBase {
   }
 
   /** The answer the bot may give: only a confident match (coverage over a threshold and at least two matching words, or an exact FAQ question). */
-  async answer(question: string, s: AnswerSettings, audience: 'bot' | 'staff' = 'bot', via: 'bot' | 'staff' | 'test' = 'bot'): Promise<(Hit & { text: string }) | null> {
+  async answer(question: string, s: AnswerSettings, audience: 'bot' | 'staff' = 'bot', via: 'bot' | 'staff' | 'test' = 'bot'): Promise<(Hit & { text: string; passage?: string; note?: string; others?: Hit[] }) | null> {
     const hits = await this.search(question, { audience, limit: 3 });
     const top = hits[0];
     // customers' reactions: an answer they keep marking unhelpful is only offered, not given; a well-liked one needs a little less evidence
@@ -554,18 +554,18 @@ export class KnowledgeBase {
     const src = (await this.db.query('SELECT kind, body, origin FROM kb_sources WHERE id = $1', [top.sourceId])).rows[0];
     // a FAQ answer is shown whole; documents give the most relevant passage
     const text = src?.kind === 'faq' && src.body ? src.body.slice(0, s.maxChars) : bestSnippet(top.snippet, queryTokens(question), s.maxChars);
-    return { ...top, text: withLegalNote(text, top, src?.origin) };
+    return { ...top, text: withLegalNote(text, top, src?.origin), passage: text, note: withLegalNote('', top, src?.origin).trim(), others: hits.slice(1).filter((h) => isConfident(h, undefined, s.minScore)) };
   }
 
   /** The formatted passage of one chosen source for a question (used when the customer picks a "did you mean" suggestion). */
-  async answerFor(sourceId: string, question: string, s: AnswerSettings): Promise<(Hit & { text: string }) | null> {
+  async answerFor(sourceId: string, question: string, s: AnswerSettings): Promise<(Hit & { text: string; passage?: string; note?: string; others?: Hit[] }) | null> {
     const hits = await this.search(question, { audience: 'bot', limit: 8 });
     const hit = hits.find((h) => h.sourceId === sourceId);
     if (!hit) return null;
     await this.db.query('UPDATE kb_sources SET uses = uses + 1 WHERE id = $1', [sourceId]);
     const src = (await this.db.query('SELECT kind, body, origin FROM kb_sources WHERE id = $1', [sourceId])).rows[0];
     const text = src?.kind === 'faq' && src.body ? src.body.slice(0, s.maxChars) : bestSnippet(hit.snippet, queryTokens(question), s.maxChars);
-    return { ...hit, text: withLegalNote(text, hit, src?.origin) };
+    return { ...hit, text: withLegalNote(text, hit, src?.origin), passage: text, note: withLegalNote('', hit, src?.origin).trim() };
   }
 
   async logQuery(text: string, via: 'bot' | 'staff' | 'test', answered: boolean, score: number | null, sourceId: string | null): Promise<void> {

@@ -794,3 +794,6 @@ button.linkish { min-height: 36px; padding: 0 .2rem; border: 0; background: none
 .case-msg.out { background: color-mix(in srgb, var(--accent) 8%, var(--surface)); }
 .case-msg small { color: var(--muted); }
 @media (max-width: 520px) { .case-row { grid-template-columns: auto 1fr; } .case-meta { grid-column: 1 / -1; justify-items: start; grid-auto-flow: column; justify-content: start; gap: .5rem; } }
+.answer-mode fieldset label { display: flex; gap: .5rem; align-items: center; min-height: 40px; font-weight: 600; }
+.answer-preview { margin-top: .5rem; padding: .7rem .9rem; border-radius: 12px; border: 1px solid var(--border); background: var(--surface-2); }
+.answer-text { white-space: pre-wrap; margin: .3rem 0 0; }

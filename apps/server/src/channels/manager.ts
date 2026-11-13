@@ -32,6 +32,8 @@ import { TelegramAdapter } from './telegram.js';
 import { CLOUD_CREDS_KEY, newVerifyToken, WhatsAppCloudAdapter, type CloudCreds } from './whatsapp-cloud.js';
 import { EMAIL_CREDS_KEY, EmailAdapter, type EmailCreds } from './email.js';
 import { thankForFeedback } from '../automations.js';
+import { composeAnswer, type KbAnswer } from '../kb/compose.js';
+import { loadPersona } from '../routes/branding.js';
 import { isCommentContact, META_CREDS_KEY, MetaMessagingAdapter, type CommentReplyMode, type MetaCreds } from './meta-messaging.js';
 import { WebChatAdapter } from './webchat.js';
 import { WhatsAppAdapter } from './whatsapp.js';
@@ -658,6 +660,12 @@ export class ChannelManager {
     }
   }
 
+  /** The knowledge-base answer in the chosen wording: the passage itself, or a local model's wording of the passages only. */
+  async wordAnswer(bot: BotConfig, question: string, a: KbAnswer): Promise<string> {
+    const name = (await loadPersona(this.db).catch(() => null))?.name || 'העוזר/ת';
+    return composeAnswer({ url: this.cfg.LOCAL_LLM_URL, model: this.cfg.LOCAL_LLM_MODEL, timeoutMs: this.cfg.LOCAL_LLM_TIMEOUT_MS }, bot, question, a, name);
+  }
+
   /** Menu bot: answer, or hand over to a person (assign via routing, leave a note, away notice outside hours). */
   /** A confident knowledge-base answer for a free-text message, formatted for the customer; null when unsure (then the normal menu flow applies). */
   private async kbAnswer(bot: BotConfig, state: string | null, text: string | null, inFlow = false, onSearch?: () => Promise<void>, onFound?: (sourceId: string) => void): Promise<string | null> {
@@ -672,7 +680,7 @@ export class ChannelManager {
       const a = await this.kb.answer(t, { minScore: bot.kb.minScore, maxChars: bot.kb.maxChars });
       if (!a) return null;
       onFound?.(a.sourceId);
-      return [bot.kb.intro, a.text, bot.kb.showSource ? `מקור: ${a.url ?? a.title}` : ''].filter(Boolean).join('\n\n');
+      return await this.wordAnswer(bot, t, a);
     } catch { return null; }
   }
 
@@ -860,7 +868,7 @@ export class ChannelManager {
           // the customer's own wording led to this entry: a new wording for it (applied when a person approves)
           if (learnNorm(q) !== learnNorm(a.title)) void recordLearn(this.db, this.kb, { kind: 'variant', target: id, sourceId: id, text: q, conversationId: convId }).catch(() => undefined);
         }
-        return a ? [bot.kb.intro, a.text, bot.kb.showSource ? `מקור: ${a.url ?? a.title}` : ''].filter(Boolean).join('\n\n') : null;
+        return a ? this.wordAnswer(bot, q, a) : null;
       },
     };
     const r = await runFlow(flow, st, input, ctx, bot.humanLabel);

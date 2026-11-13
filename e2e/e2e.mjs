@@ -198,6 +198,7 @@ await page.click('button:has-text("בטי, הבוט של יחידת הבטיחו
 await page.waitForSelector('.persona-face img', { timeout: 15000 }).catch(() => undefined);
 check('bot identity: Betty is set with her picture and the word "בוט"', await page.isVisible('.persona-face img') && (await page.textContent('.persona-preview strong')) === 'בטי (בוט)');
 await axe('bot settings: identity');
+check('bot answers: choice between a quote and a local model, with the model status', await page.isVisible('text=אופן הניסוח של התשובה') && await page.isVisible('text=מודל מקומי לא הוגדר בשרת'));
 await page.reload();
 await page.waitForSelector('#bt2');
 check('bot settings persisted (3 items, enabled)', (await page.inputValue('#bt2')) === 'משלוחים' && (await page.isChecked('text=הפעלת הבוט')));
@@ -461,7 +462,6 @@ await page.click('li.card:has-text("האתר שלנו") >> button:has-text("הג
 await page.waitForSelector('textarea[id^="wc-code-"]');
 const embed = await page.inputValue('textarea[id^="wc-code-"]');
 check('widget: embed code shown', /<script src="http:\/\/localhost:3077\/widget\.js" data-key="wc_[\w-]+" async><\/script>/.test(embed), embed);
-await page.fill('textarea[id^="wc-org-"]', 'http://localhost:4010');
 await page.selectOption('select[id^="wc-askName-"]', 'required');
 await page.fill('input[id^="wc-cons-"]', 'אני מאשר את מדיניות הפרטיות');
 await page.click('button:has-text("הוספת כפתור")');
@@ -469,6 +469,7 @@ await page.fill('input[id^="wc-soc-"][id$="-sh-0"]', '972501234567');
 await page.click('button:has-text("הוספת כפתור")');
 await page.fill('input[id^="wc-soc-"][id$="-sh-1"]', 'my.shop');
 await axe('widget settings panel');
+await page.fill('textarea[id^="wc-org-"]', 'http://localhost:4010');
 { const v = await page.inputValue('textarea[id^="wc-org-"]'); const n = await page.locator('textarea[id^="wc-org-"]').count(); check('widget: allowed site is still in the field before saving', v === 'http://localhost:4010', JSON.stringify({ v, n, panels: await page.locator('textarea[id^="wc-code-"]').count() })); }
 await page.click('button:has-text("שמירה והפעלה")');
 await page.waitForSelector('text=נשמר, והערוץ פעיל.');
@@ -890,7 +891,7 @@ await page.fill('#pk-name', 'מכשיר וירטואלי');
 await page.click('button:has-text("הוספת Passkey")');
 await page.waitForSelector('text=ה-Passkey נוסף.');
 await page.waitForSelector('li:has-text("מכשיר וירטואלי")');
-await page.setInputFiles(`#av-${(await (await page.request.get(BASE + '/auth/me')).json()).id}`, { name: 'me.png', mimeType: 'image/png', buffer: png });
+await page.setInputFiles(`#av-${(await page.evaluate(() => fetch('/auth/me', { credentials: 'same-origin' }).then((r) => r.json()))).id}`, { name: 'me.png', mimeType: 'image/png', buffer: png });
 await page.waitForSelector('text=התמונה עודכנה.');
 await page.waitForSelector('aside.sidebar .me-card img.avatar-img');
 check('account: profile picture uploaded and shown in the side menu', true);

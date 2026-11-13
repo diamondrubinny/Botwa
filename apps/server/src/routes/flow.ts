@@ -12,6 +12,9 @@ import { listOfficers } from '../safety/officers.js';
 import { flowSchema, unfinished, unreachable, validateFlow, type Flow } from '../flow/schema.js';
 import { loadFlow, saveFlow } from '../flow/store.js';
 import type { KnowledgeBase } from '../kb/service.js';
+import { composeAnswer, llmStatus, localAnswer, quoteAnswer } from '../kb/compose.js';
+import type { Config } from '../config.js';
+import { loadPersona } from './branding.js';
 import { resolveArea } from '../safety/areas.js';
 import { loadBusinessHours } from './settings.js';
 
@@ -21,7 +24,23 @@ const stateSchema = z.object({
   list: z.object({ items: z.array(z.string().max(200)).max(20), phase: z.enum(['item', 'more']) }).optional(),
 });
 
-export function flowRoutes(app: FastifyInstance, db: Db, kb: KnowledgeBase) {
+export function flowRoutes(app: FastifyInstance, db: Db, kb: KnowledgeBase, cfg?: Config) {
+  const llm = { url: cfg?.LOCAL_LLM_URL ?? '', model: cfg?.LOCAL_LLM_MODEL ?? '', timeoutMs: cfg?.LOCAL_LLM_TIMEOUT_MS ?? 30_000 };
+  const botName = async () => (await loadPersona(db).catch(() => null))?.name || 'העוזר/ת';
+  // the local model for the bot's wording: is it there, and how does it answer a sample question (managers only)
+  app.get('/settings/bot/llm', { preHandler: requireAuth(db, 'bot.view') }, async () => llmStatus(llm));
+  app.post('/settings/bot/llm-test', { preHandler: requireAuth(db, 'bot.manage'), config: { rateLimit: { max: 10, timeWindow: '1 minute' } } }, async (req, reply) => {
+    const b = z.object({ question: z.string().trim().min(3).max(500), mode: z.enum(['quote', 'local']) }).safeParse(req.body);
+    if (!b.success) return reply.code(400).send({ error: 'bad_request' });
+    const bot = await loadBot(db);
+    const a = await kb.answer(b.data.question, { minScore: bot.kb.minScore, maxChars: bot.kb.maxChars }, 'bot', 'test').catch(() => null);
+    if (!a) return { found: false, answer: null };
+    const tuned = { ...bot, kb: { ...bot.kb, answerMode: b.data.mode } };
+    const started = Date.now();
+    const local = b.data.mode === 'local' ? await localAnswer(llm, tuned, b.data.question, a, await botName()) : null;
+    return { found: true, source: a.title, mode: b.data.mode, usedModel: !!local, ms: Date.now() - started, answer: local ?? quoteAnswer(tuned, a) };
+  });
+
   const view = requireAuth(db, 'bot.view');
   const manage = requireAuth(db, 'bot.manage');
 
@@ -97,7 +116,7 @@ export function flowRoutes(app: FastifyInstance, db: Db, kb: KnowledgeBase) {
     const r = await runFlow(flow, b.data.state as FlowState | null, { text: b.data.text, media: b.data.media }, {
       isOpen: b.data.open ?? (!hours.enabled || isOpen(hours, new Date())), channelType: b.data.channel,
       humanKeywords: bot.humanKeywords, humanOption: bot.humanOption, invalidRetries: bot.invalidRetries, invalidMessage: bot.invalidMessage,
-      kbAnswer: async (t) => { const a = await kb.answer(t, { minScore: bot.kb.minScore, maxChars: bot.kb.maxChars }, 'bot', 'test').catch(() => null); return a ? [bot.kb.intro, a.text].filter(Boolean).join('\n\n') : null; },
+      kbAnswer: async (t) => { const a = await kb.answer(t, { minScore: bot.kb.minScore, maxChars: bot.kb.maxChars }, 'bot', 'test').catch(() => null); return a ? composeAnswer(llm, bot, t, a, await botName()) : null; },
       matchOption: (t, o) => kb.matchOption(t, o),
       resolveArea: (t) => resolveArea(db, t),
     }, bot.humanLabel);

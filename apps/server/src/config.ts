@@ -53,6 +53,11 @@ const schema = z.object({
   ANDROID_APP_SHA256: z.string().default('').refine((v) => v.split(',').map((x) => x.trim()).filter(Boolean).every((x) => /^([0-9A-F]{2}:){31}[0-9A-F]{2}$/i.test(x)), 'ANDROID_APP_SHA256 must be colon-separated SHA-256 fingerprints'),
   /** "Meaning" search with a local model (needs the optional runtime: build with WITH_SEMANTIC=1). off = keyword search only. */
   SEMANTIC_SEARCH: z.enum(['off', 'local']).default('off'),
+  /** Optional local language model (Ollama API on this server) that words the bot's answers from knowledge-base passages only.
+   *  Empty = not available (the bot quotes the passage). Never an external service. */
+  LOCAL_LLM_URL: z.string().trim().default('').refine((v) => v === '' || /^https?:\/\/[\w.-]+(:\d{1,5})?\/?$/.test(v), 'LOCAL_LLM_URL must be like http://ollama:11434'),
+  LOCAL_LLM_MODEL: z.string().trim().max(100).regex(/^[\w.:/-]*$/).default('qwen2.5:7b-instruct'),
+  LOCAL_LLM_TIMEOUT_MS: z.coerce.number().int().min(3000).max(120_000).default(30_000),
   SEMANTIC_MODEL: z.string().regex(/^[\w.-]+\/[\w.-]+$/).default('Xenova/multilingual-e5-small'),
   MODEL_DIR: z.string().default('./data/models'),
   /**

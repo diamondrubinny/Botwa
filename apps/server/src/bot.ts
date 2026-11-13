@@ -63,7 +63,11 @@ export const botSchema = z.object({
     maxChars: z.number().int().min(200).max(1500),
     showSource: z.boolean(),
     intro: z.string().trim().max(120),
-  }).default({ enabled: false, minScore: 0.6, maxChars: 700, showSource: true, intro: 'מצאתי את זה במאגר המידע שלנו:' }),
+    /** how the answer is worded: quote = the passage itself (no AI); local = a local model words it from the passages only */
+    answerMode: z.enum(['quote', 'local']).default('quote'),
+    /** a closing line under every knowledge-base answer (empty = none) */
+    outro: z.string().trim().max(200).default('אם צריך הבהרה או עזרה נוספת, אפשר לכתוב כאן, או לבקש נציג.'),
+  }).default({ enabled: false, minScore: 0.6, maxChars: 700, showSource: true, intro: 'מצאתי את זה במאגר המידע שלנו:', answerMode: 'quote', outro: 'אם צריך הבהרה או עזרה נוספת, אפשר לכתוב כאן, או לבקש נציג.' }),
   /** automatic emoji reactions on the customer's message: "working" while the bot searches, then "done" / "noAnswer", or "handoff" when a person takes over */
   reactions: z.object({ enabled: z.boolean(), /** react to every message the bot handles (not only to searches) */ ackAll: z.boolean().default(false), working: emoji, done: emoji, noAnswer: emoji, handoff: emoji, /** a greeting (שלום, היי…) gets this reaction and nothing else; empty = none */ greeting: emoji.default('👋') }).default(() => ({ ...DEFAULT_REACTIONS })),
   /** a customer message the bot could not answer (channel down, sending failed) is answered when the channel is back, up to this many hours later (0 = never) */
@@ -88,7 +92,7 @@ export const DEFAULT_BOT: BotConfig = {
   invalidMessage: 'לא הבנתי את הבחירה.',
   invalidRetries: 1,
   footer: 'לחזרה לתפריט שלחו "תפריט". לנציג שלחו "נציג".',
-  kb: { enabled: false, minScore: 0.6, maxChars: 700, showSource: true, intro: 'מצאתי את זה במאגר המידע שלנו:' },
+  kb: { enabled: false, minScore: 0.6, maxChars: 700, showSource: true, intro: 'מצאתי את זה במאגר המידע שלנו:', answerMode: 'quote', outro: 'אם צריך הבהרה או עזרה נוספת, אפשר לכתוב כאן, או לבקש נציג.' },
   reactions: { ...DEFAULT_REACTIONS },
   catchupHours: 12,
   interactiveMenus: true,
