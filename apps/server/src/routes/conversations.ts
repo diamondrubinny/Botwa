@@ -39,7 +39,7 @@ export function conversationRoutes(app: FastifyInstance, db: Db, mgr: ChannelMan
       `SELECT c.id, c.channel_id AS "channelId", c.status, c.assigned_to AS "assignedTo", c.unread_count AS "unreadCount",
               c.last_message_at AS "lastMessageAt", ct.display_name AS "contactName", ct.external_id AS "contactId", ct.id AS "contactRowId", ct.blocked AS "blocked", ct.opted_out AS "optedOut", ct.blocked_reason AS "blockedReason",
               ch.label AS "channelLabel", c.last_message_at AS "lastActivity",
-              c.bot_state AS "botState", c.snoozed_until AS "snoozedUntil",
+              c.bot_state AS "botState", c.snoozed_until AS "snoozedUntil", c.assigned_at AS "assignedAt",
               EXISTS (SELECT 1 FROM conversation_stars cs WHERE cs.conversation_id = c.id AND cs.user_id = $3) AS "starred",
               (SELECT CASE WHEN lm.direction = 'in' AND c.status = 'open' AND c.bot_state IS DISTINCT FROM 'menu' THEN lm.created_at END
                  FROM messages lm WHERE lm.conversation_id = c.id AND NOT lm.auto ORDER BY lm.created_at DESC LIMIT 1) AS "waitingSince",

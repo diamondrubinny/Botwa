@@ -661,6 +661,17 @@ await page.waitForSelector('.chat-pane h2:has-text("לקוח משני")');
 check('opening related conversation works', true);
 await page.click('.conv-list button:has-text("יוסי לקוח")');
 await page.waitForSelector('.chat-pane h2:has-text("יוסי לקוח")');
+// who handles the inquiry: one labelled state in the header and on the list row (here nobody yet)
+{ const head = await page.textContent('.chat-head .mchip.handler'); const row = await page.textContent('.conv-list button:has-text("יוסי לקוח") .mchip.handler');
+  check('who handles it: a clear state in the header and in the list', /מי מטפל בפנייה/.test(head) && /(ממתינה לנציג\/ה|בטיפולך|מטפל\/ת)/.test(head) && head.replace(/ · .*/, '') === row, JSON.stringify({ head, row })); }
+await page.click('.inbox-adv summary');
+await page.selectOption('#lp-h', 'waiting');
+await page.waitForTimeout(200);
+{ const rows = await page.locator('.conv-list li').count(); const waiting = await page.locator('.conv-list .mchip.h-waiting').count();
+  check('filter by handler: only inquiries waiting for a person', rows > 0 && rows === waiting, JSON.stringify({ rows, waiting })); }
+await axe('inbox: filter by handler');
+await page.selectOption('#lp-h', '');
+await page.click('.inbox-adv summary');
 await page.selectOption('#canned', { label: 'ברכה' });
 await page.waitForFunction(() => document.querySelector('#reply')?.value.includes('איך אפשר לעזור'), null, { timeout: 5000 }).catch(() => {});
 check('canned reply inserted', (await page.inputValue('#reply')).includes('איך אפשר לעזור'));

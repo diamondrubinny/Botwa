@@ -29,7 +29,7 @@ export type ChannelKind = 'whatsapp' | 'whatsapp_cloud' | 'telegram' | 'webchat'
 export const CHANNEL_NAMES: Record<ChannelKind, string> = { whatsapp: 'ווצאפ', whatsapp_cloud: 'ווצאפ רשמי (Cloud API)', telegram: 'טלגרם', webchat: 'צ׳אט באתר', messenger: 'Messenger (פייסבוק)', instagram: 'Instagram', email: 'אימייל' };
 export interface Channel { id: string; type: ChannelKind; label: string; status: string }
 export interface Conversation {
-  id: string; channelId: string; status: 'open' | 'closed'; assignedTo: string | null; assignedName: string | null;
+  id: string; channelId: string; status: 'open' | 'closed'; assignedTo: string | null; assignedName: string | null; assignedAt?: string | null;
   unreadCount: number; lastMessageAt: string; contactName: string | null; contactId: string; contactRowId: string;
   channelLabel: string; channelType: string; lastMessage: string | null; waitingSince: string | null; botState: 'menu' | 'human' | 'area' | null; blocked?: boolean; optedOut?: boolean; blockedReason?: string | null; tags: Tag[]; snoozedUntil?: string | null; starred?: boolean;
 }

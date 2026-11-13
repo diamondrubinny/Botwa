@@ -4,6 +4,7 @@ import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { api, ApiError, can, personLabel, upload, type Attachment, type Canned, type Conversation, type Me, type Message, type Note, type RelatedConv, type Tag, type UserRow } from '../api';
 import { EmojiPicker, GifPicker, motionOff, type GifItem } from '../components/Pickers';
 import { ReactionControl } from '../components/Reactions';
+import { HandlerChip, handlerOf, type HandlerKind } from '../components/Handler';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { PersonPanel } from '../components/PersonPanel';
 import { CaseHistory } from '../components/CaseHistory';
@@ -101,18 +102,25 @@ export function Inbox({ me }: { me: Me }) {
   const [tpls, setTpls] = useState<{ name: string; language: string; body: string; params: number; category: string }[]>([]);
   const [tp, setTp] = useState<{ key: string; values: string[]; msg: string } | null>(null);
   // list preferences, kept in this browser: sort order, channel, and "only unread / only waiting for an answer"
-  const [lp, setLp] = useState<{ sort: 'recent' | 'waiting' | 'unread'; channel: string; unreadOnly: boolean; waitingOnly: boolean }>(() => {
-    try { const v = JSON.parse(localStorage.getItem('botwa_inbox_prefs') ?? '{}') as Partial<{ sort: string; channel: string; unreadOnly: boolean; waitingOnly: boolean }>; return { sort: v.sort === 'waiting' || v.sort === 'unread' ? v.sort : 'recent', channel: v.channel ?? '', unreadOnly: !!v.unreadOnly, waitingOnly: !!v.waitingOnly }; } catch { return { sort: 'recent', channel: '', unreadOnly: false, waitingOnly: false }; }
+  const [lp, setLp] = useState<{ sort: 'recent' | 'waiting' | 'unread'; channel: string; handler: string; unreadOnly: boolean; waitingOnly: boolean }>(() => {
+    try { const v = JSON.parse(localStorage.getItem('botwa_inbox_prefs') ?? '{}') as Partial<{ sort: string; channel: string; handler: string; unreadOnly: boolean; waitingOnly: boolean }>; return { sort: v.sort === 'waiting' || v.sort === 'unread' ? v.sort : 'recent', channel: v.channel ?? '', handler: typeof v.handler === 'string' ? v.handler : '', unreadOnly: !!v.unreadOnly, waitingOnly: !!v.waitingOnly }; } catch { return { sort: 'recent', channel: '', handler: '', unreadOnly: false, waitingOnly: false }; }
   });
   const setPref = (p: Partial<typeof lp>) => setLp((x) => { const n = { ...x, ...p }; try { localStorage.setItem('botwa_inbox_prefs', JSON.stringify(n)); } catch { /* storage unavailable */ } return n; });
 
   const channels = [...new Set(convs.map((c) => c.channelLabel))];
+  // who handles it: a state (mine / waiting for a person / the bot / closed) or one person (u:<id>)
+  const handlers = [...new Map(convs.filter((c) => c.assignedTo && c.assignedTo !== me.id).map((c) => [c.assignedTo!, c.assignedName ?? 'נציג/ה'])).entries()].sort((a, b) => a[1].localeCompare(b[1], 'he'));
+  const matchHandler = (c: Conversation) => {
+    if (!lp.handler) return true;
+    if (lp.handler.startsWith('u:')) return c.assignedTo === lp.handler.slice(2);
+    return handlerOf(c, me.id, '').kind === (lp.handler as HandlerKind);
+  };
   const view = convs
-    .filter((c) => (!lp.channel || c.channelLabel === lp.channel) && (!lp.unreadOnly || c.unreadCount > 0) && (!lp.waitingOnly || !!c.waitingSince))
+    .filter((c) => (!lp.channel || c.channelLabel === lp.channel) && matchHandler(c) && (!lp.unreadOnly || c.unreadCount > 0) && (!lp.waitingOnly || !!c.waitingSince))
     .sort((a, b) => lp.sort === 'waiting' ? (a.waitingSince ? new Date(a.waitingSince).getTime() : Infinity) - (b.waitingSince ? new Date(b.waitingSince).getTime() : Infinity)
       : lp.sort === 'unread' ? (b.unreadCount > 0 ? 1 : 0) - (a.unreadCount > 0 ? 1 : 0) || new Date(b.lastMessageAt).getTime() - new Date(a.lastMessageAt).getTime()
       : 0);
-  const advActive = lp.sort !== 'recent' || !!lp.channel || lp.unreadOnly || lp.waitingOnly;
+  const advActive = lp.sort !== 'recent' || !!lp.channel || !!lp.handler || lp.unreadOnly || lp.waitingOnly;
   // approved message templates, for the official WhatsApp channel (the way to write to someone after the 24-hour window)
   useEffect(() => {
     setTpls([]); setTp(null);
@@ -334,10 +342,16 @@ export function Inbox({ me }: { me: Me }) {
                 <select id="lp-sort" value={lp.sort} onChange={(e) => setPref({ sort: e.target.value as typeof lp.sort })}><option value="recent">אחרונות קודם</option><option value="waiting">ממתינות הכי הרבה זמן</option><option value="unread">לא נקראו קודם</option></select></div>
               <div className="field"><label htmlFor="lp-ch">ערוץ</label>
                 <select id="lp-ch" value={lp.channel} onChange={(e) => setPref({ channel: e.target.value })}><option value="">כל הערוצים</option>{channels.map((c) => <option key={c} value={c}>{c}</option>)}</select></div>
+              <div className="field"><label htmlFor="lp-h">מי מטפל</label>
+                <select id="lp-h" value={lp.handler} onChange={(e) => setPref({ handler: e.target.value })}>
+                  <option value="">כולם</option><option value="me">בטיפולי</option><option value="waiting">ממתינות לנציג/ה</option><option value="bot">{brand.bot?.name || 'הבוט'} מטפל/ת</option><option value="agent">בטיפול נציג/ה אחר/ת</option>
+                  {handlers.map(([id, name]) => <option key={id} value={`u:${id}`}>{name}</option>)}
+                  {lp.handler.startsWith('u:') && !handlers.some(([id]) => `u:${id}` === lp.handler) && <option value={lp.handler}>נציג/ה שנבחר/ה</option>}
+                </select></div>
             </div>
             <label className="row" style={{ fontWeight: 400 }}><input type="checkbox" style={{ width: 'auto', minHeight: 'auto' }} checked={lp.unreadOnly} onChange={(e) => setPref({ unreadOnly: e.target.checked })} /> רק עם הודעות שלא נקראו</label>
             <label className="row" style={{ fontWeight: 400 }}><input type="checkbox" style={{ width: 'auto', minHeight: 'auto' }} checked={lp.waitingOnly} onChange={(e) => setPref({ waitingOnly: e.target.checked })} /> רק שממתינות לתשובה שלנו</label>
-            {advActive && <button type="button" onClick={() => setPref({ sort: 'recent', channel: '', unreadOnly: false, waitingOnly: false })}>ניקוי הסינון המתקדם</button>}
+            {advActive && <button type="button" onClick={() => setPref({ sort: 'recent', channel: '', handler: '', unreadOnly: false, waitingOnly: false })}>ניקוי הסינון המתקדם</button>}
           </details>
           {view.length === 0 ? (convs.length === 0
             ? <EmptyState art="inbox" title="אין שיחות להצגה" size={170}>כשלקוח יכתוב בווצאפ, בטלגרם או בצ׳אט באתר, השיחה תופיע כאן.</EmptyState>
@@ -357,8 +371,7 @@ export function Inbox({ me }: { me: Me }) {
                         </span>
                         <span className="conv-meta">
                           <span className={`mchip ch-${c.channelType}`}>{c.channelLabel}</span>
-                          <span className={`mchip${c.assignedName ? '' : ' muted'}`}>{c.assignedName ?? 'לא משויך'}</span>
-                          {(c.botState === 'menu' || c.botState === 'area') && <span className="mchip bot">הבוט מטפל</span>}
+                          <HandlerChip c={c} meId={me.id} botName={brand.bot?.name || 'הבוט'} />
                           {c.tags.slice(0, 2).map((t) => <span key={t.id} className="mchip tag">{t.name}</span>)}
                           {c.tags.length > 2 && <span className="mchip tag">+{c.tags.length - 2}<span className="sr-only"> תגיות נוספות</span></span>}
                           {w && <span className={`mchip wait${w.late ? ' late' : ''}`}>{w.late && <span className="sr-only">חריגה מיעד המענה: </span>}{w.text}</span>}
@@ -382,8 +395,7 @@ export function Inbox({ me }: { me: Me }) {
                   <h2>{nameOf(sel)}</h2>
                   <small className="conv-meta head-meta">
                     <span className={`mchip ch-${sel.channelType}`}>{sel.channelLabel}</span>
-                    <span className={`mchip${sel.assignedName ? '' : ' muted'}`}>{sel.assignedName ?? 'לא משויך'}</span>
-                    {sel.status === 'closed' && <span className="mchip muted">סגורה</span>}
+                    <HandlerChip c={sel} meId={me.id} botName={brand.bot?.name || 'הבוט'} withSince />
                     {isComment && <span className="mchip comment">תגובה ציבורית על פוסט</span>}
                     {related.length > 0 && <span className="mchip person">עוד {related.length} {related.length === 1 ? 'ערוץ' : 'ערוצים'} של אותו אדם</span>}
                   </small>

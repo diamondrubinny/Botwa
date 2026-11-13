@@ -38,6 +38,7 @@ export function CaseHistory({ convId, refresh }: { convId: string; refresh: numb
                 </span>
                 <span className="case-meta">
                   <span className={`mchip ${c.closedAt ? '' : 'case-open'}`}>{!c.closedAt ? 'פתוחה' : c.closeKind === 'auto' ? 'נסגרה אוטומטית' : c.closeKind === 'customer' ? 'נסגרה לבקשת הלקוח' : c.closedByName ? `נסגרה ע״י ${c.closedByName}` : 'נסגרה'}</span>
+                  <span className={`mchip${c.assignedName ? '' : ' muted'}`}><span className="sr-only">מי טיפל: </span>{c.assignedName ? `${c.closedAt ? 'טיפל/ה' : 'מטפל/ת'}: ${c.assignedName}` : 'בלי נציג/ה'}</span>
                   {c.closedAt && <small>משך: {dur(c.openedAt, c.closedAt)}</small>}
                   {c.rating && <span className="case-rating" aria-label={`דירוג ${c.rating} מתוך 5`}><span aria-hidden="true">{'★'.repeat(c.rating)}{'☆'.repeat(5 - c.rating)}</span></span>}
                 </span>
