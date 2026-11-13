@@ -1,5 +1,6 @@
 // Small inline icon set (stroke icons, decorative: the visible/aria text always carries the meaning).
 const P: Record<string, string> = {
+  pen: 'M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z',
   chat: 'M21 12a8 8 0 0 1-11.7 7.1L4 20l1-4.2A8 8 0 1 1 21 12z',
   bot: 'M12 3v3M7 9h10a3 3 0 0 1 3 3v4a3 3 0 0 1-3 3H7a3 3 0 0 1-3-3v-4a3 3 0 0 1 3-3zM9 14h.01M15 14h.01M2 13v2M22 13v2',
   chart: 'M4 20V10M10 20V4M16 20v-7M22 20H2',

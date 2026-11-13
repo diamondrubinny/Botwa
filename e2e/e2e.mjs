@@ -578,6 +578,66 @@ await chat.locator('.msg.me:has-text("אתם אחלה") .rx:has-text("❤️")')
 await page.waitForSelector('.msg.in:has-text("אתם אחלה") button.rx-badge:has-text("❤️")', { timeout: 15000 });
 check('reactions: a thank-you gets a heart automatically, in the widget and in the inbox', true);
 
+// digital forms, end to end through the website chat: a template from a PDF, sent from the conversation, the code arrives in the chat,
+// the visitor fills and signs on their own device, a signed copy comes back and the inbox shows it as signed
+{ const { PDFDocument, StandardFonts } = createRequire(import.meta.url)('pdf-lib');
+  const d = await PDFDocument.create(); const pg = d.addPage([595, 842]); const font = await d.embedFont(StandardFonts.Helvetica);
+  pg.drawText('Visitor safety declaration', { x: 170, y: 780, size: 16, font }); pg.drawText('Name:', { x: 480, y: 700, size: 11, font }); pg.drawText('Date:', { x: 480, y: 670, size: 11, font }); pg.drawText('Signature:', { x: 470, y: 600, size: 11, font });
+  const pdf = Buffer.from(await d.save());
+  await page.click('aside.sidebar nav >> text=טפסים');
+  await page.waitForSelector('text=טפסים שנשלחו');
+  await axe('forms: sent');
+  await page.click('.chips button:has-text("תבניות")');
+  await page.setInputFiles('#fu-file', { name: 'declaration.pdf', mimeType: 'application/pdf', buffer: pdf });
+  await page.fill('#fu-title', 'הצהרת בטיחות למבקר');
+  await page.click('button:has-text("יצירת תבנית")');
+  await page.waitForSelector('.fe-page canvas', { timeout: 30000 });
+  await page.waitForSelector('.fe-field');
+  check('forms: a PDF becomes a template with suggested fields (name, date, signature) on its rendered page', (await page.locator('.fe-field').count()) === 3, String(await page.locator('.fe-field').count()));
+  await axe('forms: editor');
+  await page.locator('.fe-field.t-text').focus();
+  await page.keyboard.press('ArrowLeft');
+  await page.fill('#fe-l', 'שם מלא');
+  await page.click('.form-editor button:has-text("שמירה")');
+  await page.waitForSelector('.form-editor [role=status].ok');
+  check('forms: the editor moves a field with the keyboard and saves', true);
+  await page.click('.form-editor button:has-text("סגירה")');
+  await axe('forms: templates');
+  // send it from the website-chat conversation
+  await page.click('aside.sidebar nav >> text=שיחות');
+  await page.click('.conv-list button:has-text("דנה מהאתר")');
+  await page.click('button:has-text("שליחת טופס לחתימה")');
+  await page.waitForSelector('#sf-t');
+  await axe('inbox: send a form');
+  await page.click('#send-form button[type=submit]');
+  await page.waitForSelector('#send-form [role=status].ok');
+  const link = await chat.locator('.msg.them:has-text("הצהרת בטיחות למבקר") a').getAttribute('href', { timeout: 15000 });
+  check('forms: the personal link reaches the visitor in the chat', /\/f\/f_[\w-]+$/.test(link ?? ''), link ?? '');
+  const fp = await visitorCtx.newPage();
+  await fp.setViewportSize({ width: 390, height: 844 });
+  await fp.goto(link);
+  await fp.click('button:has-text("שליחת קוד אימות לצ׳אט")');
+  await chat.locator('.msg.them:has-text("קוד האימות")').waitFor({ timeout: 15000 });
+  const code = (await chat.locator('.msg.them:has-text("קוד האימות")').last().textContent()).match(/(\d{6})/)[1];
+  check('forms: the inbox never shows the code itself', !(await page.textContent('.messages')).includes(code));
+  await fp.fill('#code', code);
+  await fp.click('form button.primary');
+  await fp.waitForSelector('canvas.pad');
+  { await fp.evaluate(axeSrc); const r = await fp.evaluate(() => axe.run(document, { runOnly: ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'] }));
+    check('axe: form fill page (phone)', r.violations.length === 0, r.violations.map((v) => `${v.id}: ${v.nodes[0].html.slice(0, 80)}`).join(' | ')); }
+  for (const el of await fp.locator('form input[type=text]:visible').all()) await el.fill('דנה כהן');
+  await fp.fill('form input[type=date]', '2026-11-20');
+  await fp.click('button:has-text("הקלדת שם במקום ציור")');
+  await fp.fill('.field input[autocomplete=name]:visible >> nth=-1', 'דנה כהן');
+  await fp.check('#consent');
+  await fp.click('form button.primary');
+  await fp.waitForSelector('.done', { timeout: 30000 });
+  check('forms: the visitor signs on the phone and gets the confirmation', true);
+  await page.waitForSelector('.conv-forms .fs-signed', { state: 'attached', timeout: 20000 }).catch(() => undefined);
+  if (!(await page.locator('.conv-forms .fs-signed').count())) { await page.click('.conv-list button:has-text("דנה מהאתר")'); await page.waitForSelector('.conv-forms .fs-signed', { state: 'attached', timeout: 15000 }); }
+  check('forms: the inbox shows the form as signed, with the signed PDF to download', (await page.locator('.conv-forms a:has-text("הורדת הטופס החתום")').count()) === 1);
+  await fp.close(); }
+
 // a site that is not on the list gets no launcher (the config call is refused cross-origin) and cannot frame the chat page either
 const bp = await visitorCtx.newPage();
 await bp.goto('http://localhost:4011/');

@@ -131,6 +131,8 @@ export async function markOpened(db: Db, r: PublicReq): Promise<void> {
   if (r.status === 'sent') { await db.query(`UPDATE form_requests SET status = 'opened' WHERE id = $1 AND status = 'sent'`, [r.id]); await event(db, r.id, 'opened'); }
 }
 
+export const OTP_MASK = (title: string) => `קוד אימות לחתימה על "${title}" נשלח (הקוד מוסתר).`;
+
 /** A six-digit code to the same chat the link was sent to (proof that the person holds that phone / account). */
 export async function sendOtp(db: Db, out: Sender, r: PublicReq): Promise<'sent' | 'too_soon' | 'too_many' | 'no_channel'> {
   if (!r.channel_id || !r.external_id || !r.conversation_id) return 'no_channel';
@@ -138,9 +140,13 @@ export async function sendOtp(db: Db, out: Sender, r: PublicReq): Promise<'sent'
   if (r.last_otp_at && Date.now() - new Date(r.last_otp_at).getTime() < 45_000) return 'too_soon';
   const code = String(randomInt(0, 1_000_000)).padStart(6, '0');
   await db.query(`UPDATE form_requests SET otp_hash = $2, otp_expires_at = now() + interval '10 minutes', otp_tries = 0, otp_sent = otp_sent + 1 WHERE id = $1`, [r.id, sha256(`otp:${r.id}:${code}`)]);
-  const sent = await out.sendText(r.channel_id, r.external_id, `קוד האימות לחתימה על "${r.title}": ${code}\nהקוד בתוקף 10 דקות. אם לא ביקשת אותו, אפשר להתעלם מההודעה.`);
-  // the conversation keeps that a code was sent, never the code itself (staff must not be able to sign in the customer's name)
-  const m = await db.query(`INSERT INTO messages (conversation_id, direction, body, external_id, auto) VALUES ($1,'out',$2,$3,true) ON CONFLICT DO NOTHING RETURNING id`, [r.conversation_id, `קוד אימות לחתימה על "${r.title}" נשלח (הקוד מוסתר).`, sent.externalMessageId ?? null]);
+  const text = `קוד האימות לחתימה על "${r.title}": ${code}\nהקוד בתוקף 10 דקות. אם לא ביקשת אותו, אפשר להתעלם מההודעה.`;
+  const sent = await out.sendText(r.channel_id, r.external_id, text);
+  // staff must never see the code (they could sign in the customer's name): the inbox masks this kind of message. Only the website
+  // chat keeps the text itself, because its visitor reads the stored messages; elsewhere the platform delivered it already.
+  const webchat = (await db.query('SELECT type FROM channels WHERE id = $1', [r.channel_id])).rows[0]?.type === 'webchat';
+  const m = await db.query(`INSERT INTO messages (conversation_id, direction, body, external_id, auto, automation) VALUES ($1,'out',$2,$3,true,'form_otp') ON CONFLICT DO NOTHING RETURNING id`,
+    [r.conversation_id, webchat ? text : OTP_MASK(r.title), sent.externalMessageId ?? null]);
   if (m.rows[0]) out.notifyMessage(r.channel_id, r.conversation_id, m.rows[0].id);
   await event(db, r.id, 'otp_sent');
   return 'sent';

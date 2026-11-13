@@ -22,7 +22,7 @@ export async function forwardText(db: Db, convId: string, rule: Pick<ForwardRule
   if (opts.note) lines.push(`הערה: ${clip(opts.note, 400)}`);
   if (c.collected) lines.push('', clip(String(c.collected).replace(/^פרטים שנאספו:?\s*/, ''), 700));
   if (rule.include_messages > 0) {
-    const msgs = (await db.query(`SELECT direction, body, auto FROM messages WHERE conversation_id = $1 AND body <> '' ORDER BY created_at DESC LIMIT $2`, [convId, rule.include_messages])).rows.reverse();
+    const msgs = (await db.query(`SELECT direction, body, auto FROM messages WHERE conversation_id = $1 AND body <> '' AND automation IS DISTINCT FROM 'form_otp' ORDER BY created_at DESC LIMIT $2`, [convId, rule.include_messages])).rows.reverse();
     if (msgs.length) lines.push('', 'הודעות אחרונות:', ...msgs.map((m) => `${m.direction === 'in' ? 'לקוח' : m.auto ? 'בוט' : 'צוות'}: ${clip(String(m.body), 220)}`));
   }
   lines.push('', `לפתיחה בפאנל: ${origin.replace(/\/$/, '')}/#/inbox?c=${convId}`);

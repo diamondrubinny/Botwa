@@ -140,8 +140,11 @@ describe('digital forms end to end', () => {
     expect((await call(null, 'POST', `/f/${token}/otp`)).statusCode).toBe(200);
     const code = texts[0]!.match(/(\d{6})/)![1]!;
     expect((await call(null, 'POST', `/f/${token}/otp`)).json().error).toBe('too_soon');
-    const stored = (await db.query(`SELECT body FROM messages WHERE body LIKE '%קוד אימות%'`)).rows.map((r) => r.body).join(' ');
-    expect(stored).not.toContain(code);                                                                // staff never see the code
+    const stored = (await db.query(`SELECT body FROM messages WHERE automation = 'form_otp'`)).rows.map((r) => r.body).join(' ');
+    expect(stored).not.toContain(code);                                                                // not kept readable (not a website chat)
+    const inbox = JSON.stringify((await call('ag@t.io', 'GET', `/conversations/${conv}/messages`)).json());
+    expect(inbox).toContain('הקוד מוסתר');                                                             // staff never see the code
+    expect(inbox).not.toContain(code);
     expect((await call(null, 'POST', `/f/${token}/verify`, { code: '000000' === code ? '111111' : '000000' })).json().error).toBe('otp_wrong');
     const v = await call(null, 'POST', `/f/${token}/verify`, { code });
     expect(v.statusCode).toBe(200);

@@ -69,3 +69,12 @@ export interface SendingCfg { minDelayMs: number; maxDelayMs: number; perMinute:
 
 /** "Dana Levi (@dana.levi)" for people pickers */
 export const personLabel = (u: { name: string; username?: string | null }) => (u.username ? `${u.name} (@${u.username})` : u.name);
+
+// ---- digital forms ----
+export type FormFieldType = 'text' | 'textarea' | 'date' | 'id_number' | 'phone' | 'email' | 'number' | 'checkbox' | 'signature' | 'initials';
+export interface FormField { id: string; type: FormFieldType; label: string; page: number; x: number; y: number; w: number; h: number; required: boolean; prefill: null | 'contact_name' | 'contact_phone' | 'today' | 'agent_name' | 'case_number'; locked: boolean; hint: string }
+export interface FormTemplate { id: string; title: string; description: string; audience: string[]; sourceName: string; sourceUrl: string | null; sha256: string; pages: { w: number; h: number }[] | number; fields: FormField[]; active: boolean; createdAt: string; updatedAt: string; requests?: number; signed?: number }
+export interface FormRequestRow { id: string; number: number; status: 'sent' | 'opened' | 'verified' | 'signed' | 'expired' | 'cancelled'; createdAt: string; expiresAt: string; signedAt: string | null; signerName: string | null; signerPhone: string | null; conversationId: string | null; title: string; templateId: string; sentBy: string | null; sha256: string | null }
+export const FORM_STATUS: Record<FormRequestRow['status'], string> = { sent: 'נשלח', opened: 'נפתח', verified: 'אומת', signed: 'נחתם', expired: 'פג תוקף', cancelled: 'בוטל' };
+export const FORM_FIELD_TYPES: Record<FormFieldType, string> = { text: 'טקסט', textarea: 'טקסט ארוך', date: 'תאריך', id_number: 'תעודת זהות', phone: 'טלפון', email: 'אימייל', number: 'מספר', checkbox: 'תיבת סימון', signature: 'חתימה', initials: 'ראשי תיבות' };
+export const FORM_AUDIENCES: Record<string, string> = { employee: 'עובדים', contractor: 'קבלנים', student: 'סטודנטים', guest: 'אורחים', customer: 'לקוחות' };

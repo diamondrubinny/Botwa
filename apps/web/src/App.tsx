@@ -24,6 +24,7 @@ import { Safety } from './pages/Safety';
 import { Roles } from './pages/Roles';
 import { Settings } from './pages/Settings';
 import { Team } from './pages/Team';
+import { Forms } from './pages/Forms';
 import { t } from './strings';
 
 type IconName = Parameters<typeof Icon>[0]['name'];
@@ -35,6 +36,7 @@ const NAV: NavItem[] = [
   { r: 'flow', label: 'תרשים זרימה', icon: 'flow', allowed: (m) => can(m, 'bot.view') },
   { r: 'safety', label: 'לוח בטיחות', icon: 'shield', allowed: (m) => can(m, 'safety.view') },
   { r: 'kb', label: 'מאגר ידע', icon: 'book', allowed: (m) => can(m, 'kb.manage') },
+  { r: 'forms', label: 'טפסים', icon: 'pen', allowed: () => true },
   { r: 'reports', label: 'דוחות', icon: 'chart', allowed: (m) => can(m, 'reports.view') },
   { r: 'canned', label: 'תשובות ותגיות', icon: 'tag', allowed: (m) => can(m, 'canned.manage') || can(m, 'tags.manage') },
   { r: 'channels', label: t.nav.channels, icon: 'plug', allowed: (m) => can(m, 'channels.view') },
@@ -172,6 +174,7 @@ function Shell({ me, reloadMe, onLogout }: { me: Me; reloadMe: () => Promise<voi
           {page === 'integrations' && can(me, 'api.manage') && <Integrations />}
           {page === 'safety' && can(me, 'safety.view') && <Safety me={me} />}
           {page === 'kb' && can(me, 'kb.manage') && <KnowledgeBase />}
+          {page === 'forms' && <Forms me={me} />}
           {page === 'reports' && can(me, 'reports.view') && <Reports />}
           {page === 'canned' && (can(me, 'canned.manage') || can(me, 'tags.manage')) && <CannedReplies me={me} />}
           {page === 'channels' && can(me, 'channels.view') && <Channels me={me} />}

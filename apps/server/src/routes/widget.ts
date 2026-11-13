@@ -149,7 +149,8 @@ export function widgetRoutes(app: FastifyInstance, db: Db, mgr: ChannelManager, 
     } else { name = ''; email = ''; phone = ''; }
 
     const externalMessageId = `wc-${randomUUID()}`;
-    await adapter.ingest({ externalContactId: contactId(v), contactName: name || `מבקר באתר #${v.id.slice(0, 4)}`, externalMessageId, text, timestamp: new Date() });
+    // later messages carry no name: the placeholder is only for a first message without one, so it never replaces a real name
+    await adapter.ingest({ externalContactId: contactId(v), contactName: name || (first ? `מבקר באתר #${v.id.slice(0, 4)}` : undefined), externalMessageId, text, timestamp: new Date() });
     const row = (await db.query(`SELECT m.seq, m.conversation_id FROM messages m JOIN conversations c ON c.id = m.conversation_id JOIN contacts ct ON ct.id = c.contact_id WHERE ct.channel_id = $1 AND m.external_id = $2`, [s.channelId, externalMessageId])).rows[0];
     if (first && row) {
       const bits = [email && `אימייל: ${email}`, phone && `טלפון: ${phone}`, v.identity_id && `מזהה לקוח מאומת: ${v.identity_id}`, s.behavior.consentText && 'אישר את ההצהרה באתר'].filter(Boolean);

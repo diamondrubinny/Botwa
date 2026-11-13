@@ -44,7 +44,7 @@ export function conversationRoutes(app: FastifyInstance, db: Db, mgr: ChannelMan
               (SELECT CASE WHEN lm.direction = 'in' AND c.status = 'open' AND c.bot_state IS DISTINCT FROM 'menu' THEN lm.created_at END
                  FROM messages lm WHERE lm.conversation_id = c.id AND NOT lm.auto ORDER BY lm.created_at DESC LIMIT 1) AS "waitingSince",
               COALESCE((SELECT json_agg(json_build_object('id', t.id, 'name', t.name) ORDER BY lower(t.name)) FROM conversation_tags ctg JOIN tags t ON t.id = ctg.tag_id WHERE ctg.conversation_id = c.id), '[]'::json) AS tags, ch.type AS "channelType", COALESCE(au.name_he, au.name) AS "assignedName",
-              (SELECT COALESCE(NULLIF(m.body, ''), '[קובץ מצורף]') FROM messages m WHERE m.conversation_id = c.id ORDER BY created_at DESC LIMIT 1) AS "lastMessage"
+              (SELECT COALESCE(NULLIF((CASE WHEN m.automation = 'form_otp' THEN 'קוד אימות לטופס נשלח (הקוד מוסתר).' ELSE m.body END), ''), '[קובץ מצורף]') FROM messages m WHERE m.conversation_id = c.id ORDER BY created_at DESC LIMIT 1) AS "lastMessage"
          FROM conversations c JOIN contacts ct ON ct.id = c.contact_id
               JOIN channels ch ON ch.id = c.channel_id LEFT JOIN users au ON au.id = c.assigned_to
         WHERE ($1::text IS NULL OR c.status = $1)
@@ -57,7 +57,7 @@ export function conversationRoutes(app: FastifyInstance, db: Db, mgr: ChannelMan
           AND (NOT $12::boolean OR EXISTS (SELECT 1 FROM conversation_stars fs WHERE fs.conversation_id = c.id AND fs.user_id = $3))
           AND ($8::uuid IS NULL OR EXISTS (SELECT 1 FROM conversation_tags xt WHERE xt.conversation_id = c.id AND xt.tag_id = $8))
           AND ($7::text IS NULL OR ct.display_name ILIKE $7 OR ct.external_id ILIKE $7
-               OR EXISTS (SELECT 1 FROM messages sm WHERE sm.conversation_id = c.id AND sm.body ILIKE $7))
+               OR EXISTS (SELECT 1 FROM messages sm WHERE sm.conversation_id = c.id AND sm.automation IS DISTINCT FROM 'form_otp' AND sm.body ILIKE $7))
         ORDER BY c.last_message_at DESC LIMIT $5 OFFSET $6`,
       [q.status ?? null, q.mine === 'true', u.id, isManager(u), q.limit, q.offset, q.q ? `%${q.q.replace(/[\\%_]/g, '\\$&')}%` : null, q.tag ?? null, q.id ?? null, q.blocked === 'true' && isManager(u), q.snoozed === 'true', q.starred === 'true', q.bot === 'true'],
     );
@@ -83,13 +83,13 @@ export function conversationRoutes(app: FastifyInstance, db: Db, mgr: ChannelMan
     if (!p.success || !q.success) return reply.code(400).send({ error: 'bad_request' });
     if (!(await loadAccessible(db, req.user!, p.data.id))) return reply.code(404).send({ error: 'not_found' });
     const { rows } = await db.query(
-      `SELECT m.id, m.direction, m.body, m.sender_user_id AS "senderUserId", COALESCE(u.name_he, u.name) AS "senderName", m.created_at AS "createdAt", m.auto, m.reply_mode AS "replyMode",
+      `SELECT m.id, m.direction, (CASE WHEN m.automation = 'form_otp' THEN 'קוד אימות לטופס נשלח (הקוד מוסתר).' ELSE m.body END) AS body, m.sender_user_id AS "senderUserId", COALESCE(u.name_he, u.name) AS "senderName", m.created_at AS "createdAt", m.auto, m.reply_mode AS "replyMode",
               m.our_reaction AS "ourReaction", CASE WHEN m.our_reaction IS NULL THEN NULL ELSE COALESCE(ru.name_he, ru.name, 'אוטומטית') END AS "ourReactionBy",
               CASE WHEN a.id IS NULL THEN NULL ELSE json_build_object('id', a.id, 'kind', a.kind, 'mime', a.mime, 'size', a.size,
                 'fileName', a.file_name, 'status', a.status, 'detail', a.detail) END AS attachment
          FROM messages m LEFT JOIN users u ON u.id = m.sender_user_id LEFT JOIN users ru ON ru.id = m.our_reaction_by LEFT JOIN attachments a ON a.message_id = m.id
         WHERE m.conversation_id = $1 AND ($2::timestamptz IS NULL OR m.created_at < $2)
-          AND ($4::text IS NULL OR m.body ILIKE $4 OR a.file_name ILIKE $4)
+          AND ($4::text IS NULL OR (m.automation IS DISTINCT FROM 'form_otp' AND m.body ILIKE $4) OR a.file_name ILIKE $4)
         ORDER BY m.created_at DESC LIMIT $3`,
       [p.data.id, q.data.before ?? null, q.data.limit, q.data.q ? `%${q.data.q.replace(/[\\%_]/g, '\\$&')}%` : null],
     );
@@ -359,7 +359,7 @@ export function conversationRoutes(app: FastifyInstance, db: Db, mgr: ChannelMan
     const c = await db.query(`SELECT ${fields} FROM contacts WHERE id=$1`, [p.data.id]);
     if (!c.rows[0]) return reply.code(404).send({ error: 'not_found' });
     const msgs = async (contactId: string) => (await db.query(
-      `SELECT m.direction, m.body, m.created_at, a.file_name AS "attachmentName", a.status AS "attachmentStatus"
+      `SELECT m.direction, (CASE WHEN m.automation = 'form_otp' THEN 'קוד אימות לטופס נשלח (הקוד מוסתר).' ELSE m.body END) AS body, m.created_at, a.file_name AS "attachmentName", a.status AS "attachmentStatus"
          FROM messages m JOIN conversations v ON v.id = m.conversation_id LEFT JOIN attachments a ON a.message_id = m.id
         WHERE v.contact_id = $1 ORDER BY m.created_at`,
       [contactId],

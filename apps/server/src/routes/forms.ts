@@ -314,7 +314,9 @@ export function formRoutes(app: FastifyInstance, db: Db, mgr: ChannelManager, cf
       const name = `${r.title} - חתום.pdf`;
       void (async () => {
         try {
-          const sent = await mgr.sendMedia(r.channel_id!, r.external_id!, { buffer: res.pdf, mime: 'application/pdf', fileName: name, caption: `עותק חתום של "${r.title}". תודה!` });
+          // the website chat has no file sending: the copy is kept in the conversation (the visitor downloaded it on the page)
+          const webchat = (await db.query('SELECT type FROM channels WHERE id = $1', [r.channel_id])).rows[0]?.type === 'webchat';
+          const sent = webchat ? {} as { externalMessageId?: string } : await mgr.sendMedia(r.channel_id!, r.external_id!, { buffer: res.pdf, mime: 'application/pdf', fileName: name, caption: `עותק חתום של "${r.title}". תודה!` });
           const m = await db.query(`INSERT INTO messages (conversation_id, direction, body, external_id, auto) VALUES ($1,'out',$2,$3,true) RETURNING id`, [r.conversation_id, `עותק חתום של "${r.title}". תודה!`, sent.externalMessageId ?? null]);
           await media.storeSent(m.rows[0].id, res.pdf, { mime: 'application/pdf', ext: 'pdf', kind: 'document', inline: false }, name);
           mgr.notifyMessage(r.channel_id!, r.conversation_id!, m.rows[0].id);

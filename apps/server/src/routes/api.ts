@@ -104,7 +104,7 @@ export function apiRoutes(app: FastifyInstance, db: Db, mgr: ChannelManager, cfg
     if (!p.success || !q.success) return reply.code(400).send({ error: 'bad_request' });
     if (!(await db.query('SELECT 1 FROM conversations WHERE id = $1', [p.data.id])).rowCount) return reply.code(404).send({ error: 'not_found' });
     const { rows } = await db.query(
-      `SELECT m.id, m.seq, m.direction, m.body AS text, m.auto, m.created_at AS "createdAt", m.sender_user_id AS "senderUserId" FROM messages m WHERE m.conversation_id = $1 AND m.seq > $2 ORDER BY m.seq LIMIT $3`,
+      `SELECT m.id, m.seq, m.direction, (CASE WHEN m.automation = 'form_otp' THEN 'קוד אימות לטופס נשלח (הקוד מוסתר).' ELSE m.body END) AS text, m.auto, m.created_at AS "createdAt", m.sender_user_id AS "senderUserId" FROM messages m WHERE m.conversation_id = $1 AND m.seq > $2 ORDER BY m.seq LIMIT $3`,
       [p.data.id, q.data.after_seq, q.data.limit]);
     return { items: rows.map((r) => ({ ...r, seq: Number(r.seq) })), nextAfterSeq: rows.length ? Number(rows[rows.length - 1]!.seq) : q.data.after_seq };
   });

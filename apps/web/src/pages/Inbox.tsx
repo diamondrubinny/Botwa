@@ -5,6 +5,7 @@ import { api, ApiError, can, personLabel, upload, type Attachment, type Canned, 
 import { EmojiPicker, GifPicker, motionOff, type GifItem } from '../components/Pickers';
 import { ReactionControl } from '../components/Reactions';
 import { HandlerChip, handlerOf, type HandlerKind } from '../components/Handler';
+import { ConversationFormsList, SendFormPanel } from '../components/ConversationForms';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { PersonPanel } from '../components/PersonPanel';
 import { CaseHistory } from '../components/CaseHistory';
@@ -79,6 +80,8 @@ export function Inbox({ me }: { me: Me }) {
   const [tagFilter, setTagFilter] = useState('');
   const [err, setErr] = useState('');
   const [sending, setSending] = useState(false);
+  const [formPanel, setFormPanel] = useState(false);
+  useEffect(() => { setFormPanel(false); }, [selId]);
   const [picker, setPicker] = useState<'emoji' | 'gif' | null>(null);
   const emojiBtn = useRef<HTMLButtonElement>(null);
   const gifBtn = useRef<HTMLButtonElement>(null);
@@ -417,6 +420,7 @@ export function Inbox({ me }: { me: Me }) {
                   <button onClick={() => assignTo(me.id)}>קח שיחה</button>
                 )}
                 {sel.assignedTo && (sel.assignedTo === me.id || canAssignOthers) && <button aria-expanded={!!ho} aria-controls="handover" onClick={() => (ho ? setHo(null) : void openHandover())}>העברה לנציג…</button>}
+                {!isComment && <button type="button" aria-expanded={formPanel} aria-controls={formPanel ? 'send-form' : undefined} onClick={() => setFormPanel(!formPanel)}>שליחת טופס לחתימה</button>}
                 <button aria-pressed={!!sel.starred} onClick={() => act(() => api('POST', `/conversations/${sel.id}/star`, { starred: !sel.starred }))}>{sel.starred ? '★ הסרת סימון' : '☆ סימון'}</button>
                 <label htmlFor="snz" className="sr-only">דחיית שיחה</label>
                 <select id="snz" value="" onChange={(e) => { const m = Number(e.target.value); if (Number.isNaN(m)) return; void act(async () => { await api('POST', `/conversations/${sel.id}/snooze`, { minutes: m }); if (m > 0) setSelId(null); }); }}>
@@ -450,6 +454,7 @@ export function Inbox({ me }: { me: Me }) {
                   <div className="row"><button className="primary" type="submit">סגירת השיחה</button><button type="button" onClick={() => setCloseAsk(null)}>ביטול</button></div>
                 </form>
               )}
+              {formPanel && sel && <SendFormPanel convId={sel.id} onDone={() => setBump((n) => n + 1)} onClose={() => setFormPanel(false)} />}
               {tp && sel && (() => {
                 const t = tpls.find((x) => `${x.name}|${x.language}` === tp.key) ?? tpls[0]!;
                 const preview = t.body.replace(/\{\{(\d+)\}\}/g, (_m, n: string) => tp.values[Number(n) - 1] || `{{${n}}}`);
@@ -545,6 +550,7 @@ export function Inbox({ me }: { me: Me }) {
                   </section>
 
                   <CaseHistory convId={sel.id} refresh={bump} />
+                  <ConversationFormsList convId={sel.id} refresh={`${bump}-${msgs.length}`} />
 
                   <PersonPanel convId={sel.id} contactRowId={sel.contactRowId} related={related} onOpen={(id) => void openRelated(id)}
                     onChanged={() => void api<RelatedConv[]>('GET', `/conversations/${sel.id}/related`).then(setRelated).catch(() => undefined)} />

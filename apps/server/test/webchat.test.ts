@@ -203,6 +203,8 @@ describe('website chat widget', () => {
     expect(note).toContain('אישר');
     expect((await pub('POST', '/widget/session', undefined, { key, token })).json()).toMatchObject({ hasConversation: true });
     expect((await pub('POST', '/widget/messages', token, { text: 'x'.repeat(3000) })).statusCode).toBe(200); // trimmed to the limit, not an error
+    // a later message carries no name: the name given at the start stays (no "visitor #" placeholder over it)
+    expect((await db.query(`SELECT ct.display_name FROM contacts ct WHERE ct.id = (SELECT contact_id FROM conversations WHERE id = $1)`, [conv[0].id])).rows[0].display_name).toBe('דנה כהן');
     expect((await db.query(`SELECT max(length(body))::int AS n FROM messages`)).rows[0].n).toBeLessThanOrEqual(2000);
   });
 
