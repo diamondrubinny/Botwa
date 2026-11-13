@@ -87,6 +87,9 @@ export function Batches({ focus }: { focus: string | null }) {
   const [open, setOpen] = useState<string | null>(focus);
   const [rows, setRows] = useState<BatchPerson[]>([]);
   const [msg, setMsg] = useState('');
+  const [smsReady, setSmsReady] = useState(false);
+  const [bySms, setBySms] = useState(false);
+  useEffect(() => { void api<{ ready: boolean }>('GET', '/forms/sms').then((r) => setSmsReady(r.ready)).catch(() => undefined); }, []);
   const load = async () => setList(await api<BatchRow[]>('GET', '/forms/batches').catch(() => []));
   useEffect(() => { void load(); }, [focus]);
   useEffect(() => { setOpen(focus); }, [focus]);
@@ -100,12 +103,16 @@ export function Batches({ focus }: { focus: string | null }) {
   };
   async function remind(id: string) {
     setMsg('');
-    try { const r = await api<{ reminded: number; skipped: number }>('POST', `/forms/batches/${id}/remind`); setMsg(`נשלחו ${r.reminded} תזכורות${r.skipped ? `, ${r.skipped} לא נשלחו (מחוץ לחלון התגובה)` : ''}. תזכורת נשלחת לכל אחד לכל היותר פעם ביום.`); }
+    try {
+      const r = await api<{ reminded: number; skipped: number; bySms?: number; smsFailed?: number }>('POST', `/forms/batches/${id}/remind`, { sms: smsReady && bySms });
+      setMsg(`נשלחו ${r.reminded} תזכורות${r.bySms ? ` (מהן ${r.bySms} ב-SMS)` : ''}${r.skipped ? `, ${r.skipped} לא נשלחו${r.smsFailed ? ' (חלקן: SMS נכשל, ביקשו להפסיק לקבל הודעות, או שהגעתם למגבלה החודשית)' : ' (מחוץ לחלון התגובה)'}` : ''}. תזכורת נשלחת לכל אחד לכל היותר פעם ביום.`);
+    }
     catch (e) { setMsg(errText(e instanceof ApiError ? e.code : 'generic')); }
   }
   return (
     <section className="card" aria-labelledby="fbl-h">
       <h2 id="fbl-h">שליחות לקבוצה</h2>
+      {smsReady && <label className="row" style={{ fontWeight: 400 }}><input type="checkbox" style={{ width: 'auto', minHeight: 'auto' }} checked={bySms} onChange={(e) => setBySms(e.target.checked)} /> בתזכורות: גם ב-SMS למי שלא ניתן להגיע אליו בווצאפ</label>}
       <ul className="form-tpls">
         {list.map((b) => (
           <li key={b.id}>

@@ -74,22 +74,26 @@
     } }, [h('div', { class: 'field' }, [h('label', { for: 'code', text: 'קוד אימות (6 ספרות)' }), codeIn, h('p', { id: 'code-h', class: 'hint', text: 'הקוד נשלח לצ׳אט שבו קיבלתם את הקישור.' })]),
       h('button', { class: 'primary', type: 'submit', text: 'אימות והמשך' })]);
     var btnV = codeBox.querySelector('button');
-    var send = h('button', { class: 'primary', type: 'button', onclick: function () {
-      send.disabled = true;
-      api('POST', '/otp').then(function () {
-        status.className = 'okmsg'; status.textContent = 'הקוד נשלח' + (info.phoneHint ? ' ל-' + info.phoneHint : '') + '. הוא בתוקף 10 דקות.';
-        codeBox.hidden = false; send.textContent = 'שליחת קוד חדש'; codeIn.focus();
-        setTimeout(function () { send.disabled = false; }, 45000);
+    // the code goes to the chat; when SMS is set up, it can also go by SMS to the same number
+    function ask(via, btn) {
+      send.disabled = true; if (smsBtn) smsBtn.disabled = true;
+      api('POST', '/otp', { via: via }).then(function () {
+        status.className = 'okmsg';
+        status.textContent = (via === 'sms' ? 'הקוד נשלח ב-SMS' : 'הקוד נשלח לצ׳אט') + (info.phoneHint ? ' ל-' + info.phoneHint : '') + '. הוא בתוקף 10 דקות.';
+        codeBox.hidden = false; btn.textContent = via === 'sms' ? 'שליחת קוד חדש ב-SMS' : 'שליחת קוד חדש'; codeIn.focus();
+        setTimeout(function () { send.disabled = false; if (smsBtn) smsBtn.disabled = false; }, 45000);
       }).catch(function (err) {
-        send.disabled = false;
+        send.disabled = false; if (smsBtn) smsBtn.disabled = false;
         status.className = 'err';
-        status.textContent = err.message === 'too_soon' ? 'קוד נשלח לפני רגע. אפשר לבקש שוב בעוד דקה.' : err.message === 'too_many' ? 'נשלחו יותר מדי קודים לטופס הזה. כתבו לנו בצ׳אט.' : 'לא הצלחנו לשלוח קוד. נסו שוב בעוד רגע.';
+        status.textContent = err.message === 'too_soon' ? 'קוד נשלח לפני רגע. אפשר לבקש שוב בעוד דקה.' : err.message === 'too_many' ? 'נשלחו יותר מדי קודים לטופס הזה. כתבו לנו בצ׳אט.' : err.message === 'sms_monthly_limit' ? 'לא ניתן לשלוח SMS כרגע. בקשו את הקוד לצ׳אט.' : 'לא הצלחנו לשלוח קוד. נסו שוב בעוד רגע.';
       });
-    }, text: 'שליחת קוד אימות לצ׳אט' });
+    }
+    var send = h('button', { class: 'primary', type: 'button', onclick: function () { ask('chat', send); }, text: 'שליחת קוד אימות לצ׳אט' });
+    var smsBtn = info.smsOtp ? h('button', { type: 'button', onclick: function () { ask('sms', smsBtn); }, text: 'לא הגיע? שליחת הקוד ב-SMS' }) : null;
     screen([head(0), h('div', { class: 'card' }, [
       h('h2', { text: 'אימות' }),
       h('p', { text: 'כדי לוודא שהטופס נחתם על ידיכם, נשלח קוד חד-פעמי לצ׳אט שבו קיבלתם את הקישור' + (info.phoneHint ? ' (' + info.phoneHint + ')' : '') + '.' }),
-      send, status, codeBox,
+      send, smsBtn, status, codeBox,
     ])]);
   }
 

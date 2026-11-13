@@ -266,9 +266,9 @@ describe('one form to a group', () => {
     // the new person's conversation stays out of the open inbox until they answer
     expect((await db.query(`SELECT c.status FROM conversations c JOIN contacts ct ON ct.id = c.contact_id WHERE ct.external_id = '972521111111@s.whatsapp.net'`)).rows[0].status).toBe('closed');
     texts.length = 0;
-    expect((await call('admin@t.io', 'POST', `/forms/batches/${id}/remind`)).json()).toEqual({ reminded: 1, skipped: 0 });
+    expect((await call('admin@t.io', 'POST', `/forms/batches/${id}/remind`)).json()).toEqual({ reminded: 1, skipped: 0, bySms: 0, smsFailed: 0 });
     expect(texts[0]).toContain('תזכורת');
-    expect((await call('admin@t.io', 'POST', `/forms/batches/${id}/remind`)).json()).toEqual({ reminded: 0, skipped: 0 });   // not twice a day
+    expect((await call('admin@t.io', 'POST', `/forms/batches/${id}/remind`)).json()).toEqual({ reminded: 0, skipped: 0, bySms: 0, smsFailed: 0 });   // not twice a day
     expect((await call('admin@t.io', 'GET', `/forms/requests?batchId=${id}`)).json()).toHaveLength(2);
     // a channel that cannot be addressed by phone is refused
     const tg = (await call('admin@t.io', 'POST', '/channels', { type: 'webchat', label: 'אתר' })).json().id;

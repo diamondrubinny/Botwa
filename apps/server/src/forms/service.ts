@@ -3,6 +3,7 @@ import type { Config } from '../config.js';
 import { decrypt, encrypt } from '../crypto.js';
 import type { Db } from '../db.js';
 import { detectFields } from './detect.js';
+import { maskNumber, smsNumber } from '../sms/service.js';
 import { buildSignedPdf, type SignatureMark } from './pdf.js';
 import { checkValue, fieldsSchema, type Field } from './schema.js';
 
@@ -149,13 +150,25 @@ export async function markOpened(db: Db, r: PublicReq): Promise<void> {
 export const OTP_MASK = (title: string) => `קוד אימות לחתימה על "${title}" נשלח (הקוד מוסתר).`;
 
 /** A six-digit code to the same chat the link was sent to (proof that the person holds that phone / account). */
-export async function sendOtp(db: Db, out: Sender, r: PublicReq): Promise<'sent' | 'too_soon' | 'too_many' | 'no_channel'> {
+/** The phone a code may go to by SMS: the number of the chat the form was sent to (never a number typed on the page). */
+export const otpSmsNumber = (r: Pick<PublicReq, 'external_id'>) => (r.external_id?.endsWith('@s.whatsapp.net') ? smsNumber(r.external_id) : null);   // other platforms' ids are not phone numbers
+
+export async function sendOtp(db: Db, out: Sender, r: PublicReq, sms?: (to: string, text: string) => Promise<void>): Promise<'sent' | 'too_soon' | 'too_many' | 'no_channel' | 'no_phone'> {
   if (!r.channel_id || !r.external_id || !r.conversation_id) return 'no_channel';
+  const phone = sms ? otpSmsNumber(r) : null;
+  if (sms && !phone) return 'no_phone';
   if (r.otp_sent >= 6) return 'too_many';
   if (r.last_otp_at && Date.now() - new Date(r.last_otp_at).getTime() < 45_000) return 'too_soon';
   const code = String(randomInt(0, 1_000_000)).padStart(6, '0');
   await db.query(`UPDATE form_requests SET otp_hash = $2, otp_expires_at = now() + interval '10 minutes', otp_tries = 0, otp_sent = otp_sent + 1 WHERE id = $1`, [r.id, sha256(`otp:${r.id}:${code}`)]);
   const text = `קוד האימות לחתימה על "${r.title}": ${code}\nהקוד בתוקף 10 דקות. אם לא ביקשת אותו, אפשר להתעלם מההודעה.`;
+  if (sms && phone) {
+    // the same number the chat is on, by SMS: the team sees only that a code was sent, never the code
+    await sms(phone, text);
+    await db.query('INSERT INTO conversation_notes (conversation_id, body) VALUES ($1, $2)', [r.conversation_id, `קוד אימות לחתימה על "${r.title}" נשלח ב-SMS ל-${maskNumber(phone)} (הקוד מוסתר).`]);
+    await event(db, r.id, 'otp_sent', 'sms');
+    return 'sent';
+  }
   const sent = await out.sendText(r.channel_id, r.external_id, text);
   // staff must never see the code (they could sign in the customer's name): the inbox masks this kind of message. Only the website
   // chat keeps the text itself, because its visitor reads the stored messages; elsewhere the platform delivered it already.

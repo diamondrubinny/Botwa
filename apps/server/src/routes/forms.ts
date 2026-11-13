@@ -19,6 +19,8 @@ import { decrypt } from '../crypto.js';
 import { currentBuild, flowState, FlowProblem, publishFlow, receiveFlowReply, refreshFlow, sendFlowRequest } from '../forms/flows.js';
 import { hasSignature, LABEL_MAX, shortLabel } from '../forms/flowjson.js';
 import { FlowError } from '../channels/whatsapp-cloud.js';
+import { sendSms, SmsError, smsReady } from '../sms/service.js';
+import { otpSmsNumber } from '../forms/service.js';
 import { byToken, createTemplate, deliverSignedCopy, decryptValues, event, getTemplate, keyOk, listTemplates, markOpened, sendOtp, sendRequest, sha256, signedPdf, submit, verifyOtp, type PublicReq } from '../forms/service.js';
 
 const MAX_PDF = 10 * 1024 * 1024;
@@ -206,11 +208,15 @@ export function formRoutes(app: FastifyInstance, db: Db, mgr: ChannelManager, cf
     return rows.map(({ link_enc, ...r }) => ({ ...r, number: Number(r.number), link: link_enc && ['sent', 'opened', 'verified'].includes(r.status) ? decrypt(link_enc, cfg.ENCRYPTION_KEY) : null }));
   });
 
+  /** Can reminders also go by SMS (set up and switched on)? */
+  app.get('/forms/sms', { preHandler: manage }, async () => ({ ready: await smsReady(db) }));
   app.post('/forms/batches/:id/remind', { preHandler: manage, config: { rateLimit: { max: 10, timeWindow: '10 minutes' } } }, async (req, reply) => {
     const p = idParam.safeParse(req.params);
     if (!p.success) return reply.code(400).send({ error: 'bad_request' });
     try {
-      const r = await remindBatch(db, cfg, mgr, p.data.id, req.user!.id);
+      const sms = (req.body as { sms?: unknown } | null)?.sms === true;
+      if (sms && !(await smsReady(db))) return reply.code(409).send({ error: 'sms_not_configured' });
+      const r = await remindBatch(db, cfg, mgr, p.data.id, req.user!.id, { sms });
       await audit(db, { actorId: req.user!.id, action: 'forms.remind', target: p.data.id, ip: req.ip, meta: r });
       return r;
     } catch (e) { if ((e as Error).message === 'not_found') return reply.code(404).send({ error: 'not_found' }); throw e; }
@@ -403,6 +409,8 @@ export function formRoutes(app: FastifyInstance, db: Db, mgr: ChannelManager, cf
       // the fields as the signer sees them (no positions on the page are needed for filling)
       fields: r.fields.map((f) => ({ id: f.id, type: f.type, label: f.label, required: f.required, locked: f.locked && r.prefill[f.id] !== undefined, hint: f.hint, page: f.page })),
       prefill: r.prefill, signerName: r.signer_name, phoneHint: phone, verified: !!r.verified_at && r.status === 'verified',
+      // the code can also go by SMS to the same number, when SMS is set up and the chat is a WhatsApp number
+      smsOtp: !!otpSmsNumber(r) && await smsReady(db),
     };
   });
 
@@ -419,10 +427,13 @@ export function formRoutes(app: FastifyInstance, db: Db, mgr: ChannelManager, cf
     if (!live(r)) return reply.code(404).send({ error: 'not_found' });
     if (!['sent', 'opened', 'verified'].includes(r.status)) return reply.code(409).send({ error: r.status });
     try {
-      const out = await sendOtp(db, mgr, r);
-      if (out !== 'sent') return reply.code(out === 'no_channel' ? 409 : 429).send({ error: out });
+      const via = (req.body as { via?: unknown } | null)?.via === 'sms' ? 'sms' : 'chat';
+      if (via === 'sms' && !(await smsReady(db))) return reply.code(409).send({ error: 'sms_not_configured' });
+      const out = await sendOtp(db, mgr, r, via === 'sms' ? async (to, text) => { await sendSms(db, cfg, { to, text, purpose: 'otp', requestId: r.id }); } : undefined);
+      if (out !== 'sent') return reply.code(out === 'no_channel' || out === 'no_phone' ? 409 : 429).send({ error: out });
       return { ok: true };
     } catch (e) {
+      if (e instanceof SmsError) return reply.code(e.key === 'sms_monthly_limit' ? 429 : 502).send({ error: e.key });
       req.log.warn({ err: (e as Error).message }, 'form otp send failed');
       return reply.code(502).send({ error: 'otp_send_failed' });
     }

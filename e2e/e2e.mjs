@@ -148,6 +148,20 @@ await page.waitForFunction(() => ![...document.querySelectorAll('li.card strong'
 
 check('emergency pause and resume work from the panel', true);
 await axe('channels');
+// SMS (outbound only): switching it on needs the account, the sender and the token; the token is never shown back
+await page.waitForSelector('#sms-h');
+await page.check('form:has(#sms-h) input[role=switch]');
+await page.fill('#sms-sid', 'AC' + 'a'.repeat(32)); await page.fill('#sms-from', 'Technion');
+await page.click('form:has(#sms-h) button:has-text("שמירה")');
+await page.waitForSelector('form:has(#sms-h) [role=status].error');
+check('SMS: cannot be switched on without the token', (await page.textContent('form:has(#sms-h) [role=status]')).includes('Auth token'));
+await page.fill('#sms-sec', 'b'.repeat(32));
+await page.click('form:has(#sms-h) button:has-text("שמירה")');
+await page.waitForSelector('form:has(#sms-h) [role=status].ok');
+check('SMS: saved, the token is kept and not shown', (await page.inputValue('#sms-sec')) === '' && (await page.textContent('label[for=sms-sec]')).includes('שמור'));
+await axe('channels: SMS settings');
+await page.uncheck('form:has(#sms-h) input[role=switch]');
+await page.click('form:has(#sms-h) button:has-text("שמירה")');
 await page.click('text=קישור עם מספר טלפון (בלי QR)');
 await page.waitForSelector('input[placeholder="972501234567"]');
 await axe('phone-number pairing form');

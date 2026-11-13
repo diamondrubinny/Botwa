@@ -5,6 +5,7 @@ import { api, ApiError, can, CHANNEL_NAMES, type Channel, type ChannelKind, type
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { UsageMeter } from '../components/UsageMeter';
 import { BusinessUsernamePanel } from '../components/BusinessUsername';
+import { SmsSettings } from '../components/SmsSettings';
 import { usePoll } from '../hooks';
 import { errText, t } from '../strings';
 
@@ -183,6 +184,7 @@ export function Channels({ me }: { me: Me }) {
         {list.length === 0 && <li><EmptyState art="channels" title="אין עדיין ערוצים">חברו ווצאפ, טלגרם או צ׳אט לאתר בטופס "ערוץ חדש".</EmptyState></li>}
       </ul>
 
+      {isAdmin && <SmsSettings />}
       {isAdmin && (
         <form className="card" onSubmit={create}>
           <h2>ערוץ חדש</h2>

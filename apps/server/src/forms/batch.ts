@@ -5,6 +5,7 @@ import type { Config } from '../config.js';
 import { decrypt } from '../crypto.js';
 import type { Db } from '../db.js';
 import { createRequest, event, getTemplate, linkMessage } from './service.js';
+import { sendSms, SmsError } from '../sms/service.js';
 
 /** An Israeli or international mobile number as digits with the country code (05x... -> 9725x...); null when it is not one. */
 export function normalizePhone(raw: string): string | null {
@@ -104,18 +105,33 @@ export async function deliverBatch(db: Db, cfg: Config, mgr: ChannelManager, bat
 }
 
 /** A reminder to those who have not signed yet (at most once a day each), the same way the link was delivered. */
-export async function remindBatch(db: Db, cfg: Config, mgr: ChannelManager, batchId: string, userId: string): Promise<{ reminded: number; skipped: number }> {
+export async function remindBatch(db: Db, cfg: Config, mgr: ChannelManager, batchId: string, userId: string, opts: { sms?: boolean } = {}): Promise<{ reminded: number; skipped: number; bySms: number; smsFailed: number }> {
   const b = (await db.query('SELECT wa_template FROM form_batches WHERE id = $1', [batchId])).rows[0];
   if (!b) throw new Error('not_found');
-  const rows = (await db.query(`SELECT r.id, r.conversation_id, r.link_enc, r.signer_name, r.expires_at, t.title FROM form_requests r JOIN form_templates t ON t.id = r.template_id
-    WHERE r.batch_id = $1 AND r.status IN ('sent','opened','verified') AND r.expires_at > now() AND r.delivery IN ('sent','template')
-      AND (r.reminded_at IS NULL OR r.reminded_at < now() - interval '20 hours') ORDER BY r.number`, [batchId])).rows as Pending[];
-  let reminded = 0, skipped = 0;
+  // with SMS: also the people WhatsApp could not reach (their link was given to pass on, or sending failed)
+  const rows = (await db.query(`SELECT r.id, r.conversation_id, r.link_enc, r.signer_name, r.signer_phone, r.expires_at, r.delivery, t.title FROM form_requests r JOIN form_templates t ON t.id = r.template_id
+    WHERE r.batch_id = $1 AND r.status IN ('sent','opened','verified') AND r.expires_at > now() AND r.link_enc IS NOT NULL
+      AND (r.delivery IN ('sent','template') OR ($2::boolean AND r.delivery IN ('link_only','failed')))
+      AND (r.reminded_at IS NULL OR r.reminded_at < now() - interval '20 hours') ORDER BY r.number`, [batchId, !!opts.sms])).rows as (Pending & { signer_phone: string | null; delivery: string })[];
+  let reminded = 0, skipped = 0, bySms = 0, smsFailed = 0;
   for (const r of rows) {
     const url = decrypt(r.link_enc, cfg.ENCRYPTION_KEY);
     const text = `${r.signer_name ? `שלום ${r.signer_name}, ` : ''}תזכורת: הטופס "${r.title}" עדיין מחכה לחתימתך.\n${url}`;
-    const res = await deliverOne(db, cfg, mgr, r, (b.wa_template ?? null) as WaTemplate | null, userId, text);
-    if (res.delivery === 'sent' || res.delivery === 'template') { reminded++; await db.query('UPDATE form_requests SET reminded_at = now() WHERE id = $1', [r.id]); await event(db, r.id, 'reminded'); } else skipped++;
+    const done = async (how: string) => { reminded++; await db.query('UPDATE form_requests SET reminded_at = now() WHERE id = $1', [r.id]); await event(db, r.id, 'reminded', how); };
+    if (r.delivery === 'sent' || r.delivery === 'template') {
+      const res = await deliverOne(db, cfg, mgr, r, (b.wa_template ?? null) as WaTemplate | null, userId, text);
+      if (res.delivery === 'sent' || res.delivery === 'template') { await done('whatsapp'); continue; }
+      if (!opts.sms) { skipped++; continue; }
+    }
+    // by SMS to the number on the list (short text: the link and the form's name)
+    try {
+      await sendSms(db, cfg, { to: r.signer_phone ?? '', text: `תזכורת: "${r.title.slice(0, 40)}" מחכה לחתימתך: ${url}`, purpose: 'reminder', requestId: r.id, userId });
+      bySms++; await done('sms');
+    } catch (e) {
+      smsFailed++; skipped++;
+      await event(db, r.id, 'sms_failed', e instanceof SmsError ? e.key : 'error');
+      if (e instanceof SmsError && (e.key === 'sms_monthly_limit' || e.key === 'sms_not_configured' || e.key === 'sms_auth_failed')) break;   // no point trying the rest
+    }
   }
-  return { reminded, skipped };
+  return { reminded, skipped, bySms, smsFailed };
 }
