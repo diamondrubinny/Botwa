@@ -1,4 +1,5 @@
 // Draws the built-in GIFs frame by frame (SVG rendered by Chromium, so Hebrew is shaped and set right to left in Heebo).
+// Each loop starts on a complete picture ("shift"): the first frame is what chat apps show as the still preview.
 // Usage: NODE_PATH=$(npm root -g) node scripts/gifs/frames.cjs <out-dir>   then: python3 scripts/gifs/assemble.py <out-dir> <dest-dir>
 const { chromium } = require('playwright'); const fs = require('fs'); const path = require('path');
 const W = 320, H = 320, N = 24;
@@ -37,8 +38,9 @@ const GIFS = {
   } },
   working: { title: 'בטיפול', keywords: 'בטיפול מטפלים עובדים על זה בבדיקה working on it', bg: '#ede9fe', draw(t) {
     let s = gear(130, 130, 52, 10, t * 72, C.purple) + gear(214, 184, 34, 8, -t * 110 + 12, C.orange);
-    const dots = [0, 1, 2].map((i) => `<circle cx="${226 - i * 18}" cy="282" r="6" fill="${C.navy}" opacity="${0.25 + 0.75 * clamp(Math.sin(Math.PI * ((t * 3 - i / 3 + 3) % 1)))}"/>`).join('');
-    return s + `<text x="186" y="294" text-anchor="end" direction="rtl" font-family="Heebo" font-weight="800" font-size="42" fill="${C.navy}">בטיפול</text>` + dots;
+    // the word is centred a little to the right; the dots follow it on its left (Hebrew reads right to left)
+    const dots = [0, 1, 2].map((i) => `<circle cx="${88 - i * 17}" cy="282" r="6" fill="${C.navy}" opacity="${0.25 + 0.75 * clamp(Math.sin(Math.PI * ((t * 3 - i / 3 + 3) % 1)))}"/>`).join('');
+    return s + title('בטיפול', 294, 42, C.navy).replace('x="160"', 'x="168"') + dots;
   } },
   moment: { title: 'רגע אחד…', keywords: 'רגע אחד המתנה סבלנות שעון חול wait moment', bg: '#fff4cc', draw(t) {
     const flip = t > 0.8 ? ease((t - 0.8) / 0.2) * 180 : 0;
@@ -51,7 +53,7 @@ const GIFS = {
     if (t < 0.8) g += `<path d="M0 0v${66 - bot * 0.8}" stroke="${C.orange}" stroke-width="4" stroke-dasharray="4 6" stroke-dashoffset="${-t * 60}"/>`;
     return `<g transform="translate(160 132) rotate(${flip})">${g}</g>` + title('רגע אחד…', 290, 40);
   } },
-  done: { title: 'בוצע!', keywords: 'בוצע טופל הושלם וי סיימנו done check', bg: '#dcfce7', draw(t) {
+  done: { title: 'בוצע!', keywords: 'בוצע טופל הושלם וי סיימנו done check', bg: '#dcfce7', shift: 0.62, draw(t) {
     const pop = t < 0.25 ? ease(t / 0.25) : 1;
     const draw = clamp((t - 0.2) / 0.35);
     let s = '';
@@ -67,7 +69,7 @@ const GIFS = {
     [[64, 70, 0], [258, 92, 0.33], [240, 196, 0.66], [76, 182, 0.5]].forEach(([x, y, o]) => { const p = (t + o) % 1; s += sparkle(x, y, 1 + 0.9 * Math.sin(Math.PI * p), C.yellow, Math.sin(Math.PI * p)); });
     return s + title('שמחנו לעזור', 286, 38, '#7c2d12');
   } },
-  safety: { title: 'בטיחות קודם!', keywords: 'בטיחות קודם קסדה זהירות הגנה safety first helmet', bg: C.navy, draw(t) {
+  safety: { title: 'בטיחות קודם!', keywords: 'בטיחות קודם קסדה זהירות הגנה safety first helmet', bg: C.navy, shift: 0.6, draw(t) {
     const fall = t < 0.35 ? -150 * (1 - ease(t / 0.35)) : 0;
     const bounce = t >= 0.35 && t < 0.55 ? -18 * Math.sin(Math.PI * (t - 0.35) / 0.2) : 0;
     const squash = t >= 0.33 && t < 0.42 ? 1 - 0.12 * Math.sin(Math.PI * (t - 0.33) / 0.09) : 1;
@@ -76,7 +78,7 @@ const GIFS = {
     s += `<clipPath id="cp"><rect x="0" y="236" width="320" height="34"/></clipPath><rect x="0" y="236" width="320" height="34" fill="#111827"/><g clip-path="url(#cp)">${st}</g>`;
     return s + title('בטיחות קודם!', 310, 34, C.yellow);
   } },
-  received: { title: 'קיבלנו!', keywords: 'קיבלנו התקבל הפנייה נקלטה מכתב received got it', bg: '#dbf1ff', draw(t) {
+  received: { title: 'קיבלנו!', keywords: 'קיבלנו התקבל הפנייה נקלטה מכתב received got it', bg: '#dbf1ff', shift: 0.8, draw(t) {
     const p = ease(clamp(t / 0.5));
     const x = 300 - 140 * p, y = 40 + 120 * p - 60 * Math.sin(Math.PI * p);
     const land = t > 0.5 ? Math.sin(Math.PI * clamp((t - 0.5) / 0.2)) : 0;
@@ -130,7 +132,7 @@ const GIFS = {
   for (const [k, g] of Object.entries(GIFS)) {
     fs.mkdirSync(path.join(out, k), { recursive: true });
     for (let i = 0; i < N; i++) {
-      const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}"><rect width="${W}" height="${H}" fill="${g.bg}"/>${g.draw(i / N)}</svg>`;
+      const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}"><rect width="${W}" height="${H}" fill="${g.bg}"/>${g.draw((i / N + (g.shift ?? 0)) % 1)}</svg>`;
       await p.evaluate((h) => { document.getElementById('s').innerHTML = h; }, svg);
       await p.locator('#s svg').screenshot({ path: path.join(out, k, `${String(i).padStart(2, '0')}.png`) });
     }

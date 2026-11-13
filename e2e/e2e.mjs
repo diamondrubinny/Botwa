@@ -616,16 +616,17 @@ await axe('canned replies + tags');
 
 // GIF library: a manager adds a GIF (checked by content, scanned by clamd), then edits its title
 const GIF = Buffer.from('R0lGODlhEAAQAPcfMQAAACQAAEgAAGwAAJAAALQAANgAAPwAAAAkACQkAEgkAGwkAJAkALQkANgkAPwkAABIACRIAEhIAGxIAJBIALRIANhIAPxIAABsACRsAEhsAGxsAJBsALRsANhsAPxsAACQACSQAEiQAGyQAJCQALSQANiQAPyQAAC0ACS0AEi0AGy0AJC0ALS0ANi0APy0AADYACTYAEjYAGzYAJDYALTYANjYAPzYAAD8ACT8AEj8AGz8AJD8ALT8ANj8APz8AAAAVSQAVUgAVWwAVZAAVbQAVdgAVfwAVQAkVSQkVUgkVWwkVZAkVbQkVdgkVfwkVQBIVSRIVUhIVWxIVZBIVbRIVdhIVfxIVQBsVSRsVUhsVWxsVZBsVbRsVdhsVfxsVQCQVSSQVUiQVWyQVZCQVbSQVdiQVfyQVQC0VSS0VUi0VWy0VZC0VbS0Vdi0Vfy0VQDYVSTYVUjYVWzYVZDYVbTYVdjYVfzYVQD8VST8VUj8VWz8VZD8VbT8Vdj8Vfz8VQAAqiQAqkgAqmwAqpAAqrQAqtgAqvwAqgAkqiQkqkgkqmwkqpAkqrQkqtgkqvwkqgBIqiRIqkhIqmxIqpBIqrRIqthIqvxIqgBsqiRsqkhsqmxsqpBsqrRsqthsqvxsqgCQqiSQqkiQqmyQqpCQqrSQqtiQqvyQqgC0qiS0qki0qmy0qpC0qrS0qti0qvy0qgDYqiTYqkjYqmzYqpDYqrTYqtjYqvzYqgD8qiT8qkj8qmz8qpD8qrT8qtj8qvz8qgAA/yQA/0gA/2wA/5AA/7QA/9gA//wA/wAk/yQk/0gk/2wk/5Ak/7Qk/9gk//wk/wBI/yRI/0hI/2xI/5BI/7RI/9hI//xI/wBs/yRs/0hs/2xs/5Bs/7Rs/9hs//xs/wCQ/ySQ/0iQ/2yQ/5CQ/7SQ/9iQ//yQ/wC0/yS0/0i0/2y0/5C0/7S0/9i0//y0/wDY/yTY/0jY/2zY/5DY/7TY/9jY//zY/wD8/yT8/0j8/2z8/5D8/7T8/9j8//z8/yH/C05FVFNDQVBFMi4wAwEAAAAh+QQEFAAfACwAAAAAEAAQAAAIHQAPCBxIsKDBgwgTKlzIsKHDhxAjSpxIsaLFgQEBACH5BAUUAAAALA8ADwABAAEAAAgEAAEEBAAh+QQFFAAAACwPAA8AAQABAAAIBAABBAQAIfkEBRQAAAAsDwAPAAEAAQAACAQAAQQEADs=', 'base64');
-await page.fill('#gif-title', 'תודה רבה'); await page.fill('#gif-kw', 'אגודל, שמחה');
+await page.fill('#gif-title', 'אגודל מהצוות'); await page.fill('#gif-kw', 'אגודל, שמחה');
 await page.setInputFiles('#gif-file', { name: 'thanks.gif', mimeType: 'image/gif', buffer: GIF });
 await page.click('button:has-text("הוספה לספרייה")');
-await page.waitForSelector('.gif-admin li:has-text("תודה רבה")', { timeout: 20000 }).catch(() => undefined);
-check('GIF added to the library', await page.locator('.gif-admin li:has-text("תודה רבה")').count() === 1, await page.textContent('#gifs-h ~ p[role=status]').catch(() => ''));
+await page.waitForSelector('.gif-admin li:has-text("אגודל מהצוות")', { timeout: 20000 }).catch(() => undefined);
+check('GIF added to the library', await page.locator('.gif-admin li:has-text("אגודל מהצוות")').count() === 1, await page.textContent('#gifs-h ~ p[role=status]').catch(() => ''));
 await page.setInputFiles('#gif-file', { name: 'fake.gif', mimeType: 'image/gif', buffer: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==', 'base64') });
 await page.fill('#gif-title', 'מזויף'); await page.click('button:has-text("הוספה לספרייה")');
 await page.waitForSelector('[role=status].error:has-text("רק קובצי GIF")', { timeout: 8000 }).catch(() => undefined);
 check('a PNG renamed .gif is refused', await page.isVisible('[role=status].error:has-text("רק קובצי GIF")'));
 await axe('canned replies: GIF library');
+check('GIF library: the 12 built-in GIFs are there (e.g. "בטיחות קודם!")', await page.locator('.gif-admin li:has-text("בטיחות קודם!")').count() === 1 && await page.locator('.gif-admin li').count() === 13, String(await page.locator('.gif-admin li').count()));
 
 // seed an inbound conversation directly (adapter can't reach WhatsApp here)
 const ch = psql("SELECT id FROM channels LIMIT 1");
@@ -831,7 +832,7 @@ check('Escape closes the emoji picker and returns focus', !(await page.isVisible
 // GIF picker: the library item is there; sending reaches the server (stops at "channel not connected" here)
 await page.click('button[aria-label="שליחת GIF"]');
 await page.waitForSelector('#gif-picker .gif-tile', { timeout: 8000 }).catch(() => undefined);
-check('GIF picker lists the library', await page.locator('#gif-picker .gif-tile').count() === 1);
+check('GIF picker lists the library, with the built-in GIFs drawn for the system', await page.locator('#gif-picker .gif-tile').count() === 13, String(await page.locator('#gif-picker .gif-tile').count()));
 await axe('inbox: GIF picker');
 await page.click('#gif-picker .gif-tile');
 await page.waitForSelector('[role=alert]:has-text("הערוץ אינו מחובר")', { timeout: 8000 }).catch(() => undefined);

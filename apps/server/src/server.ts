@@ -9,6 +9,9 @@ import { MediaService } from './media/store.js';
 import { loadConfig } from './config.js';
 import { createDb } from './db.js';
 import { migrate } from './migrate.js';
+import { seedGifPresets } from './gif-presets.js';
+import { gifToMp4 } from './media/animation.js';
+import path from 'node:path';
 
 const cfg = loadConfig();
 const db = createDb(cfg.DATABASE_URL);
@@ -18,6 +21,10 @@ await media.init();
 const mgr = new ChannelManager(db, cfg, undefined, media);
 const app = await buildApp(cfg, db, mgr, media);
 await mgr.startAll();
+// built-in GIFs drawn for the system: added to the gallery once (in the background; the MP4 copies take a few seconds)
+void seedGifPresets(db, (gif) => gifToMp4(gif, { ffmpegPath: cfg.FFMPEG_PATH, tmpDir: path.join(cfg.MEDIA_DIR, 'tmp') }))
+  .then((n) => { if (n) app.log.info({ added: n }, 'built-in GIFs added to the gallery'); })
+  .catch((err) => app.log.error({ err }, 'built-in GIFs could not be added'));
 // Knowledge base: resume unfinished link imports, re-read links whose refresh time has come, drop old question logs.
 void mgr.kb?.resumePending().catch((err) => app.log.error({ err }, 'kb resume failed'));
 setInterval(() => void mgr.supervise().catch((err) => app.log.error({ err }, 'channel supervision failed')), 60_000).unref();

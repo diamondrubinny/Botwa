@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "tsx watch src/server.ts",
-    "build": "rm -rf dist && tsc -p tsconfig.build.json && cp -r src/migrations dist/migrations && cp -r src/avatar-presets dist/avatar-presets && cp -r src/bot-presets dist/bot-presets && mkdir -p dist/webchat && cp -r src/webchat/assets dist/webchat/assets && cp -r ../../wordpress-plugin/botwa-chat dist/webchat/wp-plugin",
+    "build": "rm -rf dist && tsc -p tsconfig.build.json && cp -r src/migrations dist/migrations && cp -r src/avatar-presets dist/avatar-presets && cp -r src/bot-presets dist/bot-presets && cp -r src/gif-presets dist/gif-presets && mkdir -p dist/webchat && cp -r src/webchat/assets dist/webchat/assets && cp -r ../../wordpress-plugin/botwa-chat dist/webchat/wp-plugin",
     "start": "node dist/server.js",
     "migrate": "tsx src/scripts/migrate.ts",
     "create-admin": "tsx src/scripts/create-admin.ts",
