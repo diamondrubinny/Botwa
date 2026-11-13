@@ -43,7 +43,7 @@ describe('Messenger and Instagram channels', () => {
     if (url.includes('/subscribed_apps')) return init?.method === 'POST' ? Response.json({ success: true }) : Response.json({ data: [{ id: 'app' }] });
     if (init?.method === 'POST' && url.endsWith('/messages')) return sendResponse();
     if (init?.method === 'POST' && /\/(comments|replies)$/.test(url)) return Response.json({ id: `reply_${++replyN}` });
-    if (init?.method === 'POST' && /\/v21\.0\/[\d_]+$/.test(url)) return Response.json({ success: true });   // hide a comment
+    if (init?.method === 'POST' && /\/v25\.0\/[\d_]+$/.test(url)) return Response.json({ success: true });   // hide a comment
     if (/\/\d+\?fields=first_name/.test(url)) return Response.json({ first_name: 'Dana', last_name: 'Levi' });
     if (/\/\d+\?fields=name,username/.test(url)) return Response.json({ name: 'Noa IG', username: 'noa' });
     if (url.startsWith('https://scontent.xx.fbcdn.net/')) return new Response(Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==', 'base64'));

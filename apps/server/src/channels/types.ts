@@ -19,6 +19,8 @@ export interface OutboundMedia {
 export interface InboundMessage {
   externalContactId: string;
   contactName?: string;
+  /** WhatsApp Cloud: the customer's business-scoped user id (BSUID), kept on the contact so a later message with the id only finds them */
+  userId?: string;
   externalMessageId: string;
   text: string;
   timestamp: Date;

@@ -884,3 +884,8 @@ button.linkish { min-height: 36px; padding: 0 .2rem; border: 0; background: none
   main table:not([data-cards="off"]) td > .row, main table:not([data-cards="off"]) td.row { justify-content: flex-start; }
   main { overflow-x: clip; }
 }
+
+/* label / value pairs (e.g. the business username panel) */
+.kv { display: grid; grid-template-columns: auto 1fr; gap: .25rem 1rem; margin: .5rem 0; }
+.kv dt { font-weight: 600; }
+.kv dd { margin: 0; overflow-wrap: anywhere; }

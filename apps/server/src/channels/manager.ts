@@ -35,6 +35,8 @@ import { EMAIL_CREDS_KEY, EmailAdapter, type EmailCreds } from './email.js';
 import { closeByCustomer, introduceAgent, isCloseRequest, thankForFeedback } from '../automations.js';
 import { composeAnswer, type KbAnswer } from '../kb/compose.js';
 import { loadPersona } from '../routes/branding.js';
+import { saveUsername } from './username-store.js';
+import { renderBotText, cleanName, type BotTextContext } from '../bot-text.js';
 import { isCommentContact, META_CREDS_KEY, MetaMessagingAdapter, type CommentReplyMode, type MetaCreds } from './meta-messaging.js';
 import { WebChatAdapter } from './webchat.js';
 import { WhatsAppAdapter } from './whatsapp.js';
@@ -326,6 +328,7 @@ export class ChannelManager {
         onReaction: (ev) => { void this.customerReaction(channelId, ev).catch(() => undefined); },
         onMessage: async (m) => {
           const r = await ingestInbound(this.db, channelId, m, { floodLimit: this.cfg.FLOOD_LIMIT });
+          if (r.externalContactId !== m.externalContactId) m = { ...m, externalContactId: r.externalContactId };   // known by number, came by user id: answer the contact we know
           if (r.flooded) {
             await audit(this.db, { action: 'contact.auto_block', target: r.contactId, meta: { reason: 'flood', limit: this.cfg.FLOOD_LIMIT } }).catch(() => undefined);
             void sendAlert(this.cfg, `🚫 לקוח נחסם אוטומטית עקב הצפת הודעות (יותר מ-${this.cfg.FLOOD_LIMIT} ב-2 דקות).`, { contactId: r.contactId });
@@ -384,6 +387,8 @@ export class ChannelManager {
     });
     if (!adapter) throw new Error('unsupported_channel_type');
     this.adapters.set(channelId, adapter);
+    // Meta reports a change of the number's business username (when the app is subscribed to business_username_updates)
+    if (adapter instanceof WhatsAppCloudAdapter) adapter.onUsernameUpdate = (v) => { void saveUsername(this.db, channelId, v).catch(() => undefined); };
     await this.db.query('UPDATE channels SET auto_start=true WHERE id=$1', [channelId]);
     try {
       await adapter.start(opts);
@@ -727,8 +732,18 @@ export class ChannelManager {
     if (ins.rows[0]) { this.notifyMessage(channelId, convId, ins.rows[0].id); this.hookMessage('message.sent', convId, ins.rows[0].id); }
   }
 
+  /** Who the bot is (its persona name) and what we know to call the customer: the name they gave the bot, else their profile name. */
+  private async botTextContext(convId: string, nameHint?: string): Promise<BotTextContext> {
+    const [persona, row] = await Promise.all([
+      loadPersona(this.db).catch(() => null),
+      this.db.query(`SELECT ct.profile->>'fullName' AS full_name, ct.display_name FROM conversations c JOIN contacts ct ON ct.id = c.contact_id WHERE c.id = $1`, [convId]).then((r) => r.rows[0]).catch(() => undefined),
+    ]);
+    return { botName: persona?.name, fullName: cleanName(nameHint) || cleanName(row?.full_name) || cleanName(row?.display_name) };
+  }
+
   /** The bot's replies of one step; when the last is its menu and the channel can show buttons or a list, send the menu that way (the text is kept in the conversation either way). */
-  private async botSayAll(channelId: string, convId: string, ext: string, bot: BotConfig, replies: string[], menu: boolean | undefined): Promise<void> {
+  private async botSayAll(channelId: string, convId: string, ext: string, bot: BotConfig, rawReplies: string[], menu: boolean | undefined, nameHint?: string): Promise<void> {
+    const replies = rawReplies.some((r) => r.includes('{')) ? await this.botTextContext(convId, nameHint).then((c) => rawReplies.map((r) => renderBotText(r, c))) : rawReplies;
     for (let i = 0; i < replies.length; i++) {
       const reply = replies[i]!;
       if (menu && i === replies.length - 1 && bot.interactiveMenus) {
@@ -957,7 +972,7 @@ export class ChannelManager {
     };
     const r = await runFlow(flow, st, input, ctx, bot.humanLabel);
     const stepStart: Date = (await this.db.query('SELECT now() AS t')).rows[0].t;   // database clock, like the messages' own times
-    await this.botSayAll(channelId, convId, ext, bot, r.replies, r.menu);
+    await this.botSayAll(channelId, convId, ext, bot, r.replies, r.menu, r.state.vars.fullName);
     if (answeredFrom) await this.tagAnswer(convId, answeredFrom, stepStart);
     const handoff = r.effects.find((e): e is Extract<Effect, { kind: 'handoff' }> => e.kind === 'handoff');
     if (handoff) await rx.set('handoff'); else if (searched) await rx.set(found ? 'done' : 'noAnswer'); else if (bot.reactions.ackAll) await rx.set('done');

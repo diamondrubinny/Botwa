@@ -388,7 +388,7 @@ function NodeForm({ n, flow, refs, canEdit, upd, del, makeStart, makeMain }: { n
   return (
     <fieldset disabled={dis} style={{ border: 0, padding: 0, margin: 0 }}>
       <div className="field"><label htmlFor={f('lb')}>שם בתרשים (אופציונלי)</label><input id={f('lb')} maxLength={60} value={n.label ?? ''} onChange={(e) => set({ label: e.target.value || undefined })} /></div>
-      {'text' in n && n.type !== 'end' && n.type !== 'handoff' && <div className="field"><label htmlFor={f('tx')}>{n.type === 'menu' ? 'טקסט מעל התפריט' : 'ההודעה ללקוח'}</label><textarea id={f('tx')} rows={3} maxLength={1500} value={n.text} onChange={(e) => set({ text: e.target.value })} /></div>}
+      {'text' in n && n.type !== 'end' && n.type !== 'handoff' && <div className="field"><label htmlFor={f('tx')}>{n.type === 'menu' ? 'טקסט מעל התפריט' : 'ההודעה ללקוח'}</label><textarea id={f('tx')} rows={3} maxLength={1500} aria-describedby={f('txv')} value={n.text} onChange={(e) => set({ text: e.target.value })} /><p id={f('txv')} className="hint">משתנים: <code>{'{בוט}'}</code> שם הבוט, <code>{'{שם פרטי}'}</code> / <code>{'{שם}'}</code> של לקוח מוכר.</p></div>}
       {(n.type === 'end' || n.type === 'handoff') && <div className="field"><label htmlFor={f('tx')}>{n.type === 'end' ? 'הודעת סיום' : 'הודעה לפני ההעברה (ריק = ההודעה הכללית של הבוט)'}</label><textarea id={f('tx')} rows={2} maxLength={500} value={n.text} onChange={(e) => set({ text: e.target.value })} /></div>}
 
       {n.type === 'menu' && (

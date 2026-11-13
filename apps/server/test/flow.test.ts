@@ -397,7 +397,7 @@ describe('the safety unit template', () => {
     expect(r.replies[0]).toContain('מה הסטטוס שלך?');
     r = await run(r.state, '2');                                                                // משתלם
     expect(r.effects).toContainEqual({ kind: 'profile', vars: { fullName: 'דנה לוי', faculty: 'הנדסה', pi: 'פרופ׳ כהן', status: 'משתלם' } });
-    expect(r.replies[0]).toContain('15. שאלה כללית / דיווח אחר');
+    expect(r.replies[1]).toContain('15. שאלה כללית / דיווח אחר');
     r = await run(r.state, 'יש לי שאלה על לייזר במעבדה');                                         // free text -> the laser topic by words
     expect(r.replies.join('\n')).toContain('שלחו תמונה של האזור');
     r = await run(r.state, null, {}, true);                                                     // photo
@@ -411,7 +411,7 @@ describe('the safety unit template', () => {
     for (const part of ['שם מלא: דנה לוי', 'פקולטה: הנדסה', 'שם ה-PI: פרופ׳ כהן', 'סטטוס: משתלם', 'מיקום: בניין 3 חדר 12', 'קבצים שנשלחו: 1']) expect(note).toContain(part);
 
     const back = await run(null, 'שלום', { profile: { fullName: 'דנה לוי', faculty: 'הנדסה', pi: 'פרופ׳ כהן', status: 'משתלם' } });
-    expect(back.replies[0]).toContain('ברצוני לקבל מידע / לדווח על:');
+    expect(back.replies[0]).toBe('היי {שם פרטי}, טוב לראות אותך שוב! כאן {בוט} מיחידת הבטיחות 😊'); expect(back.replies[1]).toContain('ברצוני לקבל מידע / לדווח על:');
   });
 
   it('forms are links, chemicals take up to ten items and an optional SDS, the question goes to the officer, hazards to the area officer', async () => {
@@ -544,8 +544,10 @@ describe('safety flow live: areas, template endpoint, placeholders, profile, fil
     await call('PUT', '/settings/bot', 'admin@t.io', { ...DEFAULT_BOT, enabled: true, mode: 'flow' });
     const first = await say('wa1', 'שלום'); expect(first.join(' ')).toContain('שם מלא');
     await say('wa1', 'רונית כהן'); await say('wa1', 'דלג'); await say('wa1', 'דלג'); await say('wa1', 'מדעי החיים'); await say('wa1', 'פרופ׳ לוי');
+    expect(first.join(' ')).toContain('שלום, כאן הבוט מיחידת הבטיחות');                     // no persona name yet: "the bot"
     const topics = await say('wa1', '1');                                                    // status: manager
-    expect(topics[0]).toContain('ברצוני לקבל מידע / לדווח על:');
+    expect(topics[0]).toBe('תודה רונית! שמרתי את הפרטים, כך שבפעם הבאה לא נשאל אותם שוב.');  // thanked by first name
+    expect(topics[1]).toContain('ברצוני לקבל מידע / לדווח על:');
     const c0 = await conv('wa1');
     expect(c0.display_name).toBe('רונית כהן');
     expect(c0.profile).toMatchObject({ fullName: 'רונית כהן', faculty: 'מדעי החיים', pi: 'פרופ׳ לוי', status: 'מנהל / מהנדס מעבדה' });
@@ -561,8 +563,10 @@ describe('safety flow live: areas, template endpoint, placeholders, profile, fil
 
     // the same person writes again from a new contact id? no: same contact, new topic after a person closed the case
     await db.query(`UPDATE conversations SET status = 'closed', flow_state = NULL, bot_state = NULL, assigned_to = NULL WHERE id = $1`, [c1.id]);
+    await call('PUT', '/branding/bot', 'admin@t.io', { name: 'בטי', role: 'הבוט של יחידת הבטיחות' });
     const again = await say('wa1', 'שלום שוב');
-    expect(again[0]).toContain('ברצוני לקבל מידע / לדווח על:');                                 // identification is not asked again
+    expect(again[0]).toBe('היי רונית, טוב לראות אותך שוב! כאן בטי מיחידת הבטיחות 😊');          // remembered by first name, the bot by its name
+    expect(again[1]).toContain('ברצוני לקבל מידע / לדווח על:');                                 // identification is not asked again
     await say('wa1', '5');                                                                    // chemicals
     await say('wa1', 'אצטון'); await say('wa1', '2');                                          // one item, no more
     await say('wa1', 'דלג');                                                                  // no SDS
@@ -862,5 +866,41 @@ describe('editor positions', () => {
     expect(flowSchema.safeParse({ start: 'm', nodes: [{ id: 'm', type: 'end', text: '' }], layout: { m: { x: 'a', y: 1 } } }).success).toBe(false);
     expect(flowSchema.safeParse({ start: 'm', nodes: [{ id: 'm', type: 'end', text: '' }], layout: { 'Bad Id': { x: 1, y: 1 } } }).success).toBe(false);
     expect(flowSchema.safeParse({ start: 'm', nodes: [{ id: 'm', type: 'end', text: '' }], layout: { m: { x: 1e9, y: 1 } } }).success).toBe(false);
+  });
+});
+
+describe('migration 063: the bot names itself and greets known customers', () => {
+  it('upgrades a stored template flow once, sets Betty when no identity was chosen, updates the untouched welcome', async () => {
+    const { migrate: mig } = await import('../src/migrate.js');
+    const { createDb: mk } = await import('../src/db.js');
+    const d = mk(process.env.TEST_DATABASE_URL ?? 'postgres://postgres@localhost:5432/botwa_test');
+    try {
+      // the template as it was before 063
+      const old = JSON.parse(JSON.stringify(buildSafetyFlow(() => '11111111-1111-4111-8111-111111111111'))) as { nodes: { id: string; yes?: string; next?: string; text?: string }[] };
+      old.nodes = old.nodes.filter((n) => n.id !== 'welcome_back' && n.id !== 'id_saved');
+      old.nodes.find((n) => n.id === 'start')!.yes = 'topics';
+      old.nodes.find((n) => n.id === 'remember')!.next = 'topics';
+      const intro = old.nodes.find((n) => n.id === 'id_intro')!;
+      intro.text = intro.text!.replace('שלום, כאן {בוט} מיחידת הבטיחות 👋', 'שלום, כאן הבוט של יחידת הבטיחות.');
+      await d.query(`INSERT INTO settings (key, value) VALUES ('flow', $1) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`, [JSON.stringify(old)]);
+      await d.query(`DELETE FROM settings WHERE key = 'bot_persona'`);
+      await d.query(`INSERT INTO settings (key, value) VALUES ('bot', $1) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`, [JSON.stringify({ ...DEFAULT_BOT, welcome: 'שלום! אני הבוט של השירות. במה אפשר לעזור? השיבו במספר:' })]);
+      await d.query(`DELETE FROM schema_migrations WHERE name LIKE '063%'`);
+      await mig(d);
+      const v = (await d.query(`SELECT value FROM settings WHERE key = 'flow'`)).rows[0].value;
+      expect(flowSchema.safeParse(v).success).toBe(true);
+      expect(validateFlow(v)).toEqual([]);
+      const by = new Map<string, { yes?: string; next?: string; text?: string }>(v.nodes.map((n: { id: string }) => [n.id, n]));
+      expect(by.get('start')!.yes).toBe('welcome_back');
+      expect(by.get('remember')!.next).toBe('id_saved');
+      expect(by.get('id_intro')!.text).toBe((buildSafetyFlow(() => '11111111-1111-4111-8111-111111111111').nodes.find((n) => n.id === 'id_intro') as { text: string }).text);
+      expect((await d.query(`SELECT value FROM settings WHERE key = 'bot_persona'`)).rows[0].value).toEqual({ name: 'בטי', role: 'הבוט של יחידת הבטיחות' });
+      expect((await d.query(`SELECT value->>'welcome' AS w FROM settings WHERE key = 'bot'`)).rows[0].w).toBe('שלום {שם פרטי}! כאן {בוט}. במה אפשר לעזור? השיבו במספר:');
+      // once only: running it again changes nothing (no duplicate nodes)
+      await d.query(`DELETE FROM schema_migrations WHERE name LIKE '063%'`);
+      await mig(d);
+      const again = (await d.query(`SELECT value FROM settings WHERE key = 'flow'`)).rows[0].value;
+      expect(again.nodes.length).toBe(v.nodes.length);
+    } finally { await d.end(); }
   });
 });

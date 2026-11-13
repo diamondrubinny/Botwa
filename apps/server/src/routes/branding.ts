@@ -29,7 +29,7 @@ export async function loadPersona(db: Db): Promise<Persona & { avatarV: number }
 }
 /** Ready identities shipped with the system (picture in src/bot-presets). */
 const PRESETS: Record<string, { name: string; role: string; file: string; welcome: string }> = {
-  betty: { name: 'בטי', role: 'הבוט של יחידת הבטיחות', file: 'betty.jpg', welcome: 'שלום! אני בטי, הבוט של יחידת הבטיחות. במה אפשר לעזור? השיבו במספר:' },
+  betty: { name: 'בטי', role: 'הבוט של יחידת הבטיחות', file: 'betty.jpg', welcome: 'שלום {שם פרטי}! אני בטי, הבוט של יחידת הבטיחות. במה אפשר לעזור? השיבו במספר:' },
 };
 
 const IMAGE = /^image\/(png|jpeg|webp)/i;

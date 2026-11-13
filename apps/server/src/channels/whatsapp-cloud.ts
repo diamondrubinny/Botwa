@@ -51,14 +51,62 @@ export function verifySignature(appSecret: string, rawBody: Buffer, header: stri
 }
 
 interface WaMessage {
-  id?: string; from?: string; timestamp?: string; type?: string;
+  id?: string; from?: string; from_user_id?: string; timestamp?: string; type?: string;
   text?: { body?: string };
   image?: { id?: string; caption?: string }; document?: { id?: string; caption?: string; filename?: string };
   audio?: { id?: string }; video?: { id?: string; caption?: string }; sticker?: { id?: string };
   button?: { text?: string }; reaction?: { message_id?: string; emoji?: string }; interactive?: { button_reply?: { id?: string; title?: string }; list_reply?: { id?: string; title?: string } };
 }
-interface WaValue { messages?: WaMessage[]; contacts?: { wa_id?: string; profile?: { name?: string } }[] }
+interface WaContact { wa_id?: string; user_id?: string; profile?: { name?: string; username?: string } }
+interface WaValue { messages?: WaMessage[]; contacts?: WaContact[]; username?: string; status?: string; context?: string; display_phone_number?: string }
 export interface WaWebhook { object?: string; entry?: { changes?: { field?: string; value?: WaValue }[] }[] }
+
+/**
+ * A business-scoped user id (BSUID): a two-letter country code, a period and up to 128 letters/digits ("US.1349…"); a parent
+ * id has "ENT." after the country code. Format per Meta's business-scoped user ids page (verify against the official reference).
+ */
+export const BSUID = /^[A-Z]{2}\.(?:ENT\.)?[A-Za-z0-9]{1,128}$/;
+/** Our contact id for a customer who arrived by user id only (their phone number hidden behind a WhatsApp username). */
+export const bsuidContact = (id: string) => `${id}@bsuid`;
+/** The recipient field of a Cloud API message: the phone number as "to", or the BSUID as "recipient" (Meta: supported from July 2026). */
+export function recipientOf(externalContactId: string): { to: string } | { recipient: string } {
+  const [id, kind] = externalContactId.split('@');
+  return kind === 'bsuid' && BSUID.test(id ?? '') ? { recipient: id! } : { to: id! };
+}
+
+/** A message body built for "to", addressed to the contact instead (phone number or user id). */
+function addressed(payload: Record<string, unknown>, externalContactId: string): Record<string, unknown> {
+  const { to: _to, ...rest } = payload;
+  return { ...rest, ...recipientOf(externalContactId) };
+}
+
+/**
+ * Business username rules (Meta, business-scoped user ids page): 3–35 characters, English letters, digits, "." and "_" only, at
+ * least one letter, no leading/trailing period or "..", not starting with "www." and not ending with a domain suffix. Case is
+ * ignored by Meta, so we keep it lower-case. Returns an error key, or null when the name is acceptable.
+ */
+const DOMAIN_END = /\.(com|org|net|int|edu|gov|mil|arpa|html|htm|txt|xml)$/i;
+export function usernameProblem(raw: string): string | null {
+  const u = raw.trim().toLowerCase();
+  if (u.length < 3 || u.length > 35) return 'username_length';
+  if (!/^[a-z0-9._]+$/.test(u)) return 'username_chars';
+  if (!/[a-z]/.test(u)) return 'username_no_letter';
+  if (u.startsWith('.') || u.endsWith('.') || u.includes('..')) return 'username_periods';
+  if (u.startsWith('www.') || DOMAIN_END.test(u)) return 'username_domain';
+  return null;
+}
+
+/** Meta's Username API error codes → our keys (codes from the same page; verify against the official reference, it changes). */
+const USERNAME_ERRORS: Record<number, string> = {
+  10: 'username_permission', 33: 'username_invalid_number', 100: 'username_format', 190: 'meta_auth_failed',
+  147001: 'username_taken', 147002: 'username_not_eligible', 147003: 'username_fb_link', 147004: 'username_ig_link',
+  147005: 'username_transfer_required', 147006: 'username_business_app', 147007: 'username_reserved_other',
+  130429: 'username_limit', 133010: 'username_not_registered',
+};
+export class UsernameError extends Error {
+  constructor(readonly key: string, readonly detail?: string) { super(key); }
+}
+export interface BusinessUsername { username: string | null; status: 'approved' | 'reserved' | 'none' }
 
 export class WhatsAppCloudAdapter implements ChannelAdapter {
   private creds?: CloudCreds;
@@ -66,7 +114,7 @@ export class WhatsAppCloudAdapter implements ChannelAdapter {
   get numberId(): string | null { return this.creds?.phoneNumberId ?? null; }
   private active = false;
 
-  constructor(private readonly ctx: AdapterContext, private readonly fetchImpl: FetchLike = (u, i) => fetch(u, i), private readonly version = 'v21.0') {}
+  constructor(private readonly ctx: AdapterContext, private readonly fetchImpl: FetchLike = (u, i) => fetch(u, i), private readonly version = 'v25.0') {}
 
   private url = (path: string) => `${GRAPH}/${this.version}/${path}`;
   private auth = () => ({ authorization: `Bearer ${this.creds!.accessToken}` });
@@ -248,17 +296,73 @@ export class WhatsAppCloudAdapter implements ChannelAdapter {
     } catch { return null; }
   }
 
+  // ---- business username (Meta's Username API on the phone number; per the business-scoped user ids page, verify against the reference) ----
+
+  /** One Username API call: the JSON on success, a UsernameError with our key (and Meta's short message) otherwise. */
+  private async usernameCall<T>(method: 'GET' | 'POST' | 'DELETE', path: string, body?: unknown): Promise<T> {
+    if (!this.creds || !this.active) throw new UsernameError('channel_not_connected');
+    let res: Response;
+    try {
+      res = await this.fetchImpl(this.url(`${this.creds.phoneNumberId}/${path}`), {
+        method, headers: body ? { ...this.auth(), 'content-type': 'application/json' } : this.auth(), body: body ? JSON.stringify(body) : undefined, signal: AbortSignal.timeout(15_000),
+      });
+    } catch { throw new UsernameError('meta_unreachable'); }
+    const j = (await res.json().catch(() => ({}))) as T & { error?: { code?: number; message?: string; error_user_msg?: string; error_data?: { details?: string } } };
+    if (!res.ok || j.error) {
+      const e = j.error ?? {};
+      const said = String(e.error_data?.details ?? e.error_user_msg ?? e.message ?? '').replace(/[\u0000-\u001f]/g, ' ').slice(0, 200);
+      throw new UsernameError((e.code !== undefined && USERNAME_ERRORS[e.code]) || metaCheckError(res.status, e.code), said || undefined);
+    }
+    return j;
+  }
+
+  /** The number's current username and its status ("none" when it has none). */
+  async getUsername(): Promise<BusinessUsername> {
+    const j = await this.usernameCall<{ username?: string; status?: string }>('GET', 'username');
+    const status = j.status === 'approved' || j.status === 'reserved' ? j.status : 'none';
+    return { username: j.username && status !== 'none' ? j.username : null, status };
+  }
+
+  /** Adopt or change the username. transfer: move it from another number of the same business portfolio (counts as a change). */
+  async setUsername(username: string, transfer = false): Promise<BusinessUsername> {
+    const u = username.trim().toLowerCase();
+    const bad = usernameProblem(u);
+    if (bad) throw new UsernameError(bad);
+    const j = await this.usernameCall<{ status?: string }>('POST', 'username', { username: u, transfer_action: transfer ? 'force_transfer' : 'none' });
+    return { username: u, status: j.status === 'reserved' ? 'reserved' : 'approved' };
+  }
+
+  async deleteUsername(): Promise<boolean> {
+    const j = await this.usernameCall<{ success?: boolean }>('DELETE', 'username');
+    return j.success === true;
+  }
+
+  /** Usernames Meta reserved for the business portfolio (higher chance of approval). */
+  async usernameSuggestions(): Promise<string[]> {
+    const j = await this.usernameCall<{ data?: { username_suggestions?: unknown[] }[] }>('GET', 'username_suggestions');
+    const all = (j.data ?? []).flatMap((d) => (Array.isArray(d.username_suggestions) ? d.username_suggestions : []));
+    return [...new Set(all.filter((x): x is string => typeof x === 'string' && usernameProblem(x) === null).map((x) => x.toLowerCase()))].slice(0, 20);
+  }
+
   async handleWebhook(payload: WaWebhook): Promise<number> {
     let n = 0;
     for (const entry of payload.entry ?? []) {
       for (const ch of entry.changes ?? []) {
+        if (ch.field === 'business_username_updates' && ch.value) { this.onUsernameUpdate?.(ch.value); continue; }
         if (ch.field !== 'messages' || !ch.value) continue;
-        const names = new Map((ch.value.contacts ?? []).map((c) => [c.wa_id ?? '', c.profile?.name]));
+        const contacts = ch.value.contacts ?? [];
         for (const m of ch.value.messages ?? []) {
-          if (!m.id || !m.from || !/^\d{5,20}$/.test(m.from)) continue;
+          if (!m.id) continue;
+          // the phone number when the message has it; otherwise (a customer with a WhatsApp username) the business-scoped user id
+          const phone = m.from && /^\d{5,20}$/.test(m.from) ? m.from : undefined;
+          const contact = contacts.find((c) => (phone && c.wa_id === phone) || (!!m.from_user_id && c.user_id === m.from_user_id)) ?? (contacts.length === 1 ? contacts[0] : undefined);
+          const userId = [m.from_user_id, contact?.user_id].find((v): v is string => !!v && BSUID.test(v));
+          if (!phone && !userId) continue;
+          const ext = phone ? `${phone}@s.whatsapp.net` : bsuidContact(userId!);
+          const name = contact?.profile?.name || (contact?.profile?.username ? `@${contact.profile.username}` : undefined);
           // a reaction on one of our messages is feedback, not a message (shape per Meta's webhook docs; verify against the official reference)
-          if (m.type === 'reaction') { if (m.reaction?.message_id) this.ctx.events.onReaction?.({ externalContactId: `${m.from}@s.whatsapp.net`, targetMessageId: m.reaction.message_id, emoji: m.reaction.emoji ?? '' }); continue; }
-          await this.ctx.events.onMessage(this.toInbound(m, names.get(m.from)));
+          if (m.type === 'reaction') { if (m.reaction?.message_id) this.ctx.events.onReaction?.({ externalContactId: ext, targetMessageId: m.reaction.message_id, emoji: m.reaction.emoji ?? '' }); continue; }
+          await this.ctx.events.onMessage({ ...this.toInbound(m, ext, name), userId });
           n++;
         }
       }
@@ -266,7 +370,10 @@ export class WhatsAppCloudAdapter implements ChannelAdapter {
     return n;
   }
 
-  private toInbound(m: WaMessage, name?: string): InboundMessage {
+  /** Set by the channel manager: Meta reported a change of the number's business username (webhook field business_username_updates). */
+  onUsernameUpdate?: (v: { username?: string; status?: string; context?: string }) => void;
+
+  private toInbound(m: WaMessage, ext: string, name?: string): InboundMessage {
     const media = m.image ?? m.document ?? m.audio ?? m.video ?? m.sticker;
     const caption = m.image?.caption ?? m.document?.caption ?? m.video?.caption;
     // a tap on a menu button or list row arrives as the option number we put in its id (titles are shortened), so the bot reads it like a typed number
@@ -274,7 +381,7 @@ export class WhatsAppCloudAdapter implements ChannelAdapter {
     const pickedText = picked ? (/^\d{1,2}$/.test(picked.id ?? '') ? picked.id : picked.title) : undefined;
     const text = m.text?.body ?? m.button?.text ?? pickedText ?? caption ?? (media ? '' : '[unsupported message type]');
     return {
-      externalContactId: `${m.from}@s.whatsapp.net`,
+      externalContactId: ext,
       contactName: name,
       externalMessageId: m.id!,
       text,
@@ -311,21 +418,21 @@ export class WhatsAppCloudAdapter implements ChannelAdapter {
   }
 
   async sendText(externalContactId: string, text: string): Promise<{ externalMessageId?: string }> {
-    const out = await this.post(`${this.creds?.phoneNumberId}/messages`, { messaging_product: 'whatsapp', recipient_type: 'individual', to: externalContactId.split('@')[0], type: 'text', text: { body: text, preview_url: false } });
+    const out = await this.post(`${this.creds?.phoneNumberId}/messages`, { messaging_product: 'whatsapp', recipient_type: 'individual', ...recipientOf(externalContactId), type: 'text', text: { body: text, preview_url: false } });
     return { externalMessageId: out.messages?.[0]?.id };
   }
 
   /** A menu as reply buttons (up to 3) or a list (up to 10 rows). Throws 'menu_not_supported' when it does not fit, so the caller sends the numbered text. */
   async sendInteractive(externalContactId: string, body: string, options: MenuOption[]): Promise<{ externalMessageId?: string }> {
-    const payload = buildInteractive(externalContactId.split('@')[0]!, body, options);
+    const payload = buildInteractive('', body, options);
     if (!payload) throw new Error('menu_not_supported');
-    const out = await this.post(`${this.creds?.phoneNumberId}/messages`, payload);
+    const out = await this.post(`${this.creds?.phoneNumberId}/messages`, addressed(payload, externalContactId));
     return { externalMessageId: out.messages?.[0]?.id };
   }
 
   /** A pre-approved template message: allowed outside the 24-hour window. */
   async sendTemplate(externalContactId: string, t: TemplateSend): Promise<{ externalMessageId?: string }> {
-    const out = await this.post(`${this.creds?.phoneNumberId}/messages`, buildTemplate(externalContactId.split('@')[0]!, t));
+    const out = await this.post(`${this.creds?.phoneNumberId}/messages`, addressed(buildTemplate('', t), externalContactId));
     return { externalMessageId: out.messages?.[0]?.id };
   }
 
@@ -369,13 +476,13 @@ export class WhatsAppCloudAdapter implements ChannelAdapter {
     if (!up.ok || !upj.id) throw new Error('cloud_upload_failed');
     const kind = media.mime.startsWith('image/') ? 'image' : media.mime.startsWith('audio/') ? 'audio' : media.mime.startsWith('video/') ? 'video' : 'document';
     const body = kind === 'document' ? { id: upj.id, filename: media.fileName, caption: media.caption } : kind === 'audio' ? { id: upj.id } : { id: upj.id, caption: media.caption };
-    const out = await this.post(`${this.creds.phoneNumberId}/messages`, { messaging_product: 'whatsapp', recipient_type: 'individual', to: externalContactId.split('@')[0], type: kind, [kind]: body });
+    const out = await this.post(`${this.creds.phoneNumberId}/messages`, { messaging_product: 'whatsapp', recipient_type: 'individual', ...recipientOf(externalContactId), type: kind, [kind]: body });
     return { externalMessageId: out.messages?.[0]?.id };
   }
 
   /** Reaction to a customer message (inside the 24-hour window). An empty emoji removes ours. Parameters: docs verification needed against the current Cloud API reference. */
   async react(externalContactId: string, externalMessageId: string, emoji: string): Promise<void> {
-    await this.post(`${this.creds?.phoneNumberId}/messages`, { messaging_product: 'whatsapp', recipient_type: 'individual', to: externalContactId.split('@')[0], type: 'reaction', reaction: emoji ? { message_id: externalMessageId, emoji } : { message_id: externalMessageId } });
+    await this.post(`${this.creds?.phoneNumberId}/messages`, { messaging_product: 'whatsapp', recipient_type: 'individual', ...recipientOf(externalContactId), type: 'reaction', reaction: emoji ? { message_id: externalMessageId, emoji } : { message_id: externalMessageId } });
   }
 
   async markRead(_externalContactId: string, externalMessageIds: string[]): Promise<void> {

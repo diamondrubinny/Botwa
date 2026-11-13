@@ -30,7 +30,7 @@ const schema = z.object({
   /** nobody stays signed in longer than this from the moment they typed the password, however active */
   SESSION_MAX_DAYS: z.coerce.number().int().min(1).max(365).default(90),
   /** Graph API version used by the official WhatsApp channel; check Meta's current supported versions. */
-  WHATSAPP_GRAPH_VERSION: z.string().regex(/^v\d+\.\d+$/).default('v21.0'),
+  WHATSAPP_GRAPH_VERSION: z.string().regex(/^v\d+\.\d+$/).default('v25.0'),
   // Telegram user-account login (QR). Get both from https://my.telegram.org -> API development tools.
   TELEGRAM_API_ID: z.coerce.number().int().positive().optional(),
   TELEGRAM_API_HASH: z.string().min(8).optional(),

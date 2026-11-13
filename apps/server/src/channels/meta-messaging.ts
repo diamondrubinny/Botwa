@@ -79,7 +79,7 @@ export class MetaMessagingAdapter implements ChannelAdapter {
   private names = new Map<string, string | null>();
   lastError: string | null = null;
 
-  constructor(private readonly ctx: AdapterContext, readonly platform: MetaPlatform, private readonly fetchImpl: FetchLike = (u, i) => fetch(u, i), private readonly version = 'v21.0') {}
+  constructor(private readonly ctx: AdapterContext, readonly platform: MetaPlatform, private readonly fetchImpl: FetchLike = (u, i) => fetch(u, i), private readonly version = 'v25.0') {}
 
   private url = (path: string) => `${GRAPH}/${this.version}/${path}`;
   private auth = () => ({ authorization: `Bearer ${this.creds!.pageAccessToken}` });

@@ -1,4 +1,4 @@
-import type { FastifyInstance } from 'fastify';
+import type { FastifyInstance, FastifyReply } from 'fastify';
 import { z } from 'zod';
 import { imageSize, stripImageMetadata } from '../avatars.js';
 import { audit } from '../audit.js';
@@ -10,6 +10,8 @@ import { createDefaultWebchat } from './webchat.js';
 import type { Db } from '../db.js';
 import { warmupCap } from '../channels/sender.js';
 import { monthOf, usageLimitSchema, usageReport } from '../usage.js';
+import { UsernameError, usernameProblem } from '../channels/whatsapp-cloud.js';
+import { loadUsername, saveUsername } from '../channels/username-store.js';
 
 /** Digits with country code, no leading 0/00. Israeli local format (05XXXXXXXX) is converted to 972. */
 export function normalizePhone(d: string): string {
@@ -299,6 +301,72 @@ export function channelRoutes(app: FastifyInstance, db: Db, mgr: ChannelManager,
     const detail = result === 'ok' ? null : mgr.cloudAdapter(p.data.id)?.lastPhotoDetail ?? null;
     await audit(db, { actorId: req.user!.id, action: 'channel.profile_photo', target: p.data.id, ip: req.ip, meta: { result, bytes: img.data.length, ...(detail ? { detail } : {}) } });
     return { result, ...(detail ? { detail } : {}) };
+  });
+
+  // ---- business username of an official number (Meta's Username API). Admin only; changes are audited. ----
+  const cloudOf = async (id: unknown) => {
+    const p = idParam.safeParse(id);
+    if (!p.success || (await db.query(`SELECT 1 FROM channels WHERE id=$1 AND type='whatsapp_cloud'`, [p.data.id])).rowCount !== 1) return null;
+    return { id: p.data.id, adapter: mgr.cloudAdapter(p.data.id) };
+  };
+  const usernameFail = (reply: FastifyReply, e: unknown) => {
+    if (e instanceof UsernameError) {
+      const status = e.key === 'channel_not_connected' ? 409 : e.key === 'meta_unreachable' ? 502 : e.key === 'username_limit' ? 429 : 400;
+      return reply.code(status).send({ error: e.key, ...(e.detail ? { detail: e.detail } : {}) });
+    }
+    throw e;
+  };
+  app.get('/channels/:id/cloud/username', { preHandler: adminOnly, config: { rateLimit: { max: 30, timeWindow: '1 minute' } } }, async (req, reply) => {
+    const c = await cloudOf(req.params);
+    if (!c) return reply.code(404).send({ error: 'not_found' });
+    const stored = await loadUsername(db, c.id);
+    if (!c.adapter?.isActive()) return { live: null, stored, error: 'channel_not_connected' };
+    try {
+      const live = await c.adapter.getUsername();
+      await saveUsername(db, c.id, live);
+      return { live, stored: await loadUsername(db, c.id) };
+    } catch (e) {
+      if (e instanceof UsernameError) return { live: null, stored, error: e.key, ...(e.detail ? { detail: e.detail } : {}) };
+      throw e;
+    }
+  });
+  app.get('/channels/:id/cloud/username/suggestions', { preHandler: adminOnly, config: { rateLimit: { max: 20, timeWindow: '1 minute' } } }, async (req, reply) => {
+    const c = await cloudOf(req.params);
+    if (!c) return reply.code(404).send({ error: 'not_found' });
+    if (!c.adapter?.isActive()) return reply.code(409).send({ error: 'channel_not_connected' });
+    try { return { suggestions: await c.adapter.usernameSuggestions() }; } catch (e) { return usernameFail(reply, e); }
+  });
+  const usernameBody = z.object({ username: z.string().trim().min(1).max(40), transfer: z.boolean().default(false) }).strict();
+  // Meta allows 2 changes in 14 days (10 while reserved): a tight limit here too, so a double click does not spend one
+  app.put('/channels/:id/cloud/username', { preHandler: adminOnly, config: { rateLimit: { max: 5, timeWindow: '10 minutes' } } }, async (req, reply) => {
+    const c = await cloudOf(req.params);
+    if (!c) return reply.code(404).send({ error: 'not_found' });
+    const b = usernameBody.safeParse(req.body);
+    if (!b.success) return reply.code(400).send({ error: 'bad_request' });
+    const bad = usernameProblem(b.data.username);
+    if (bad) return reply.code(400).send({ error: bad });
+    if (!c.adapter?.isActive()) return reply.code(409).send({ error: 'channel_not_connected' });
+    try {
+      const r = await c.adapter.setUsername(b.data.username, b.data.transfer);
+      await saveUsername(db, c.id, r);
+      await audit(db, { actorId: req.user!.id, action: 'channel.username_set', target: c.id, ip: req.ip, meta: { username: r.username, status: r.status, transfer: b.data.transfer } });
+      return r;
+    } catch (e) {
+      await audit(db, { actorId: req.user!.id, action: 'channel.username_set_failed', target: c.id, ip: req.ip, meta: { username: b.data.username.toLowerCase(), error: e instanceof UsernameError ? e.key : 'error' } });
+      return usernameFail(reply, e);
+    }
+  });
+  app.delete('/channels/:id/cloud/username', { preHandler: adminOnly, config: { rateLimit: { max: 5, timeWindow: '10 minutes' } } }, async (req, reply) => {
+    const c = await cloudOf(req.params);
+    if (!c) return reply.code(404).send({ error: 'not_found' });
+    if (!c.adapter?.isActive()) return reply.code(409).send({ error: 'channel_not_connected' });
+    try {
+      const ok = await c.adapter.deleteUsername();
+      if (!ok) return reply.code(502).send({ error: 'username_delete_failed' });
+      await saveUsername(db, c.id, { status: 'deleted' });
+      await audit(db, { actorId: req.user!.id, action: 'channel.username_delete', target: c.id, ip: req.ip });
+      return { ok: true };
+    } catch (e) { return usernameFail(reply, e); }
   });
 
   // Telegram two-step verification password during QR login. Not persisted, not logged.

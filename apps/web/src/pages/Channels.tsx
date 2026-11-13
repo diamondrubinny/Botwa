@@ -4,6 +4,7 @@ import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { api, ApiError, can, CHANNEL_NAMES, type Channel, type ChannelKind, type ChannelHealth, type Me } from '../api';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { UsageMeter } from '../components/UsageMeter';
+import { BusinessUsernamePanel } from '../components/BusinessUsername';
 import { usePoll } from '../hooks';
 import { errText, t } from '../strings';
 
@@ -30,6 +31,7 @@ export function Channels({ me }: { me: Me }) {
   const [metaFor, setMetaFor] = useState<string | null>(null);
   const [mailFor, setMailFor] = useState<string | null>(null);
   const [photoFor, setPhotoFor] = useState<string | null>(null);
+  const [nameFor, setNameFor] = useState<string | null>(null);
   const [msg, setMsg] = useState('');
   const [linking, setLinking] = useState<string | null>(null);
   const [pending, setPending] = useState<Pending>(null);
@@ -150,6 +152,9 @@ export function Channels({ me }: { me: Me }) {
                 {(ch.type === 'whatsapp' || ch.type === 'whatsapp_cloud') && (
                   <button onClick={() => setPhotoFor(photoFor === ch.id ? null : ch.id)} aria-expanded={photoFor === ch.id}>תמונת פרופיל</button>
                 )}
+                {ch.type === 'whatsapp_cloud' && (
+                  <button onClick={() => setNameFor(nameFor === ch.id ? null : ch.id)} aria-expanded={nameFor === ch.id}>שם משתמש עסקי</button>
+                )}
                 <button onClick={() => run(() => api('POST', `/channels/${ch.id}/stop`))}>עצירה</button>
                 <button className="danger" onClick={() => setPending({ kind: 'logout', ch })}>ניתוק החשבון</button>
                 <button className="danger" onClick={() => setPending({ kind: 'delete', ch })}>מחיקת ערוץ</button>
@@ -168,6 +173,7 @@ export function Channels({ me }: { me: Me }) {
             )}
             {webFor === ch.id && <WebChatPanel channel={ch} onSaved={() => void reload()} />}
             {photoFor === ch.id && <ProfilePhotoPanel channel={ch} />}
+            {nameFor === ch.id && <BusinessUsernamePanel channel={ch} />}
             {mailFor === ch.id && <EmailPanel channel={ch} onSaved={() => void reload()} />}
             {metaFor === ch.id && <MetaPanel channel={ch} onSaved={() => void reload()} />}
             {cloudFor === ch.id && <CloudPanel channel={ch} onSaved={() => { setCloudFor(null); void reload(); }} />}

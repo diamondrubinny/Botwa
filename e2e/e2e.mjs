@@ -95,6 +95,17 @@ await axe('channels: official WhatsApp setup');
 // monthly outgoing count of the official number: shown on the card, the limit (1000 by default) can be changed
 await page.waitForSelector('li.card:has-text("רשמי") .usage meter');
 check('official channel: monthly outgoing count against 1000 by default', /0\s*מתוך\s*1,000/.test(await page.textContent('li.card:has-text("רשמי") .usage-num')), await page.textContent('li.card:has-text("רשמי") .usage-num'));
+// business username of the official number: Meta's format is checked before anything is sent; the panel is accessible
+await page.click('li.card:has-text("רשמי") >> button:has-text("שם משתמש עסקי")');
+await page.waitForSelector('section:has(h3:has-text("שם משתמש עסקי בווצאפ"))');
+await page.waitForSelector('section:has(h3:has-text("שם משתמש עסקי בווצאפ")) dl.kv');
+await page.fill('input[id^="bu-"][id$="-in"]', 'safe..ty');
+check('business username: a bad name is explained and cannot be saved, and a disconnected channel cannot change it',
+  await page.isVisible('text=לא יכול להתחיל או להסתיים בנקודה') && await page.isDisabled('button:has-text("שמירת השם")') && await page.isVisible('text=הערוץ צריך להיות מחובר כדי לשנות את שם המשתמש'));
+await page.fill('input[id^="bu-"][id$="-in"]', '@Technion.Safety');
+check('business username: "@" and capitals are normalised', (await page.inputValue('input[id^="bu-"][id$="-in"]')) === 'technion.safety');
+await axe('channels: business username');
+await page.click('li.card:has-text("רשמי") >> button:has-text("שם משתמש עסקי")');
 await page.click('li.card:has-text("רשמי") >> button:has-text("שינוי המגבלה")');
 await page.fill('li.card:has-text("רשמי") input[id^="us-l-"]', '500');
 await page.check('li.card:has-text("רשמי") input[type=radio][name^="us-a-"] >> nth=1');

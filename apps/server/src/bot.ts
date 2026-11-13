@@ -104,7 +104,7 @@ export type BotConfig = z.infer<typeof botSchema>;
 export const DEFAULT_BOT: BotConfig = {
   enabled: false,
   mode: 'menu',
-  welcome: 'שלום! אני הבוט של השירות. במה אפשר לעזור? השיבו במספר:',
+  welcome: 'שלום {שם פרטי}! כאן {בוט}. במה אפשר לעזור? השיבו במספר:',
   items: [
     { title: 'שעות פעילות', answer: 'אנחנו פעילים בימים א׳–ה׳ בין 9:00 ל-17:00.' },
     { title: 'פרטי יצירת קשר', answer: 'אפשר ליצור איתנו קשר גם בטלפון או באימייל: [להשלים].' },

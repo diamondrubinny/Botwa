@@ -60,7 +60,8 @@ export function Bot({ me }: { me: Me }) {
           </div>
           <div className="field">
             <label htmlFor="b-welcome">הודעת פתיחה (מעל התפריט)</label>
-            <textarea id="b-welcome" rows={2} maxLength={1000} required value={b.welcome} onChange={(e) => set({ welcome: e.target.value })} />
+            <textarea id="b-welcome" rows={2} maxLength={1000} required aria-describedby="b-welcome-vars" value={b.welcome} onChange={(e) => set({ welcome: e.target.value })} />
+            <p id="b-welcome-vars" className="hint">אפשר לכתוב <code>{'{בוט}'}</code> (שם הבוט, למשל בטי) ו־<code>{'{שם פרטי}'}</code> (השם הפרטי של לקוח מוכר; ללקוח חדש המילה פשוט נשמטת).</p>
           </div>
 
           <h2>פריטי התפריט (עד 9)</h2>

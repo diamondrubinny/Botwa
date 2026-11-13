@@ -2,7 +2,7 @@ import { createHmac, randomBytes } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { buildApp } from '../src/app.js';
 import { ChannelManager, createDefaultFactory } from '../src/channels/manager.js';
-import { metaCheckError, isGraphMediaUrl, verifySignature, WhatsAppCloudAdapter } from '../src/channels/whatsapp-cloud.js';
+import { metaCheckError, isGraphMediaUrl, recipientOf, usernameProblem, verifySignature, WhatsAppCloudAdapter } from '../src/channels/whatsapp-cloud.js';
 import { loadConfig } from '../src/config.js';
 import { createDb } from '../src/db.js';
 import { migrate } from '../src/migrate.js';
@@ -23,6 +23,25 @@ describe('helpers', () => {
     expect(metaCheckError(403, 10)).toBe('meta_permission_denied');
     expect(metaCheckError(400, 4)).toBe('meta_rate_limited');
     expect(metaCheckError(500, undefined)).toBe('meta_check_failed');
+  });
+
+  it('checks business usernames by Meta\'s rules and addresses a message by number or by user id', () => {
+    for (const ok of ['technion.safety', 'safety_unit', 'abc', 'a1b2', 'x'.repeat(35)]) expect(usernameProblem(ok), ok).toBeNull();
+    expect(usernameProblem('ab')).toBe('username_length');
+    expect(usernameProblem('x'.repeat(36))).toBe('username_length');
+    expect(usernameProblem('בטיחות')).toBe('username_chars');
+    expect(usernameProblem('café')).toBe('username_chars');
+    expect(usernameProblem('safety unit')).toBe('username_chars');
+    expect(usernameProblem('12345')).toBe('username_no_letter');
+    expect(usernameProblem('.safety')).toBe('username_periods');
+    expect(usernameProblem('safety.')).toBe('username_periods');
+    expect(usernameProblem('safe..ty')).toBe('username_periods');
+    expect(usernameProblem('www.safety')).toBe('username_domain');
+    expect(usernameProblem('safety.com')).toBe('username_domain');
+    expect(usernameProblem('Technion.Safety')).toBeNull();                   // case is ignored by Meta: kept lower-case
+    expect(recipientOf('972501112233@s.whatsapp.net')).toEqual({ to: '972501112233' });
+    expect(recipientOf('US.13491208655302741918@bsuid')).toEqual({ recipient: 'US.13491208655302741918' });
+    expect(recipientOf('IL.ENT.abc123@bsuid')).toEqual({ recipient: 'IL.ENT.abc123' });
   });
 
   it('verifies HMAC signatures and restricts media hosts', () => {
@@ -56,8 +75,12 @@ describe('official WhatsApp channel', () => {
     if (url.includes('fields=webhook_configuration')) return Response.json({ webhook_configuration: webhookConf, id: '1234567890' });
     if (init?.method === 'POST' && /\/1234567890$/.test(url)) { routed.push(JSON.parse(init.body as string)); return Response.json({ success: true }); }
     if (url.includes('/subscribed_apps')) return init?.method === 'POST' ? subscribeResponse() : Response.json({ data: subscribedData });
+    if (url.endsWith('/1234567890/username_suggestions')) return Response.json({ data: [{ username_suggestions: ['technion.safety', 'Bad..name', 'TECHNION_SAFETY'] }] });
+    if (url.endsWith('/1234567890/username')) { usernameCalls.push({ method: init?.method ?? 'GET', body: init?.body ? JSON.parse(String(init.body)) : undefined }); return usernameResponse(init?.method ?? 'GET'); }
     return infoResponse();
   };
+  const usernameCalls: { method: string; body?: { username?: string; transfer_action?: string } }[] = [];
+  let usernameResponse: (method: string) => Response = (method) => (method === 'GET' ? Response.json({ status: 'none' }) : method === 'DELETE' ? Response.json({ success: true }) : Response.json({ status: 'approved' }));
   let subscribeResponse: () => Response = () => Response.json({ success: true });
   let subscribedData: unknown[] = [];
   let webhookConf: Record<string, string> = { application: 'https://old-provider.example/hook' };
@@ -221,7 +244,7 @@ describe('official WhatsApp channel', () => {
     const r = await call('POST', `/conversations/${conv}/messages`, 'adm@t.io', { text: 'מה שלומך' });
     expect(r.statusCode).toBe(201);
     const sent = calls.find((c) => c.init?.method === 'POST' && c.url.endsWith('/1234567890/messages'))!;
-    expect(sent.url).toContain('https://graph.facebook.com/v21.0/');
+    expect(sent.url).toContain('https://graph.facebook.com/v25.0/');
     expect(JSON.parse(sent.init!.body as string)).toMatchObject({ messaging_product: 'whatsapp', to: '972501112233', type: 'text', text: { body: 'מה שלומך' } });
     expect((sent.init!.headers as Record<string, string>).authorization).toBe(`Bearer ${TOKEN}`);
 
@@ -278,5 +301,67 @@ describe('official WhatsApp channel', () => {
     expect(bad.detail).toContain('שמירה בפרופיל העסקי (HTTP 400, code 100/2494102): The image is too small');
     profileResponse = () => Response.json({ success: true });
     expect((await db.query(`SELECT count(*)::int AS n FROM audit_log WHERE action = 'channel.profile_photo'`)).rows[0].n).toBe(2);
+  });
+  it('business username: read, suggestions, set (format checked first, Meta errors named), transfer, delete; admins only, audited', async () => {
+    const base = `/channels/${channelId}/cloud/username`;
+    expect((await call('GET', base, 'ag@t.io')).statusCode).toBe(403);
+    expect((await call('GET', base, 'adm@t.io')).json()).toMatchObject({ live: { username: null, status: 'none' } });
+    expect((await call('GET', `${base}/suggestions`, 'adm@t.io')).json()).toEqual({ suggestions: ['technion.safety', 'technion_safety'] });   // invalid names dropped, kept lower-case
+    usernameCalls.length = 0;
+    const bad = await call('PUT', base, 'adm@t.io', { username: 'safe..ty' });
+    expect(bad.statusCode).toBe(400);
+    expect(bad.json()).toEqual({ error: 'username_periods' });
+    expect(usernameCalls).toEqual([]);                                                               // never sent to Meta (a change is limited)
+    const ok = await call('PUT', base, 'adm@t.io', { username: 'Technion.Safety' });
+    expect(ok.json()).toEqual({ username: 'technion.safety', status: 'approved' });
+    expect(usernameCalls[0]).toEqual({ method: 'POST', body: { username: 'technion.safety', transfer_action: 'none' } });
+    expect((await db.query(`SELECT username, status FROM wa_business_usernames WHERE channel_id = $1`, [channelId])).rows[0]).toEqual({ username: 'technion.safety', status: 'approved' });
+    // Meta's refusals come back by name, with its short explanation
+    usernameResponse = () => Response.json({ error: { code: 147005, message: 'Username transfer required', error_data: { details: 'in use on another number' } } }, { status: 400 });
+    const t = await call('PUT', base, 'adm@t.io', { username: 'safety.unit' });
+    expect(t.statusCode).toBe(400);
+    expect(t.json()).toEqual({ error: 'username_transfer_required', detail: 'in use on another number' });
+    usernameResponse = () => Response.json({ error: { code: 130429, error_subcode: 2655131, message: 'too many' } }, { status: 400 });
+    expect((await call('PUT', base, 'adm@t.io', { username: 'safety.unit' })).json()).toMatchObject({ error: 'username_limit' });
+    usernameResponse = (m) => (m === 'GET' ? Response.json({ username: 'safety.unit', status: 'reserved' }) : m === 'DELETE' ? Response.json({ success: true }) : Response.json({ status: 'reserved' }));
+    usernameCalls.length = 0;
+    expect((await call('PUT', base, 'adm@t.io', { username: 'safety.unit', transfer: true })).json()).toEqual({ username: 'safety.unit', status: 'reserved' });
+    expect(usernameCalls[0]!.body).toEqual({ username: 'safety.unit', transfer_action: 'force_transfer' });
+    expect((await call('GET', base, 'adm@t.io')).json()).toMatchObject({ live: { username: 'safety.unit', status: 'reserved' }, stored: { username: 'safety.unit', status: 'reserved' } });
+    const del = await app.inject({ method: 'DELETE', url: base, remoteAddress: '10.91.0.1', headers: { origin: ORIGIN, cookie: cookies['adm@t.io']! } });
+    expect(del.json()).toEqual({ ok: true });
+    expect((await db.query(`SELECT username, status FROM wa_business_usernames WHERE channel_id = $1`, [channelId])).rows[0]).toEqual({ username: null, status: 'deleted' });
+    const acts = (await db.query(`SELECT action FROM audit_log WHERE action LIKE 'channel.username%' ORDER BY id`)).rows.map((r) => r.action);
+    expect(acts).toEqual(['channel.username_set', 'channel.username_set_failed', 'channel.username_set_failed', 'channel.username_set', 'channel.username_delete']);
+    // Meta reports a change by webhook
+    expect((await hook({ object: 'whatsapp_business_account', entry: [{ changes: [{ field: 'business_username_updates', value: { display_phone_number: '972500000000', username: 'technion.safety', status: 'approved' } }] }] })).statusCode).toBe(200);
+    await new Promise((r) => setTimeout(r, 30));
+    expect((await db.query(`SELECT username, status FROM wa_business_usernames WHERE channel_id = $1`, [channelId])).rows[0]).toEqual({ username: 'technion.safety', status: 'approved' });
+  });
+
+  it('customers with a WhatsApp username: the user id finds the same contact, a new one is answered by user id', async () => {
+    const BS = 'IL.13491208655302741918';
+    const wa = (id: string, value: object) => ({ object: 'whatsapp_business_account', entry: [{ changes: [{ field: 'messages', value }] }] });
+    // the number and the user id together: the id is kept on the known contact
+    await hook(wa('wamid.B1', { contacts: [{ wa_id: '972501112233', user_id: BS, profile: { name: 'Dana' } }], messages: [{ id: 'wamid.B1', from: '972501112233', from_user_id: BS, timestamp: String(Math.floor(Date.now() / 1000)), type: 'text', text: { body: 'עם מספר' } }] }));
+    expect((await db.query(`SELECT user_id FROM contacts WHERE external_id = '972501112233@s.whatsapp.net'`)).rows[0].user_id).toBe(BS);
+    // later the number is hidden: the same contact and conversation
+    await hook(wa('wamid.B2', { contacts: [{ user_id: BS, profile: { name: 'Dana', username: 'dana.l' } }], messages: [{ id: 'wamid.B2', from_user_id: BS, timestamp: String(Math.floor(Date.now() / 1000)), type: 'text', text: { body: 'בלי מספר' } }] }));
+    const where = (await db.query(`SELECT ct.external_id FROM messages m JOIN conversations c ON c.id = m.conversation_id JOIN contacts ct ON ct.id = c.contact_id WHERE m.external_id = 'wamid.B2'`)).rows[0];
+    expect(where.external_id).toBe('972501112233@s.whatsapp.net');
+    expect((await db.query(`SELECT count(*)::int AS n FROM contacts WHERE external_id LIKE '%@bsuid'`)).rows[0].n).toBe(0);
+    // someone new with a username only: a contact by user id, named by the profile, answered with "recipient"
+    const NEW = 'IL.99887766';
+    await hook(wa('wamid.B3', { contacts: [{ user_id: NEW, profile: { username: 'yossi_k' } }], messages: [{ id: 'wamid.B3', from_user_id: NEW, timestamp: String(Math.floor(Date.now() / 1000)), type: 'text', text: { body: 'היי' } }] }));
+    const c = (await db.query(`SELECT c.id, ct.display_name, ct.user_id FROM conversations c JOIN contacts ct ON ct.id = c.contact_id WHERE ct.external_id = $1`, [`${NEW}@bsuid`])).rows[0];
+    expect(c).toMatchObject({ display_name: '@yossi_k', user_id: NEW });
+    calls.length = 0;
+    expect((await call('POST', `/conversations/${c.id}/messages`, 'adm@t.io', { text: 'שלום יוסי' })).statusCode).toBe(201);
+    const body = JSON.parse(calls.find((x) => x.init?.method === 'POST' && x.url.endsWith('/1234567890/messages'))!.init!.body as string);
+    expect(body).toMatchObject({ recipient: NEW, type: 'text' });
+    expect(body.to).toBeUndefined();
+    // neither a number nor a valid user id: ignored
+    expect((await hook(wa('wamid.B4', { messages: [{ id: 'wamid.B4', from_user_id: 'not-an-id', type: 'text', text: { body: 'x' } }] }))).statusCode).toBe(200);
+    expect((await db.query(`SELECT count(*)::int AS n FROM messages WHERE external_id = 'wamid.B4'`)).rows[0].n).toBe(0);
   });
 });

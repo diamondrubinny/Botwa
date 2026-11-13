@@ -3,16 +3,29 @@ import type { InboundMessage } from './channels/types.js';
 import type { MediaService } from './media/store.js';
 import { parseRating } from './automations.js';
 
+/** A contact known by its WhatsApp business-scoped user id only (no phone number): "<BSUID>@bsuid". */
+export const isUserIdContact = (externalId: string) => externalId.endsWith('@bsuid');
+
 /** Store an inbound message; one conversation per contact, reopened on new inbound. Idempotent on external id. */
 export async function ingestInbound(db: Db, channelId: string, m: InboundMessage, opts: { floodLimit?: number } = {}) {
   const client = await db.connect();
   try {
     await client.query('BEGIN');
+    // a business-scoped user id (WhatsApp usernames): the contact who already has it is the same person, whatever the message carries
+    let ext = m.externalContactId;
+    let userId = m.userId ?? null;
+    if (userId) {
+      const known = (await client.query(`SELECT external_id FROM contacts WHERE channel_id = $1 AND user_id = $2`, [channelId, userId])).rows[0] as { external_id: string } | undefined;
+      if (known) {
+        if (isUserIdContact(ext)) ext = known.external_id;   // the id only: the contact we know (by number, if we had it)
+        userId = null;                                        // already kept on a contact: never set twice (unique per channel)
+      }
+    }
     const contact = await client.query(
-      `INSERT INTO contacts (channel_id, external_id, display_name) VALUES ($1,$2,$3)
-       ON CONFLICT (channel_id, external_id) DO UPDATE SET display_name = COALESCE(EXCLUDED.display_name, contacts.display_name)
+      `INSERT INTO contacts (channel_id, external_id, display_name, user_id) VALUES ($1,$2,$3,$4)
+       ON CONFLICT (channel_id, external_id) DO UPDATE SET display_name = COALESCE(EXCLUDED.display_name, contacts.display_name), user_id = COALESCE(contacts.user_id, EXCLUDED.user_id)
        RETURNING id, blocked, opted_out`,
-      [channelId, m.externalContactId, m.contactName ?? null],
+      [channelId, ext, m.contactName ?? null, userId],
     );
     const conv = await client.query(
       `INSERT INTO conversations (channel_id, contact_id) VALUES ($1,$2)
@@ -61,7 +74,7 @@ export async function ingestInbound(db: Db, channelId: string, m: InboundMessage
       }
     }
     await client.query('COMMIT');
-    return { conversationId: convId, messageId: ins.rows[0]?.id as string | undefined, duplicate: !ins.rowCount, needsRouting, blocked, flooded, rated, contactId: contact.rows[0].id as string, optedOut: contact.rows[0].opted_out as boolean };
+    return { conversationId: convId, messageId: ins.rows[0]?.id as string | undefined, duplicate: !ins.rowCount, needsRouting, blocked, flooded, rated, contactId: contact.rows[0].id as string, externalContactId: ext, optedOut: contact.rows[0].opted_out as boolean };
   } catch (e) {
     await client.query('ROLLBACK');
     throw e;
