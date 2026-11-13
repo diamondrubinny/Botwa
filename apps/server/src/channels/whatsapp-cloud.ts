@@ -55,7 +55,7 @@ interface WaMessage {
   text?: { body?: string };
   image?: { id?: string; caption?: string }; document?: { id?: string; caption?: string; filename?: string };
   audio?: { id?: string }; video?: { id?: string; caption?: string }; sticker?: { id?: string };
-  button?: { text?: string }; reaction?: { message_id?: string; emoji?: string }; interactive?: { button_reply?: { id?: string; title?: string }; list_reply?: { id?: string; title?: string } };
+  button?: { text?: string }; reaction?: { message_id?: string; emoji?: string }; interactive?: { type?: string; button_reply?: { id?: string; title?: string }; list_reply?: { id?: string; title?: string }; nfm_reply?: { name?: string; body?: string; response_json?: string } };
 }
 interface WaContact { wa_id?: string; user_id?: string; profile?: { name?: string; username?: string } }
 interface WaValue { messages?: WaMessage[]; contacts?: WaContact[]; username?: string; status?: string; context?: string; display_phone_number?: string }
@@ -104,6 +104,9 @@ const USERNAME_ERRORS: Record<number, string> = {
   130429: 'username_limit', 133010: 'username_not_registered',
 };
 export class UsernameError extends Error {
+  constructor(readonly key: string, readonly detail?: string) { super(key); }
+}
+export class FlowError extends Error {
   constructor(readonly key: string, readonly detail?: string) { super(key); }
 }
 export interface BusinessUsername { username: string | null; status: 'approved' | 'reserved' | 'none' }
@@ -344,6 +347,51 @@ export class WhatsAppCloudAdapter implements ChannelAdapter {
     return [...new Set(all.filter((x): x is string => typeof x === 'string' && usernameProblem(x) === null).map((x) => x.toLowerCase()))].slice(0, 20);
   }
 
+  // ---- WhatsApp Flows (forms filled inside WhatsApp; no endpoint). Flows API per Meta's documentation; verify against the reference. ----
+
+  private async graphJson<T>(method: 'GET' | 'POST' | 'DELETE', path: string, body?: unknown): Promise<T> {
+    if (!this.creds || !this.active) throw new FlowError('channel_not_connected');
+    let res: Response;
+    try {
+      res = await this.fetchImpl(this.url(path), { method, headers: body ? { ...this.auth(), 'content-type': 'application/json' } : this.auth(), body: body ? JSON.stringify(body) : undefined, signal: AbortSignal.timeout(20_000) });
+    } catch { throw new FlowError('meta_unreachable'); }
+    const j = (await res.json().catch(() => ({}))) as T & { error?: { code?: number; message?: string; error_user_msg?: string } };
+    if (!res.ok || j.error) {
+      const e = j.error ?? {};
+      throw new FlowError(metaCheckError(res.status, e.code), String(e.error_user_msg ?? e.message ?? '').replace(/[\u0000-\u001f]/g, ' ').slice(0, 300) || undefined);
+    }
+    return j;
+  }
+
+  /** Create a Flow from its JSON and publish it in the same request; Meta answers with validation errors if any (then it stays a draft). */
+  async flowCreate(name: string, json: unknown): Promise<{ id: string; errors: string[] }> {
+    const waba = this.waba();
+    const j = await this.graphJson<{ id?: string; validation_errors?: { message?: string; pointers?: { path?: string }[] }[] }>('POST', `${waba}/flows`, { name: name.slice(0, 200), categories: ['OTHER'], flow_json: JSON.stringify(json), publish: true });
+    if (!j.id) throw new FlowError('flow_create_failed');
+    return { id: j.id, errors: (j.validation_errors ?? []).map((v) => `${v.message ?? ''}${v.pointers?.[0]?.path ? ` (${v.pointers[0].path})` : ''}`.slice(0, 300)).slice(0, 20) };
+  }
+
+  async flowGet(id: string): Promise<{ status: string; errors: string[]; previewUrl: string | null }> {
+    if (!/^\d{5,30}$/.test(id)) throw new FlowError('flow_not_found');
+    const j = await this.graphJson<{ status?: string; validation_errors?: { message?: string }[]; preview?: { preview_url?: string } }>('GET', `${id}?fields=status,validation_errors,preview.invalidate(false)`);
+    const preview = j.preview?.preview_url && /^https:\/\/business\.facebook\.com\//.test(j.preview.preview_url) ? j.preview.preview_url : null;
+    return { status: String(j.status ?? 'UNKNOWN'), errors: (j.validation_errors ?? []).map((v) => String(v.message ?? '').slice(0, 300)).slice(0, 20), previewUrl: preview };
+  }
+
+  async flowPublish(id: string): Promise<void> { if (!/^\d{5,30}$/.test(id)) throw new FlowError('flow_not_found'); await this.graphJson('POST', `${id}/publish`); }
+  /** A published Flow cannot be changed or deleted: it is retired. A draft is deleted. */
+  async flowRetire(id: string, published: boolean): Promise<void> {
+    if (!/^\d{5,30}$/.test(id)) return;
+    await this.graphJson(published ? 'POST' : 'DELETE', published ? `${id}/deprecate` : id).catch(() => undefined);
+  }
+
+  /** A message with a button that opens the Flow (inside the 24-hour window). The token identifies the form request in the reply. */
+  async sendFlow(externalContactId: string, f: { flowId: string; token: string; body: string; cta: string; data?: Record<string, string> }): Promise<{ externalMessageId?: string }> {
+    const parameters: Record<string, unknown> = { flow_message_version: '3', flow_id: f.flowId, flow_token: f.token, flow_cta: f.cta.slice(0, 30), flow_action: 'navigate', flow_action_payload: { screen: 'S1', ...(f.data && Object.keys(f.data).length ? { data: f.data } : {}) } };
+    const out = await this.post(`${this.creds?.phoneNumberId}/messages`, { messaging_product: 'whatsapp', recipient_type: 'individual', ...recipientOf(externalContactId), type: 'interactive', interactive: { type: 'flow', body: { text: f.body.slice(0, 1024) }, action: { name: 'flow', parameters } } });
+    return { externalMessageId: out.messages?.[0]?.id };
+  }
+
   async handleWebhook(payload: WaWebhook): Promise<number> {
     let n = 0;
     for (const entry of payload.entry ?? []) {
@@ -379,6 +427,9 @@ export class WhatsAppCloudAdapter implements ChannelAdapter {
     // a tap on a menu button or list row arrives as the option number we put in its id (titles are shortened), so the bot reads it like a typed number
     const picked = m.interactive?.button_reply ?? m.interactive?.list_reply;
     const pickedText = picked ? (/^\d{1,2}$/.test(picked.id ?? '') ? picked.id : picked.title) : undefined;
+    // a form filled in WhatsApp (Flows): the answers travel as JSON; the chat shows a short line, never the answers themselves
+    const nfm = m.interactive?.type === 'nfm_reply' && typeof m.interactive.nfm_reply?.response_json === 'string' ? m.interactive.nfm_reply.response_json : undefined;
+    if (nfm !== undefined) return { externalContactId: ext, contactName: name, externalMessageId: m.id!, text: '📝 הטופס מולא ונשלח בווצאפ.', timestamp: new Date((Number(m.timestamp) || Math.floor(Date.now() / 1000)) * 1000), flowReply: { responseJson: nfm.slice(0, 200_000) } };
     const text = m.text?.body ?? m.button?.text ?? pickedText ?? caption ?? (media ? '' : '[unsupported message type]');
     return {
       externalContactId: ext,

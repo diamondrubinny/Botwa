@@ -1,6 +1,7 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { api, ApiError, can, FORM_AUDIENCES, FORM_FIELD_TYPES, FORM_STATUS, type FormRequestRow, type FormTemplate, type Me } from '../api';
 import { FormEditor } from '../components/FormEditor';
+import { FormFlowPanel } from '../components/FormFlowPanel';
 import { BatchPanel, Batches } from '../components/FormBatch';
 import { PageTitle } from '../components/Illustration';
 import { errText } from '../strings';
@@ -13,6 +14,7 @@ export function Forms({ me }: { me: Me }) {
   const manager = can(me, 'forms.manage');
   const [tab, setTab] = useState<'sent' | 'templates' | 'verify'>('sent');
   const [editing, setEditing] = useState<string | null>(null);
+  const [flowFor, setFlowFor] = useState<FormTemplate | null>(null);
   const [batchFor, setBatchFor] = useState<FormTemplate | null>(null);
   const [focusBatch, setFocusBatch] = useState<string | null>(null);
   const tabs: [typeof tab, string][] = [['sent', 'טפסים שנשלחו'], ...(manager ? [['templates', 'תבניות'] as [typeof tab, string]] : []), ['verify', 'בדיקת קובץ חתום']];
@@ -23,15 +25,16 @@ export function Forms({ me }: { me: Me }) {
         {tabs.map(([k, l]) => <button key={k} className="chip" aria-pressed={tab === k} onClick={() => { setTab(k); setEditing(null); }}>{l}</button>)}
       </div>
       {editing ? <FormEditor templateId={editing} onClose={() => setEditing(null)} />
+        : flowFor ? <FormFlowPanel tpl={flowFor} onClose={() => setFlowFor(null)} />
         : batchFor ? <BatchPanel tpl={batchFor} onClose={() => setBatchFor(null)} onDone={(id) => { setFocusBatch(id); setBatchFor(null); setTab('sent'); }} />
-        : tab === 'templates' ? <Templates onEdit={setEditing} onBatch={setBatchFor} />
+        : tab === 'templates' ? <Templates onEdit={setEditing} onBatch={setBatchFor} onFlow={setFlowFor} />
         : tab === 'verify' ? <VerifyFile />
         : <>{manager && <Batches focus={focusBatch} />}<Sent /></>}
     </>
   );
 }
 
-function Templates({ onEdit, onBatch }: { onEdit: (id: string) => void; onBatch: (t: FormTemplate) => void }) {
+function Templates({ onEdit, onBatch, onFlow }: { onEdit: (id: string) => void; onBatch: (t: FormTemplate) => void; onFlow: (t: FormTemplate) => void }) {
   const [list, setList] = useState<FormTemplate[]>([]);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [busy, setBusy] = useState(false);
@@ -91,6 +94,7 @@ function Templates({ onEdit, onBatch }: { onEdit: (id: string) => void; onBatch:
                 <div className="row">
                   <button type="button" onClick={() => onEdit(t.id)}>עריכת שדות<span className="sr-only"> {t.title}</span></button>
                   {t.active && t.fields.length > 0 && <button type="button" onClick={() => onBatch(t)}>שליחה לקבוצה<span className="sr-only"> {t.title}</span></button>}
+                  {t.active && t.fields.length > 0 && <button type="button" onClick={() => onFlow(t)}>מילוי בתוך ווצאפ<span className="sr-only"> {t.title}</span></button>}
                   <a className="btn-link" href={`/forms/templates/${t.id}/source.pdf`} target="_blank" rel="noopener">המקור<span className="sr-only"> של {t.title}</span></a>
                   <button type="button" onClick={() => void toggle(t)}>{t.active ? 'כיבוי' : 'הפעלה'}<span className="sr-only"> {t.title}</span></button>
                   {!t.requests && <button type="button" className="danger" onClick={() => void del(t)}>מחיקה<span className="sr-only"> {t.title}</span></button>}

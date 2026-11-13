@@ -16,7 +16,10 @@ import { loadBrand } from './branding.js';
 import { AUDIENCES, fieldsSchema } from '../forms/schema.js';
 import { remindBatch, startBatch } from '../forms/batch.js';
 import { decrypt } from '../crypto.js';
-import { byToken, createTemplate, decryptValues, event, getTemplate, keyOk, listTemplates, markOpened, sendOtp, sendRequest, sha256, signedPdf, submit, verifyOtp, type PublicReq } from '../forms/service.js';
+import { currentBuild, flowState, FlowProblem, publishFlow, receiveFlowReply, refreshFlow, sendFlowRequest } from '../forms/flows.js';
+import { hasSignature, LABEL_MAX, shortLabel } from '../forms/flowjson.js';
+import { FlowError } from '../channels/whatsapp-cloud.js';
+import { byToken, createTemplate, deliverSignedCopy, decryptValues, event, getTemplate, keyOk, listTemplates, markOpened, sendOtp, sendRequest, sha256, signedPdf, submit, verifyOtp, type PublicReq } from '../forms/service.js';
 
 const MAX_PDF = 10 * 1024 * 1024;
 const idParam = z.object({ id: z.string().uuid() });
@@ -214,9 +217,71 @@ export function formRoutes(app: FastifyInstance, db: Db, mgr: ChannelManager, cf
   });
 
   // ---- sending from a conversation ----
+  // ---- filling inside WhatsApp (WhatsApp Flows, official channel) ----
+  const flowFail = (reply: FastifyReply, e: unknown) => {
+    if (e instanceof FlowProblem || e instanceof FlowError) return reply.code(e.key === 'meta_unreachable' ? 502 : 409).send({ error: e.key, ...(e.detail ? { detail: e.detail } : {}) });
+    const m = (e as Error).message;
+    if (m === 'channel_not_connected' || m === 'waba_not_configured') return reply.code(409).send({ error: m });
+    throw e;
+  };
+  /** The template as a Flow: the short labels, problems, and the Flow on each official channel (published / outdated / errors). */
+  app.get('/forms/templates/:id/flow', { preHandler: any }, async (req, reply) => {
+    const p = idParam.safeParse(req.params);
+    if (!p.success) return reply.code(400).send({ error: 'bad_request' });
+    const t = await getTemplate(db, p.data.id);
+    if (!t) return reply.code(404).send({ error: 'not_found' });
+    const b = currentBuild(t);
+    const channels = (await db.query(`SELECT id, label FROM channels WHERE type = 'whatsapp_cloud' ORDER BY created_at`)).rows as { id: string; label: string }[];
+    return {
+      enabled: t.flowEnabled, version: b.version, problems: b.problems,
+      fields: t.fields.filter((f) => f.type !== 'signature' && f.type !== 'initials' && !(f.locked && f.prefill)).map((f) => ({ id: f.id, label: f.label, short: shortLabel(t.flowLabels[f.id] || f.label), custom: t.flowLabels[f.id] ?? '' })),
+      signature: hasSignature(t.fields),
+      channels: channels.map((c) => ({ ...c, ...flowState(t, c.id), connected: !!mgr.cloudAdapter(c.id)?.isActive() })),
+    };
+  });
+  app.put('/forms/templates/:id/flow', { preHandler: manage }, async (req, reply) => {
+    const p = idParam.safeParse(req.params);
+    const b = z.object({ enabled: z.boolean(), labels: z.record(z.string().regex(/^[a-z0-9_-]{1,40}$/i), z.string().trim().max(LABEL_MAX)).default({}) }).strict().safeParse(req.body);
+    if (!p.success || !b.success) return reply.code(400).send({ error: 'bad_request' });
+    const labels = Object.fromEntries(Object.entries(b.data.labels).filter(([, v]) => v.length > 0).map(([k, v]) => [k, v.replace(/[\r\n<>]+/g, ' ')]));
+    const r = await db.query('UPDATE form_templates SET flow_enabled = $2, flow_labels = $3, updated_at = now() WHERE id = $1', [p.data.id, b.data.enabled, JSON.stringify(labels)]);
+    if (!r.rowCount) return reply.code(404).send({ error: 'not_found' });
+    await audit(db, { actorId: req.user!.id, action: 'forms.flow_settings', target: p.data.id, ip: req.ip, meta: { enabled: b.data.enabled, labels: Object.keys(labels).length } });
+    return { ok: true };
+  });
+  const flowChannel = z.object({ channelId: z.string().uuid() }).strict();
+  app.post('/forms/templates/:id/flow/publish', { preHandler: manage, config: { rateLimit: { max: 10, timeWindow: '10 minutes' } } }, async (req, reply) => {
+    const p = idParam.safeParse(req.params);
+    const b = flowChannel.safeParse(req.body);
+    if (!p.success || !b.success) return reply.code(400).send({ error: 'bad_request' });
+    const api = mgr.cloudAdapter(b.data.channelId);
+    if (!api?.isActive()) return reply.code(409).send({ error: 'channel_not_connected' });
+    try {
+      const f = await publishFlow(db, api, p.data.id, b.data.channelId);
+      await audit(db, { actorId: req.user!.id, action: 'forms.flow_publish', target: p.data.id, ip: req.ip, meta: { channel: b.data.channelId, flow: f.flowId, status: f.status, errors: f.errors.length } });
+      return f;
+    } catch (e) { return flowFail(reply, e); }
+  });
+  app.post('/forms/templates/:id/flow/refresh', { preHandler: any, config: { rateLimit: { max: 30, timeWindow: '1 minute' } } }, async (req, reply) => {
+    const p = idParam.safeParse(req.params);
+    const b = flowChannel.safeParse(req.body);
+    if (!p.success || !b.success) return reply.code(400).send({ error: 'bad_request' });
+    const t = await getTemplate(db, p.data.id);
+    const api = mgr.cloudAdapter(b.data.channelId);
+    if (!t) return reply.code(404).send({ error: 'not_found' });
+    if (!api?.isActive()) return reply.code(409).send({ error: 'channel_not_connected' });
+    try { return { flow: await refreshFlow(db, api, t, b.data.channelId) }; } catch (e) { return flowFail(reply, e); }
+  });
+  // the answers of a form filled inside WhatsApp arrive as a chat message (see channels/manager.ts)
+  mgr.onFlowReply = async (a) => {
+    const brand = await loadBrand(db).catch(() => ({ appName: '' }));
+    const out = await receiveFlowReply(db, cfg, mgr, media, { ...a, org: brand.appName || 'Botwa' });
+    if (out === 'signed') await audit(db, { action: 'forms.flow_signed', target: a.conversationId, meta: { message: a.messageId } }).catch(() => undefined);
+  };
+
   app.post('/conversations/:id/forms', { preHandler: any, config: { rateLimit: { max: 30, timeWindow: '1 minute' } } }, async (req, reply) => {
     const p = idParam.safeParse(req.params);
-    const b = z.object({ templateId: z.string().uuid(), days: z.number().int().min(1).max(60).default(7), values: z.record(z.string(), z.string().max(300)).default({}), note: z.string().max(300).optional() }).safeParse(req.body);
+    const b = z.object({ templateId: z.string().uuid(), days: z.number().int().min(1).max(60).default(7), values: z.record(z.string(), z.string().max(300)).default({}), note: z.string().max(300).optional(), via: z.enum(['link', 'flow']).default('link') }).safeParse(req.body);
     if (!p.success || !b.success) return reply.code(400).send({ error: 'bad_request' });
     const conv = await loadAccessible(db, req.user!, p.data.id);
     if (!conv) return reply.code(404).send({ error: 'not_found' });
@@ -224,10 +289,12 @@ export function formRoutes(app: FastifyInstance, db: Db, mgr: ChannelManager, cf
     const blockedBy = await sendBlock(db, conv, (await loadSending(db)).replyWindowHours);
     if (blockedBy) return reply.code(409).send({ error: blockedBy });
     try {
-      const r = await sendRequest(db, cfg, mgr, { templateId: b.data.templateId, conversationId: conv.id, userId: req.user!.id, days: b.data.days, values: b.data.values, note: b.data.note });
-      await audit(db, { actorId: req.user!.id, action: 'forms.send', target: r.id, ip: req.ip, meta: { conversation: conv.id, template: b.data.templateId } });
+      const args = { templateId: b.data.templateId, conversationId: conv.id, userId: req.user!.id, days: b.data.days, values: b.data.values, note: b.data.note };
+      const r = b.data.via === 'flow' ? await sendFlowRequest(db, cfg, mgr, args) : await sendRequest(db, cfg, mgr, args);
+      await audit(db, { actorId: req.user!.id, action: 'forms.send', target: r.id, ip: req.ip, meta: { conversation: conv.id, template: b.data.templateId, via: b.data.via } });
       return reply.code(201).send({ id: r.id, number: r.number });
     } catch (e) {
+      if (e instanceof FlowProblem) return reply.code(409).send({ error: e.key, ...(e.detail ? { detail: e.detail } : {}) });
       const m = (e as Error).message;
       if (m === 'template_not_found' || m === 'template_has_no_fields' || m === 'not_found') return reply.code(409).send({ error: m });
       if (m === 'channel_not_connected') return reply.code(409).send({ error: m });
@@ -384,18 +451,7 @@ export function formRoutes(app: FastifyInstance, db: Db, mgr: ChannelManager, cf
     if (!res.ok) return reply.code(422).send({ error: 'invalid', fields: res.errors });
     // a copy back to the same chat, and a note for the team
     if (r.conversation_id && r.channel_id && r.external_id) {
-      const name = `${r.title} - חתום.pdf`;
-      void (async () => {
-        try {
-          // the website chat has no file sending: the copy is kept in the conversation (the visitor downloaded it on the page)
-          const webchat = (await db.query('SELECT type FROM channels WHERE id = $1', [r.channel_id])).rows[0]?.type === 'webchat';
-          const sent = webchat ? {} as { externalMessageId?: string } : await mgr.sendMedia(r.channel_id!, r.external_id!, { buffer: res.pdf, mime: 'application/pdf', fileName: name, caption: `עותק חתום של "${r.title}". תודה!` });
-          const m = await db.query(`INSERT INTO messages (conversation_id, direction, body, external_id, auto) VALUES ($1,'out',$2,$3,true) RETURNING id`, [r.conversation_id, `עותק חתום של "${r.title}". תודה!`, sent.externalMessageId ?? null]);
-          await media.storeSent(m.rows[0].id, res.pdf, { mime: 'application/pdf', ext: 'pdf', kind: 'document', inline: false }, name);
-          mgr.notifyMessage(r.channel_id!, r.conversation_id!, m.rows[0].id);
-          await event(db, r.id, 'copy_sent');
-        } catch (e) { await event(db, r.id, 'copy_failed', (e as Error).message.slice(0, 120)); }
-      })();
+      void deliverSignedCopy(db, mgr, media, r, res.pdf);
       await db.query('INSERT INTO conversation_notes (conversation_id, body) VALUES ($1, $2)', [r.conversation_id, `✍️ הטופס "${r.title}" (בקשה ${r.number}) נחתם. אפשר להוריד אותו מ"טפסים" או מפרטי השיחה.`]).catch(() => undefined);
     }
     return { ok: true, sha256: res.sha256 };

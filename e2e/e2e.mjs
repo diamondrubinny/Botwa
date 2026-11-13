@@ -629,6 +629,17 @@ check('reactions: a thank-you gets a heart automatically, in the widget and in t
   check('forms: the editor moves a field with the keyboard and saves', true);
   await page.click('.form-editor button:has-text("סגירה")');
   await axe('forms: templates');
+  // filling inside WhatsApp: short labels (Meta: 20 characters), the switch, and the official channels where it is published
+  await page.click('.form-tpls li:has-text("הצהרת בטיחות למבקר") button:has-text("מילוי בתוך ווצאפ")');
+  await page.waitForSelector('#ff-h');
+  await page.waitForSelector('section[aria-labelledby="ff-h"] h3:has-text("בערוצים הרשמיים")');
+  { const first = page.locator('input[id^="ffl-"]').first();
+    check('forms in WhatsApp: short labels are limited to 20 characters', (await first.count()) === 0 || (await first.getAttribute('maxlength')) === '20'); }
+  await axe('forms: filling inside WhatsApp');
+  await page.click('section[aria-labelledby="ff-h"] button:has-text("שמירה")');
+  await page.waitForSelector('section[aria-labelledby="ff-h"] [role=status].ok');
+  check('forms in WhatsApp: the settings are saved', true);
+  await page.click('section[aria-labelledby="ff-h"] button:has-text("סגירה")');
   // one form to a group: the people pasted from a spreadsheet; whoever never wrote gets a link to pass on, not an unsolicited message
   await page.click('.form-tpls li:has-text("הצהרת בטיחות למבקר") button:has-text("שליחה לקבוצה")');
   await page.waitForSelector('#fb-p');

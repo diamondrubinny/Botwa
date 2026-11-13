@@ -23,9 +23,12 @@ export function decryptBytes(buf: Buffer, keyB64: string): Buffer {
   return Buffer.concat([d.update(buf.subarray(30)), d.final()]);
 }
 
-export interface TemplateRow { id: string; title: string; description: string; audience: string[]; sourceName: string; sourceUrl: string | null; sha256: string; pages: { w: number; h: number }[]; fields: Field[]; active: boolean; createdAt: string; updatedAt: string; requests?: number; signed?: number }
+export interface TemplateRow { id: string; title: string; description: string; audience: string[]; sourceName: string; sourceUrl: string | null; sha256: string; pages: { w: number; h: number }[]; fields: Field[]; active: boolean; createdAt: string; updatedAt: string; requests?: number; signed?: number;
+  flowEnabled: boolean; flowLabels: Record<string, string>; flows: Record<string, StoredFlow> }
+/** The WhatsApp Flow of a template on one official channel (see forms/flows.ts). */
+export interface StoredFlow { flowId: string; status: string; version: string; names: Record<string, string>; errors: string[]; previewUrl: string | null; at: string }
 const TPL = `t.id, t.title, t.description, t.audience, t.source_name AS "sourceName", t.source_url AS "sourceUrl", t.sha256, t.pages, t.fields, t.active,
-  t.created_at AS "createdAt", t.updated_at AS "updatedAt"`;
+  t.created_at AS "createdAt", t.updated_at AS "updatedAt", t.flow_enabled AS "flowEnabled", t.flow_labels AS "flowLabels", t.flows`;
 
 /** A new template from a (clean, checked) PDF: its pages, and fields suggested from the labels printed on it. */
 export async function createTemplate(db: Db, a: { title: string; description?: string; audience?: string[]; pdf: Buffer; sourceName: string; sourceUrl?: string | null; userId: string }): Promise<TemplateRow> {
@@ -54,7 +57,7 @@ interface ConvInfo { id: string; channel_id: string; external_id: string; displa
 export function publicUrl(cfg: Config, token: string): string {
   return `${cfg.APP_ORIGIN.split(',')[0]!.trim().replace(/\/$/, '')}/f/${token}`;
 }
-const dateHe = (d: Date) => d.toLocaleDateString('he-IL', { timeZone: 'Asia/Jerusalem', day: 'numeric', month: 'numeric', year: 'numeric' });
+export const dateHe = (d: Date) => d.toLocaleDateString('he-IL', { timeZone: 'Asia/Jerusalem', day: 'numeric', month: 'numeric', year: 'numeric' });
 
 /** Values the system fills when sending: the customer's name and phone, today, the sender, the inquiry number. */
 async function prefillValues(db: Db, fields: Field[], conv: ConvInfo, userId: string): Promise<Record<string, string>> {
@@ -76,7 +79,7 @@ export function linkMessage(name: string | null, title: string, url: string, exp
 }
 
 /** A request for one conversation, without sending anything (group sending decides how each one is delivered). */
-export async function createRequest(db: Db, cfg: Config, a: { templateId: string; conversationId: string; userId: string; days: number; values?: Record<string, string>; batchId?: string | null; keepLink?: boolean }): Promise<{ id: string; number: number; url: string; expires: Date; title: string; conv: ConvInfo }> {
+export async function createRequest(db: Db, cfg: Config, a: { templateId: string; conversationId: string; userId: string; days: number; values?: Record<string, string>; batchId?: string | null; keepLink?: boolean }): Promise<{ id: string; number: number; url: string; token: string; expires: Date; title: string; conv: ConvInfo; prefill: Record<string, string> }> {
   const t = await getTemplate(db, a.templateId);
   if (!t || !t.active) throw new Error('template_not_found');
   if (!t.fields.length) throw new Error('template_has_no_fields');
@@ -93,7 +96,7 @@ export async function createRequest(db: Db, cfg: Config, a: { templateId: string
      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING id, number`,
     [t.id, t.sha256, JSON.stringify(t.fields), conv.id, conv.display_name, conv.external_id.split('@')[0], tokenHash(token), JSON.stringify(pre), expires, a.userId, a.batchId ?? null,
       a.keepLink ? encrypt(url, cfg.ENCRYPTION_KEY) : null, a.batchId ? 'queued' : null])).rows[0];
-  return { id: r.id, number: Number(r.number), url, expires, title: t.title, conv };
+  return { id: r.id, number: Number(r.number), url, token, expires, title: t.title, conv, prefill: pre };
 }
 
 /** Creates a request for one conversation and sends its personal link there. Returns the request (and the link, for the panel). */
@@ -119,13 +122,13 @@ export async function event(db: Db, requestId: string, kind: string, detail?: st
 // ---- the signer's side (public, by token) ------------------------------------------------------------------------
 export interface PublicReq { id: string; number: number; status: string; expires_at: Date; title: string; description: string; fields: Field[]; prefill: Record<string, string>; template_id: string; template_sha256: string;
   conversation_id: string | null; channel_id: string | null; external_id: string | null; signer_name: string | null; signer_phone: string | null; otp_hash: string | null; otp_expires_at: Date | null; otp_tries: number; otp_sent: number;
-  fill_key_hash: string | null; verified_at: Date | null; last_otp_at: Date | null }
+  fill_key_hash: string | null; verified_at: Date | null; last_otp_at: Date | null; via: 'link' | 'flow'; flow_names: Record<string, string> | null }
 
 export async function byToken(db: Db, token: string): Promise<PublicReq | null> {
   if (!/^f_[\w-]{20,60}$/.test(token)) return null;
   const r = (await db.query(
     `SELECT r.id, r.number, r.status, r.expires_at, t.title, t.description, r.fields, r.prefill, r.template_id, r.template_sha256, r.conversation_id, c.channel_id, ct.external_id,
-            r.signer_name, r.signer_phone, r.otp_hash, r.otp_expires_at, r.otp_tries, r.otp_sent, r.fill_key_hash, r.verified_at,
+            r.signer_name, r.signer_phone, r.otp_hash, r.otp_expires_at, r.otp_tries, r.otp_sent, r.fill_key_hash, r.verified_at, r.via, r.flow_names,
             (SELECT max(at) FROM form_events e WHERE e.request_id = r.id AND e.kind = 'otp_sent') AS last_otp_at
        FROM form_requests r JOIN form_templates t ON t.id = r.template_id
        LEFT JOIN conversations c ON c.id = r.conversation_id LEFT JOIN contacts ct ON ct.id = c.contact_id
@@ -188,7 +191,7 @@ export function keyOk(r: PublicReq, key: unknown): boolean {
 
 const PNG = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 /** Checks every value against its field, builds the locked PDF with its signature record, stores it encrypted. */
-export async function submit(db: Db, cfg: Config, r: PublicReq, input: { values: Record<string, unknown>; marks: Record<string, { png?: string; typed?: string }>; ip: string | null; ua: string | null; org: string }):
+export async function submit(db: Db, cfg: Config, r: PublicReq, input: { values: Record<string, unknown>; marks: Record<string, { png?: string; typed?: string }>; ip: string | null; ua: string | null; org: string; identity?: string }):
   Promise<{ ok: true; pdf: Buffer; sha256: string } | { ok: false; errors: Record<string, string> }> {
   const errors: Record<string, string> = {};
   const values: Record<string, string | boolean | null> = {};
@@ -216,7 +219,7 @@ export async function submit(db: Db, cfg: Config, r: PublicReq, input: { values:
   const now = new Date();
   const pdf = await buildSignedPdf(source, r.fields, values, marks, {
     formTitle: r.title, requestNumber: r.number, signerName: r.signer_name, signerPhone: r.signer_phone, verifiedAt: r.verified_at ?? now, signedAt: now,
-    ip: input.ip, userAgent: input.ua, templateSha256: r.template_sha256, valuesSha256: sha256(valuesJson), org: input.org,
+    ip: input.ip, userAgent: input.ua, templateSha256: r.template_sha256, valuesSha256: sha256(valuesJson), org: input.org, ...(input.identity ? { identity: input.identity } : {}),
   });
   const hash = sha256(pdf);
   const claimed = await db.query(`UPDATE form_requests SET status = 'signed', signed_at = $2, fill_key_hash = NULL WHERE id = $1 AND status IN ('verified','opened','sent') RETURNING id`, [r.id, now]);
@@ -234,3 +237,26 @@ export async function signedPdf(db: Db, cfg: Config, requestId: string): Promise
 }
 
 export function decryptValues(enc: string, cfg: Config): unknown { return JSON.parse(decrypt(enc, cfg.ENCRYPTION_KEY)); }
+
+/** What a signed copy needs from the channel layer and the file store (kept small so the service does not depend on them). */
+export interface CopyOut {
+  sendMedia(channelId: string, ext: string, m: { buffer: Buffer; mime: string; fileName: string; caption?: string }): Promise<{ externalMessageId?: string }>;
+  notifyMessage(channelId: string, conversationId: string, messageId: string): void;
+}
+export interface CopyStore { storeSent(messageId: string, buf: Buffer, d: { mime: string; ext: string; kind: string; inline: boolean }, fileName: string): Promise<unknown> }
+
+/** After signing: a copy of the signed PDF back to the same chat (kept in the conversation) and a note for the team. */
+export async function deliverSignedCopy(db: Db, out: CopyOut, store: CopyStore, r: Pick<PublicReq, 'id' | 'title' | 'number' | 'conversation_id' | 'channel_id' | 'external_id'>, pdf: Buffer): Promise<void> {
+  if (!r.conversation_id || !r.channel_id || !r.external_id) return;
+  const name = `${r.title} - חתום.pdf`;
+  try {
+    // the website chat has no file sending: the copy is kept in the conversation (the visitor downloaded it on the page)
+    const webchat = (await db.query('SELECT type FROM channels WHERE id = $1', [r.channel_id])).rows[0]?.type === 'webchat';
+    const caption = `עותק חתום של "${r.title}". תודה!`;
+    const sent = webchat ? {} as { externalMessageId?: string } : await out.sendMedia(r.channel_id, r.external_id, { buffer: pdf, mime: 'application/pdf', fileName: name, caption });
+    const m = await db.query(`INSERT INTO messages (conversation_id, direction, body, external_id, auto) VALUES ($1,'out',$2,$3,true) RETURNING id`, [r.conversation_id, caption, sent.externalMessageId ?? null]);
+    await store.storeSent(m.rows[0].id, pdf, { mime: 'application/pdf', ext: 'pdf', kind: 'document', inline: false }, name);
+    out.notifyMessage(r.channel_id, r.conversation_id, m.rows[0].id);
+    await event(db, r.id, 'copy_sent');
+  } catch (e) { await event(db, r.id, 'copy_failed', (e as Error).message.slice(0, 120)); }
+}

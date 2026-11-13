@@ -21,6 +21,8 @@ export interface InboundMessage {
   contactName?: string;
   /** WhatsApp Cloud: the customer's business-scoped user id (BSUID), kept on the contact so a later message with the id only finds them */
   userId?: string;
+  /** WhatsApp Flows: the answers of a form filled in WhatsApp (the "response_json" of an nfm_reply message) */
+  flowReply?: { responseJson: string };
   externalMessageId: string;
   text: string;
   timestamp: Date;

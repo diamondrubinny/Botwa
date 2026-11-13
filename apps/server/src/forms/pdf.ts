@@ -11,6 +11,8 @@ export interface SignatureMark { png?: Buffer; typed?: string }
 export interface SigningRecord {
   formTitle: string; requestNumber: number; signerName: string | null; signerPhone: string | null;
   verifiedAt: Date; signedAt: Date; ip: string | null; userAgent: string | null; templateSha256: string; valuesSha256: string; org: string;
+  /** how the signer's identity was established, when not by the one-time code (e.g. filled inside WhatsApp) */
+  identity?: string;
 }
 
 const fmtDate = (iso: string) => { const [y, m, d] = iso.split('-'); return `${d}/${m}/${y}`; };
@@ -94,7 +96,7 @@ export async function buildSignedPdf(source: Buffer, fields: Field[], values: Re
   line('מספר בקשה', String(rec.requestNumber));
   line('שם החותם', rec.signerName ?? '');
   line('טלפון / ערוץ', rec.signerPhone ?? '');
-  line('אימות זהות', `קוד חד-פעמי לאותה שיחה, ${when(rec.verifiedAt)}`);
+  line('אימות זהות', rec.identity ?? `קוד חד-פעמי לאותה שיחה, ${when(rec.verifiedAt)}`);
   line('נחתם', when(rec.signedAt));
   line('כתובת IP', rec.ip ?? '');
   line('דפדפן', (rec.userAgent ?? '').slice(0, 70));

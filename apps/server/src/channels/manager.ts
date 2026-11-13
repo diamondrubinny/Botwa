@@ -226,6 +226,20 @@ export class ChannelManager {
     await this.usageCount(channelId, 'template');
     return out;
   }
+  /** A form to fill inside WhatsApp (Flows): official channel only, same pause, usage and pacing rules as any send. */
+  async sendFlow(channelId: string, externalContactId: string, f: Parameters<WhatsAppCloudAdapter['sendFlow']>[1]): Promise<{ externalMessageId?: string }> {
+    const a = this.cloudAdapter(channelId);
+    if (!a || this.statuses.get(channelId) !== 'connected') throw new Error('channel_not_connected');
+    await this.assertNotPaused(channelId);
+    await this.usageGate(channelId, false);
+    const settings = this.effective(channelId, await this.loadSending());
+    const out = await this.sender.run(channelId, settings, async () => a.sendFlow(externalContactId, f), { maxWaitMs: 8_000 });
+    await this.usageCount(channelId, 'interactive');
+    return out;
+  }
+  /** Set by the forms module: a form filled in WhatsApp arrived (the message is already stored). */
+  onFlowReply?: (a: { channelId: string; conversationId: string; externalContactId: string; messageId: string; responseJson: string }) => Promise<void>;
+
   /** A menu as buttons or a list. Returns false when the channel cannot, or the menu does not fit, or Meta refuses it: the caller then sends the numbered text. */
   async sendMenu(channelId: string, externalContactId: string, body: string, options: { id: string; title: string }[]): Promise<{ externalMessageId?: string } | null> {
     const a = this.adapters.get(channelId);
@@ -336,6 +350,13 @@ export class ChannelManager {
             void sendAlert(this.cfg, `🚫 לקוח נחסם אוטומטית עקב הצפת הודעות (יותר מ-${this.cfg.FLOOD_LIMIT} ב-2 דקות).`, { contactId: r.contactId });
           }
           if (r.blocked) return; // blocked contact: stored as evidence, nothing else happens (no files, bot, away reply, routing, notification)
+          // a form filled inside WhatsApp: handled by the forms module (signed PDF), never by the bot
+          if (m.flowReply && r.messageId) {
+            await this.onFlowReply?.({ channelId, conversationId: r.conversationId, externalContactId: m.externalContactId, messageId: r.messageId, responseJson: m.flowReply.responseJson }).catch(() => undefined);
+            this.emit({ channelId, type: 'message', conversationId: r.conversationId, messageId: r.messageId });
+            this.hookMessage('message.received', r.conversationId, r.messageId);
+            return;
+          }
           if (r.rated) {   // a rating for the feedback question: thank them; no bot, no routing, the conversation stays closed
             await thankForFeedback(this.db, this, r.conversationId).catch(() => undefined);
             if (r.messageId) this.emit({ channelId, type: 'message', conversationId: r.conversationId, messageId: r.messageId });

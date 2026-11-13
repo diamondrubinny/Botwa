@@ -454,7 +454,7 @@ export function Inbox({ me }: { me: Me }) {
                   <div className="row"><button className="primary" type="submit">סגירת השיחה</button><button type="button" onClick={() => setCloseAsk(null)}>ביטול</button></div>
                 </form>
               )}
-              {formPanel && sel && <SendFormPanel convId={sel.id} onDone={() => setBump((n) => n + 1)} onClose={() => setFormPanel(false)} />}
+              {formPanel && sel && <SendFormPanel convId={sel.id} channelId={sel.channelId} channelType={sel.channelType} onDone={() => setBump((n) => n + 1)} onClose={() => setFormPanel(false)} />}
               {tp && sel && (() => {
                 const t = tpls.find((x) => `${x.name}|${x.language}` === tp.key) ?? tpls[0]!;
                 const preview = t.body.replace(/\{\{(\d+)\}\}/g, (_m, n: string) => tp.values[Number(n) - 1] || `{{${n}}}`);
