@@ -57,7 +57,7 @@ export function Inbox({ me }: { me: Me }) {
   const { tick: live } = useLive();
 
   const [convs, setConvs] = useState<Conversation[]>([]);
-  const [filter, setFilter] = useState<'open' | 'closed' | 'mine' | 'starred' | 'snoozed' | 'blocked'>('open');
+  const [filter, setFilter] = useState<'open' | 'closed' | 'mine' | 'bot' | 'starred' | 'snoozed' | 'blocked'>('open');
   const [blockPanel, setBlockPanel] = useState(false);
   const [blockReason, setBlockReason] = useState('');
   const [selId, setSelId] = useState<string | null>(null);
@@ -129,7 +129,7 @@ export function Inbox({ me }: { me: Me }) {
   useEffect(() => { document.body.classList.toggle('chat-open', !!sel); return () => document.body.classList.remove('chat-open'); }, [sel]);
 
   usePoll(async () => {
-    const q = (filter === 'mine' ? 'mine=true&status=open' : filter === 'blocked' ? 'blocked=true' : filter === 'starred' ? 'starred=true' : filter === 'snoozed' ? 'snoozed=true&status=open' : `status=${filter}`) + (search.trim() ? `&q=${encodeURIComponent(search.trim())}` : '') + (tagFilter ? `&tag=${tagFilter}` : '');
+    const q = (filter === 'mine' ? 'mine=true&status=open' : filter === 'bot' ? 'bot=true&status=open' : filter === 'blocked' ? 'blocked=true' : filter === 'starred' ? 'starred=true' : filter === 'snoozed' ? 'snoozed=true&status=open' : `status=${filter}`) + (search.trim() ? `&q=${encodeURIComponent(search.trim())}` : '') + (tagFilter ? `&tag=${tagFilter}` : '');
     setConvs(await api<Conversation[]>('GET', `/conversations?${q}`).catch(() => []));
   }, 5000, [filter, search, tagFilter, live, bump]);
   usePoll(async () => setTargets(await api<{ id: string; name: string; groupName: string }[]>('GET', '/forward/targets').catch(() => [])), 60000);
@@ -300,7 +300,7 @@ export function Inbox({ me }: { me: Me }) {
     if (mates.length === 0) setMates(await api<{ id: string; name: string; username?: string }[]>('GET', '/handover-targets').catch(() => []));
     setHo({ to, note: '' });
   };
-  const FILTERS: [typeof filter, string][] = [['open', 'פתוחות'], ['mine', 'שלי'], ['starred', 'מסומנות'], ['snoozed', 'נדחו'], ['closed', 'סגורות'], ...(canBlock ? [['blocked', 'חסומים'] as [typeof filter, string]] : [])];
+  const FILTERS: [typeof filter, string][] = [['open', 'פתוחות'], ['mine', 'שלי'], ['bot', 'בטיפול בוט'], ['starred', 'מסומנות'], ['snoozed', 'נדחו'], ['closed', 'סגורות'], ...(canBlock ? [['blocked', 'חסומים'] as [typeof filter, string]] : [])];
 
   return (
     <>
@@ -357,7 +357,7 @@ export function Inbox({ me }: { me: Me }) {
                         <span className="conv-meta">
                           <span className={`mchip ch-${c.channelType}`}>{c.channelLabel}</span>
                           <span className={`mchip${c.assignedName ? '' : ' muted'}`}>{c.assignedName ?? 'לא משויך'}</span>
-                          {c.botState === 'menu' && <span className="mchip bot">הבוט מטפל</span>}
+                          {(c.botState === 'menu' || c.botState === 'area') && <span className="mchip bot">הבוט מטפל</span>}
                           {c.tags.slice(0, 2).map((t) => <span key={t.id} className="mchip tag">{t.name}</span>)}
                           {c.tags.length > 2 && <span className="mchip tag">+{c.tags.length - 2}<span className="sr-only"> תגיות נוספות</span></span>}
                           {w && <span className={`mchip wait${w.late ? ' late' : ''}`}>{w.late && <span className="sr-only">חריגה מיעד המענה: </span>}{w.text}</span>}

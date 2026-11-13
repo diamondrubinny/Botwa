@@ -215,6 +215,15 @@ describe('snooze, star, mark unread', () => {
     expect((await post(mine, 'snooze', c1, { minutes: 999999 })).statusCode).toBe(400);
     expect((await post(mine, 'snooze', c2, { minutes: 5 })).statusCode).toBe(404); // not their conversation
 
+    // "handled by the bot" filter: only open conversations the bot is still running (menu or asking for a place)
+    await db2.query(`UPDATE conversations SET bot_state = 'area' WHERE id = $1`, [others]);
+    const sup = await login('sup@t.io');
+    expect((await list(sup, 'bot=true&status=open')).map((c) => c.id)).toEqual([others]);
+    await db2.query(`UPDATE conversations SET bot_state = 'human' WHERE id = $1`, [others]);
+    expect(await list(sup, 'bot=true&status=open')).toEqual([]);
+    expect((await list(c2, 'bot=true&status=open'))).toEqual([]);
+    await db2.query(`UPDATE conversations SET bot_state = NULL WHERE id = $1`, [others]);
+
     // a new customer message wakes it
     await db2.query(`UPDATE conversations SET snoozed_until = NULL WHERE id = $1`, [mine]);
     await post(mine, 'snooze', c1, { minutes: 60 });

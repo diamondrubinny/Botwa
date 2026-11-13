@@ -28,6 +28,7 @@ export function conversationRoutes(app: FastifyInstance, db: Db, mgr: ChannelMan
         mine: z.enum(['true', 'false']).optional(),
         snoozed: z.enum(['true', 'false']).default('false'),
         starred: z.enum(['true', 'false']).default('false'),
+        bot: z.enum(['true', 'false']).default('false'),
         limit: z.coerce.number().int().min(1).max(100).default(50),
         offset: z.coerce.number().int().min(0).default(0),
       })
@@ -51,12 +52,13 @@ export function conversationRoutes(app: FastifyInstance, db: Db, mgr: ChannelMan
           AND ($9::uuid IS NULL OR c.id = $9)
           AND ct.blocked = $10::boolean
           AND (($11::boolean AND c.snoozed_until > now()) OR (NOT $11::boolean AND (c.snoozed_until IS NULL OR c.snoozed_until <= now())))
+          AND (NOT $13::boolean OR c.bot_state IN ('menu', 'area'))
           AND (NOT $12::boolean OR EXISTS (SELECT 1 FROM conversation_stars fs WHERE fs.conversation_id = c.id AND fs.user_id = $3))
           AND ($8::uuid IS NULL OR EXISTS (SELECT 1 FROM conversation_tags xt WHERE xt.conversation_id = c.id AND xt.tag_id = $8))
           AND ($7::text IS NULL OR ct.display_name ILIKE $7 OR ct.external_id ILIKE $7
                OR EXISTS (SELECT 1 FROM messages sm WHERE sm.conversation_id = c.id AND sm.body ILIKE $7))
         ORDER BY c.last_message_at DESC LIMIT $5 OFFSET $6`,
-      [q.status ?? null, q.mine === 'true', u.id, isManager(u), q.limit, q.offset, q.q ? `%${q.q.replace(/[\\%_]/g, '\\$&')}%` : null, q.tag ?? null, q.id ?? null, q.blocked === 'true' && isManager(u), q.snoozed === 'true', q.starred === 'true'],
+      [q.status ?? null, q.mine === 'true', u.id, isManager(u), q.limit, q.offset, q.q ? `%${q.q.replace(/[\\%_]/g, '\\$&')}%` : null, q.tag ?? null, q.id ?? null, q.blocked === 'true' && isManager(u), q.snoozed === 'true', q.starred === 'true', q.bot === 'true'],
     );
     return rows;
   });
