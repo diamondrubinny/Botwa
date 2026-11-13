@@ -364,4 +364,31 @@ describe('official WhatsApp channel', () => {
     expect((await hook(wa('wamid.B4', { messages: [{ id: 'wamid.B4', from_user_id: 'not-an-id', type: 'text', text: { body: 'x' } }] }))).statusCode).toBe(200);
     expect((await db.query(`SELECT count(*)::int AS n FROM messages WHERE external_id = 'wamid.B4'`)).rows[0].n).toBe(0);
   });
+  it('first by user id only, later with the number too: one contact, the history kept (moved, or folded into the number\'s thread)', async () => {
+    const wa = (value: object) => ({ object: 'whatsapp_business_account', entry: [{ changes: [{ field: 'messages', value }] }] });
+    const now = () => String(Math.floor(Date.now() / 1000));
+    const msgs = async (ext: string) => (await db.query(`SELECT m.body FROM messages m JOIN conversations c ON c.id = m.conversation_id JOIN contacts ct ON ct.id = c.contact_id WHERE ct.external_id = $1 ORDER BY m.created_at, m.body`, [ext])).rows.map((r) => r.body);
+    // (a) no contact by number yet: the id-only contact simply gets the number, same conversation
+    await hook(wa({ contacts: [{ user_id: 'IL.777', profile: { username: 'avi.k' } }], messages: [{ id: 'wamid.M1', from_user_id: 'IL.777', timestamp: now(), type: 'text', text: { body: 'רק שם משתמש' } }] }));
+    const conv1 = (await db.query(`SELECT c.id FROM conversations c JOIN contacts ct ON ct.id = c.contact_id WHERE ct.external_id = 'IL.777@bsuid'`)).rows[0].id;
+    await hook(wa({ contacts: [{ wa_id: '972507770000', user_id: 'IL.777', profile: { name: 'Avi' } }], messages: [{ id: 'wamid.M2', from: '972507770000', from_user_id: 'IL.777', timestamp: now(), type: 'text', text: { body: 'עם מספר' } }] }));
+    const a = (await db.query(`SELECT c.id, ct.user_id FROM conversations c JOIN contacts ct ON ct.id = c.contact_id WHERE ct.external_id = '972507770000@s.whatsapp.net'`)).rows[0];
+    expect(a).toEqual({ id: conv1, user_id: 'IL.777' });
+    expect((await db.query(`SELECT count(*)::int AS n FROM contacts WHERE external_id = 'IL.777@bsuid'`)).rows[0].n).toBe(0);
+    // (b) both exist: the number's older thread and a newer id-only thread become one
+    await hook(wa({ contacts: [{ wa_id: '972508880000', profile: { name: 'Rina' } }], messages: [{ id: 'wamid.N1', from: '972508880000', timestamp: now(), type: 'text', text: { body: 'א-ישן עם מספר' } }] }));
+    await hook(wa({ contacts: [{ user_id: 'IL.888', profile: { username: 'rina' } }], messages: [{ id: 'wamid.N2', from_user_id: 'IL.888', timestamp: now(), type: 'text', text: { body: 'ב-בלי מספר' } }] }));
+    const tag = (await db.query(`INSERT INTO tags (name) VALUES ('מיזוג') RETURNING id`)).rows[0].id;
+    await db.query(`INSERT INTO conversation_tags (conversation_id, tag_id) SELECT c.id, $1 FROM conversations c JOIN contacts ct ON ct.id = c.contact_id WHERE ct.external_id = 'IL.888@bsuid'`, [tag]);
+    await hook(wa({ contacts: [{ wa_id: '972508880000', user_id: 'IL.888', profile: { name: 'Rina' } }], messages: [{ id: 'wamid.N3', from: '972508880000', from_user_id: 'IL.888', timestamp: now(), type: 'text', text: { body: 'ג-שוב עם מספר' } }] }));
+    expect(await msgs('972508880000@s.whatsapp.net')).toEqual(['א-ישן עם מספר', 'ב-בלי מספר', 'ג-שוב עם מספר']);
+    expect((await db.query(`SELECT count(*)::int AS n FROM contacts WHERE external_id = 'IL.888@bsuid'`)).rows[0].n).toBe(0);
+    const merged = (await db.query(`SELECT c.id, ct.user_id FROM conversations c JOIN contacts ct ON ct.id = c.contact_id WHERE ct.external_id = '972508880000@s.whatsapp.net'`)).rows[0];
+    expect(merged.user_id).toBe('IL.888');
+    expect((await db.query(`SELECT count(*)::int AS n FROM conversation_tags WHERE conversation_id = $1 AND tag_id = $2`, [merged.id, tag])).rows[0].n).toBe(1);
+    expect((await db.query(`SELECT body FROM conversation_notes WHERE conversation_id = $1 AND body LIKE '%אוחדו%'`, [merged.id])).rowCount).toBe(1);
+    // and a later id-only message lands on the same thread
+    await hook(wa({ contacts: [{ user_id: 'IL.888' }], messages: [{ id: 'wamid.N4', from_user_id: 'IL.888', timestamp: now(), type: 'text', text: { body: 'ד-שוב בלי' } }] }));
+    expect((await msgs('972508880000@s.whatsapp.net')).length).toBe(4);
+  });
 });

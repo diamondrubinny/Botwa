@@ -2,6 +2,7 @@ import type { Db } from './db.js';
 import type { InboundMessage } from './channels/types.js';
 import type { MediaService } from './media/store.js';
 import { parseRating } from './automations.js';
+import { foldIdContact } from './contacts/merge.js';
 
 /** A contact known by its WhatsApp business-scoped user id only (no phone number): "<BSUID>@bsuid". */
 export const isUserIdContact = (externalId: string) => externalId.endsWith('@bsuid');
@@ -15,11 +16,15 @@ export async function ingestInbound(db: Db, channelId: string, m: InboundMessage
     let ext = m.externalContactId;
     let userId = m.userId ?? null;
     if (userId) {
-      const known = (await client.query(`SELECT external_id FROM contacts WHERE channel_id = $1 AND user_id = $2`, [channelId, userId])).rows[0] as { external_id: string } | undefined;
-      if (known) {
-        if (isUserIdContact(ext)) ext = known.external_id;   // the id only: the contact we know (by number, if we had it)
-        userId = null;                                        // already kept on a contact: never set twice (unique per channel)
-      }
+      const known = (await client.query(`SELECT id, external_id FROM contacts WHERE channel_id = $1 AND user_id = $2`, [channelId, userId])).rows[0] as { id: string; external_id: string } | undefined;
+      if (known && isUserIdContact(ext)) { ext = known.external_id; userId = null; }   // the id only: the contact we know (by number, if we had it)
+      else if (known && isUserIdContact(known.external_id) && known.external_id !== ext) {
+        // first seen by id only, now with the number too: one contact, under the number
+        const byNumber = (await client.query(`SELECT id FROM contacts WHERE channel_id = $1 AND external_id = $2`, [channelId, ext])).rows[0] as { id: string } | undefined;
+        if (byNumber) await foldIdContact(client, known.id, byNumber.id, userId);
+        else await client.query('UPDATE contacts SET external_id = $2 WHERE id = $1', [known.id, ext]);
+        userId = null;
+      } else if (known) userId = null;                       // already kept on a contact: never set twice (unique per channel)
     }
     const contact = await client.query(
       `INSERT INTO contacts (channel_id, external_id, display_name, user_id) VALUES ($1,$2,$3,$4)
