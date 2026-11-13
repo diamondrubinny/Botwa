@@ -65,6 +65,30 @@ export interface FlowResult { replies: string[]; state: FlowState; effects: Effe
 const MAX_STEPS = 60;
 export const RESTART_AFTER_MS = 30 * 60_000;
 const MENU_WORDS = { has: (t: string) => isMenuRequest(t) };
+/**
+ * The menu "תפריט" goes to: the flow's chosen main menu, else the first menu reachable from the start that accepts free text
+ * (the topics menu, not a menu inside identification), else the first menu with 3+ options, else the first menu.
+ */
+export function mainMenuOf(flow: Flow): string | null {
+  const nodes = new Map(flow.nodes.map((n) => [n.id, n]));
+  if (flow.mainMenu && nodes.get(flow.mainMenu)?.type === 'menu') return flow.mainMenu;
+  const order: FlowNode[] = [];
+  const seen = new Set<string>();
+  const queue = [flow.start];
+  while (queue.length) {
+    const id = queue.shift()!;
+    const n = nodes.get(id);
+    if (!n || seen.has(id)) continue;
+    seen.add(id);
+    order.push(n);
+    const r = n as Record<string, unknown>;
+    for (const k of ['next', 'yes', 'no', 'found', 'notFound']) if (typeof r[k] === 'string') queue.push(r[k] as string);
+    if (n.type === 'menu') for (const o of n.options) if (o.next) queue.push(o.next);
+  }
+  const menus = order.filter((n): n is Extract<FlowNode, { type: 'menu' }> => n.type === 'menu');
+  return (menus.find((m) => m.kbOnFreeText) ?? menus.find((m) => m.options.length >= 3) ?? menus[0])?.id ?? null;
+}
+
 /** shown under a step that is not the first, so customers know they can go back */
 export const NAV_HINT = 'לחזרה לשלב הקודם כתבו "אחורה". לתפריט הראשי כתבו "תפריט".';
 const SKIP_WORDS = new Set(['דלג', 'דלגי', 'skip', 'לא', 'אין']);
@@ -137,6 +161,8 @@ export async function runFlow(flow: Flow, prev: FlowState | null, input: FlowInp
   };
   const finished = (): FlowResult => { summary(); return { replies, state: { ...state, node: null, list: undefined, done: true, endedAt: now }, effects }; };
 
+  // a flow that finished on its own (not handed to a person): "תפריט" opens the main menu again at once
+  if (state.done && state.endedAt && inp.text && isMenuRequest(normalize(inp.text))) state = { ...NEW_FLOW_STATE, vars: { ...state.vars }, node: '__menu__' };
   if (state.done) return { replies: [], state, effects: [] }; // a person (or the end node) has the conversation
 
   const hasText = inp.text !== null && inp.text.trim() !== '';
@@ -152,9 +178,10 @@ export async function runFlow(flow: Flow, prev: FlowState | null, input: FlowInp
   if (!hasText && !inp.media && state.node !== null) return handoff('media'); // sticker, location...
 
   const t = hasText ? normalize(inp.text!) : '';
+  let jumpTo: string | null = null;
   if (hasText && state.node !== null) {
     if (ctx.humanKeywords.some((k) => t.includes(normalize(k)))) return handoff('requested');
-    if (MENU_WORDS.has(t)) state = { ...state, node: null, invalid: 0, list: undefined, history: [] }; // restart
+    if (MENU_WORDS.has(t)) { state = { ...state, node: null, invalid: 0, list: undefined, history: [], suggest: undefined, suggestFor: undefined, pendingTopic: undefined }; jumpTo = mainMenuOf(flow); } // to the main menu
     else if (isBackRequest(t)) {
       // one step back: ask the previous step again (the first step has nothing before it: start over)
       const hist = [...(state.history ?? [])];
@@ -295,7 +322,9 @@ export async function runFlow(flow: Flow, prev: FlowState | null, input: FlowInp
       }
     }
   }
-  if (!w || state.node === null) {
+  if (state.node === '__menu__') { state = { ...state, node: null }; jumpTo = mainMenuOf(flow); }
+  if (jumpTo) cursor = jumpTo;   // "תפריט": straight to the main menu (not through identification again)
+  else if (!w || state.node === null) {
     cursor = flow.start;
     // flows with kbFirst answer a question in the very first message before anything else (then carry on, e.g. with identification)
     const askable = hasText && !/^\d{1,2}$/.test(t) && !MENU_WORDS.has(t) && !GREETINGS.has(t) && t.length >= 6 && !ctx.humanKeywords.some((k) => t.includes(normalize(k)));

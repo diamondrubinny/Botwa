@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { decide, DEFAULT_BOT, isBackRequest, isMenuRequest, normalize } from '../src/bot.js';
-import { NAV_HINT, runFlow, type FlowContext, type FlowState } from '../src/flow/engine.js';
+import { mainMenuOf, NAV_HINT, runFlow, type FlowContext, type FlowState } from '../src/flow/engine.js';
 import { flowSchema } from '../src/flow/schema.js';
 
 const n = (s: string) => normalize(s);
@@ -63,5 +63,43 @@ describe('flow: back and menu', () => {
     r = await runFlow(flow, s, 'תחזור לתפריט', ctx);
     expect(r.replies.at(-1)).toContain('במה נוכל לעזור?');
     expect(r.state.history).toEqual([]);
+  });
+});
+
+describe('flow: "menu" means the main (topics) menu, not identification again', () => {
+  const flow = flowSchema.parse({
+    start: 'faculty', nodes: [
+      { id: 'faculty', type: 'question', text: 'פקולטה / יחידה:', save: 'faculty', next: 'pi' },
+      { id: 'pi', type: 'question', text: 'שם ה-PI:', save: 'pi', next: 'status' },
+      { id: 'status', type: 'menu', text: 'מה הסטטוס שלך?', save: 'status', kbOnFreeText: false, options: [{ label: 'סטודנט', next: 'topics' }, { label: 'סגל', next: 'topics' }] },
+      { id: 'topics', type: 'menu', text: 'ברצוני לקבל מידע / לדווח על:', kbOnFreeText: true, options: [{ label: 'מפגע', next: 'where' }, { label: 'חומרים', next: 'where' }, { label: 'לייזר', next: 'where' }] },
+      { id: 'where', type: 'question', text: 'איפה?', save: 'place', next: 'end' },
+      { id: 'end', type: 'end', text: 'תודה!' },
+    ],
+  });
+  it('finds the topics menu by itself, or the one the flow names', () => {
+    expect(mainMenuOf(flow)).toBe('topics');
+    expect(mainMenuOf({ ...flow, mainMenu: 'status' })).toBe('status');
+    expect(mainMenuOf({ ...flow, mainMenu: 'where' })).toBe('topics');   // not a menu: ignored
+  });
+  it('"תחזור לתפריט" in the middle of identification or of a topic opens the topics menu', async () => {
+    let r = await runFlow(flow, null, 'שלום', ctx);
+    expect(r.replies.at(-1)).toBe('פקולטה / יחידה:');
+    r = await runFlow(flow, r.state, 'הנדסת חשמל', ctx);
+    expect(r.replies.at(-1)).toBe('שם ה-PI:');
+    r = await runFlow(flow, r.state, 'תחזור לתפריט', ctx);
+    expect(r.replies.at(-1)).toContain('ברצוני לקבל מידע / לדווח על:');
+    expect(r.menu).toBe(true);
+    r = await runFlow(flow, r.state, '1', ctx);
+    expect(r.replies.at(-1)).toBe('איפה?');
+    r = await runFlow(flow, r.state, 'תפריט', ctx);
+    expect(r.replies.at(-1)).toContain('ברצוני לקבל מידע / לדווח על:');
+    expect(r.state.vars.faculty).toBe('הנדסת חשמל');                    // what was collected is kept
+    // a flow that already ended: "תפריט" opens the topics menu again
+    r = await runFlow(flow, r.state, '2', ctx);
+    r = await runFlow(flow, r.state, 'מעבדה', ctx);
+    expect(r.state.done).toBe(true);
+    r = await runFlow(flow, r.state, 'תפריט', ctx);
+    expect(r.replies.at(-1)).toContain('ברצוני לקבל מידע / לדווח על:');
   });
 });

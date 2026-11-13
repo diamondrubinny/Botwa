@@ -70,6 +70,8 @@ export const flowSchema = z.object({
   layout: z.record(id, z.object({ x: z.number().min(-1000).max(20000), y: z.number().min(-1000).max(20000) })).optional(),
   /** answer a question typed as the very first message from the knowledge base, before the flow starts */
   kbFirst: z.boolean().default(false),
+  /** where "תפריט" / "תחזור לתפריט" takes the customer (a menu node); unset = the first menu after the start that accepts free text */
+  mainMenu: id.optional(),
   /** names for the variables in the summary note given to the person who takes over */
   labels: z.record(varName, z.string().trim().min(1).max(40)).optional(),
 });

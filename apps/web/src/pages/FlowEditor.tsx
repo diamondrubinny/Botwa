@@ -21,7 +21,7 @@ type Node = { id: string; label?: string } & (
   | { type: 'handoff'; text: string; userId?: string; areaVars?: string[]; officerTopic?: string; showContact?: boolean }
   | { type: 'end'; text: string }
 );
-interface Flow { start: string; nodes: Node[]; labels?: Record<string, string>; kbFirst?: boolean; layout?: Record<string, Pos> }
+interface Flow { start: string; nodes: Node[]; labels?: Record<string, string>; kbFirst?: boolean; layout?: Record<string, Pos>; mainMenu?: string }
 interface FState { node: string | null; vars: Record<string, string>; invalid: number; done: boolean; endedAt?: number; files?: number; list?: string[] }
 interface Refs { users: { id: string; name: string; username?: string }[]; tags: { id: string; name: string }[]; officers?: { id: string; name: string; active: boolean; hasAccount: boolean; topics: string[] }[]; topics?: string[] }
 
@@ -297,7 +297,7 @@ export function FlowEditor({ me }: { me: Me }) {
                   {selNode ? (
                     <>
                       <h3 id="fs-h">{TYPE_LABEL[selNode.type]}{flow.start === selNode.id ? ' (התחלה)' : ''}</h3>
-                      <NodeForm key={selNode.id} n={selNode} flow={flow} refs={refs} canEdit={canEdit} upd={(p) => upd(selNode.id, p)} del={() => { del(selNode.id); setOpen(null); }} makeStart={() => change((f) => f && { ...f, start: selNode.id })} />
+                      <NodeForm key={selNode.id} n={selNode} flow={flow} refs={refs} canEdit={canEdit} upd={(p) => upd(selNode.id, p)} del={() => { del(selNode.id); setOpen(null); }} makeStart={() => change((f) => f && { ...f, start: selNode.id })} makeMain={() => change((f) => f && { ...f, mainMenu: selNode.id })} />
                     </>
                   ) : (
                     <>
@@ -381,7 +381,7 @@ function TargetSelect({ id, label, value, flow, onChange, disabled }: { id: stri
   );
 }
 
-function NodeForm({ n, flow, refs, canEdit, upd, del, makeStart }: { n: Node; flow: Flow; refs: Refs; canEdit: boolean; upd: (p: Partial<Node>) => void; del: () => void; makeStart: () => void }) {
+function NodeForm({ n, flow, refs, canEdit, upd, del, makeStart, makeMain }: { n: Node; flow: Flow; refs: Refs; canEdit: boolean; upd: (p: Partial<Node>) => void; del: () => void; makeStart: () => void; makeMain: () => void }) {
   const f = (k: string) => `${k}-${n.id}`;
   const set = (p: Record<string, unknown>) => upd(p as Partial<Node>);
   const dis = !canEdit;
@@ -496,9 +496,11 @@ function NodeForm({ n, flow, refs, canEdit, upd, del, makeStart }: { n: Node; fl
       {'next' in n && n.type !== 'tag' ? <TargetSelect id={f('nx')} label="ממשיך אל" value={n.next} flow={flow} onChange={(v) => set({ next: v })} /> : null}
       {n.type === 'tag' && <TargetSelect id={f('nx')} label="ממשיך אל" value={n.next} flow={flow} onChange={(v) => set({ next: v })} />}
 
+      {n.type === 'menu' && <p id={`${n.id}-mmh`} className="hint">{flow.mainMenu === n.id ? 'זה התפריט הראשי: לקוח שכותב "תפריט" או "תחזור לתפריט" מגיע לכאן.' : 'כשלקוח כותב "תפריט" הוא מגיע לתפריט הראשי. אם לא נבחר אחד, נבחר אוטומטית התפריט הראשון שמקבל טקסט חופשי (תפריט הנושאים).'}</p>}
       {canEdit && (
         <div className="row">
           {flow.start !== n.id && <button type="button" onClick={makeStart}>הגדרה כצומת התחלה</button>}
+          {n.type === 'menu' && flow.mainMenu !== n.id && <button type="button" onClick={makeMain} aria-describedby={`${n.id}-mmh`}>הגדרה כתפריט הראשי</button>}
           <button type="button" className="danger" disabled={flow.nodes.length <= 1} onClick={() => { if (confirm(`למחוק את הצומת "${nodeName(n)}"?`)) del(); }}>מחיקת צומת</button>
         </div>
       )}
