@@ -40,6 +40,11 @@ export const automationsSchema = z.object({
     /** also after automatic closing (no answer from the customer) */
     afterAuto: z.boolean(),
   }).default({ enabled: false, question: 'נשמח לשמוע איך היה השירות: השיבו במספר מ-1 עד 5 (5 = מצוין).', thanks: 'תודה רבה על המשוב!', afterAuto: false }),
+  /** the customer writes that it is solved or asks to close ("הסתדרתי", "תסגרו את הקריאה"): close the inquiry and confirm */
+  customerClose: z.object({
+    enabled: z.boolean(),
+    text: text,
+  }).default({ enabled: true, text: 'סגרנו את הפנייה לבקשתך. אם יעלה משהו נוסף, אפשר לכתוב לנו כאן בכל עת והיא תיפתח מחדש.' }),
 }).strict();
 export type Automations = z.infer<typeof automationsSchema>;
 
@@ -52,6 +57,7 @@ export const DEFAULT_AUTOMATIONS: Automations = {
   holding: { enabled: false, after: 10, text: 'קיבלנו את פנייתך, {שם}. נציג/ה יחזרו אליך בהקדם. תודה על הסבלנות!' },
   closing: { defaultOn: false, text: 'תודה שפנית אלינו, {שם}! אם יעלה משהו נוסף, אנחנו כאן.' },
   feedback: { enabled: false, question: 'נשמח לשמוע איך היה השירות: השיבו במספר מ-1 עד 5 (5 = מצוין).', thanks: 'תודה רבה על המשוב!', afterAuto: false },
+  customerClose: { enabled: true, text: 'סגרנו את הפנייה לבקשתך. אם יעלה משהו נוסף, אפשר לכתוב לנו כאן בכל עת והיא תיפתח מחדש.' },
 };
 
 export async function loadAutomations(db: Db): Promise<Automations> {
@@ -76,7 +82,7 @@ const NOT_COMMENT = `ct.external_id !~ '@(fb|ig)comment$'`;
  * Send one automatic message to a conversation if the rules allow it (not blocked, not opted out, inside the platform's
  * reply window). Returns false when it was not sent; the caller decides what that means (e.g. close anyway).
  */
-export async function sendAutomatic(db: Db, out: AutoSender, conv: ConvRow, body: string, kind: 'idle_reminder' | 'idle_close' | 'holding' | 'closing' | 'feedback' | 'feedback_thanks'): Promise<boolean> {
+export async function sendAutomatic(db: Db, out: AutoSender, conv: ConvRow, body: string, kind: 'idle_reminder' | 'idle_close' | 'holding' | 'closing' | 'feedback' | 'feedback_thanks' | 'customer_close'): Promise<boolean> {
   if (!body.trim() || /@(fb|ig)comment$/.test(conv.external_id)) return false;
   if (await sendBlock(db, conv, (await loadSending(db)).replyWindowHours)) return false;
   const hours = await loadBusinessHours(db);
@@ -96,6 +102,49 @@ async function close(db: Db, out: AutoSender, convId: string, note: string): Pro
   if (r.rowCount) await askFeedback(db, out, convId, 'auto');
 }
 
+// "it is solved" / "close it": words that settle it on their own, and close verbs that need an object or "אפשר" with them
+const SOLVED = ['הסתדרתי', 'הסתדרנו', 'הסתדר', 'הסתדרה', 'הסתדרו', 'סודר', 'סודרה', 'נפתר', 'נפתרה', 'נפתרו', 'טופל', 'טופלה', 'resolved', 'solved', 'sorted'];
+const CLOSE_VERB = ['תסגרו', 'סגרו', 'תסגור', 'תסגרי', 'לסגור', 'close'];
+const CLOSE_OBJ = ['הקריאה', 'קריאה', 'הפנייה', 'הפניה', 'פנייה', 'פניה', 'השיחה', 'שיחה', 'הטיקט', 'טיקט', 'אותה', 'אותו', 'ticket', 'it', 'chat'];
+const CLOSE_MAY = ['אפשר', 'ניתן', 'אפשרי', 'can', 'may', 'please', 'בבקשה'];
+/** a question, a "not yet", a "but", or a "don't close" means it is not a request to close */
+const NOT_CLOSE = new Set(['לא', 'אל', 'עדיין', 'אבל', 'עוד', 'למה', 'מתי', 'איך', 'מה', 'האם', 'איפה', 'כמה', 'לפני', 'not', "don't", 'dont', 'still', 'but', 'yet', 'why', 'how', 'when']);
+
+/**
+ * The customer says the matter is settled or asks to close it ("הסתדרתי", "הסתדר, תודה", "תסגרו את הקריאה", "אפשר לסגור"):
+ * short, and with no question, "not yet", "but" or "don't close" in it.
+ */
+export function isCloseRequest(textIn: string | null): boolean {
+  if (!textIn) return false;
+  const t = textIn.trim();
+  if (!t || t.length > 140 || /[?؟]/.test(t)) return false;
+  const words = t.toLowerCase().replace(/[!.,׳"״:;()\-–—~*]/g, ' ').replace(/[\p{Extended_Pictographic}\u{FE0F}\u{200D}\u{1F3FB}-\u{1F3FF}]/gu, ' ')
+    .split(/\s+/).filter(Boolean)
+    .map((w) => (w.length > 3 && /^[וש][\u0590-\u05FF]/.test(w) && [...SOLVED, ...CLOSE_VERB, ...NOT_CLOSE].includes(w.slice(1)) ? w.slice(1) : w));   // "ותסגרו" -> "תסגרו"
+  if (!words.length || words.length > 12 || words.some((w) => NOT_CLOSE.has(w))) return false;
+  if (words.some((w) => SOLVED.includes(w))) return true;
+  const verb = words.findIndex((w) => CLOSE_VERB.includes(w));
+  if (verb < 0) return false;
+  return words.some((w) => CLOSE_OBJ.includes(w)) || words.slice(0, verb).some((w) => CLOSE_MAY.includes(w)) || words.length <= 2;
+}
+
+/**
+ * The customer asked to close (see isCloseRequest): close the inquiry as closed by the customer, confirm it to them,
+ * and ask for a rating when that is switched on. Returns false when the conversation was not open or the option is off.
+ */
+export async function closeByCustomer(db: Db, out: AutoSender, convId: string, said: string): Promise<boolean> {
+  const a = (await loadAutomations(db)).customerClose;
+  if (!a.enabled) return false;
+  const conv = (await db.query(`${CONV} WHERE c.id = $1 AND c.status = 'open' AND ${NOT_COMMENT}`, [convId])).rows[0] as ConvRow | undefined;
+  if (!conv) return false;
+  if (a.text) await sendAutomatic(db, out, conv, a.text, 'customer_close');   // before the status changes, like a person's closing message
+  const r = await db.query(`UPDATE conversations SET status = 'closed', close_kind = 'customer', closed_by = NULL, bot_state = NULL, flow_state = NULL, bot_invalid = 0 WHERE id = $1 AND status = 'open' RETURNING id`, [convId]);
+  if (!r.rowCount) return false;
+  await db.query('INSERT INTO conversation_notes (conversation_id, body) VALUES ($1, $2)', [convId, `הפנייה נסגרה לבקשת הלקוח ("${said.trim().slice(0, 80)}"). הודעה חדשה ממנו תפתח אותה מחדש.`]);
+  await askFeedback(db, out, convId, 'customer').catch(() => false);
+  return true;
+}
+
 /** Rating 1-5 from a reply: a digit, or 1-5 stars. null when the reply is something else. */
 export function parseRating(text: string): number | null {
   const t = text.trim();
@@ -105,7 +154,7 @@ export function parseRating(text: string): number | null {
 }
 
 /** After a case closed: ask for a rating once (if switched on), and remember which case the answer belongs to. */
-export async function askFeedback(db: Db, out: AutoSender, convId: string, how: 'staff' | 'auto'): Promise<boolean> {
+export async function askFeedback(db: Db, out: AutoSender, convId: string, how: 'staff' | 'auto' | 'customer'): Promise<boolean> {
   const a = (await loadAutomations(db)).feedback;
   if (!a.enabled || (how === 'auto' && !a.afterAuto)) return false;
   const kase = (await db.query(`SELECT id FROM cases WHERE conversation_id = $1 AND closed_at IS NOT NULL ORDER BY closed_at DESC LIMIT 1`, [convId])).rows[0];

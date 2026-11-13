@@ -30,4 +30,6 @@ $SUDO mkdir -p "$DEST"
 $SUDO tar xzf "$tmp" --strip-components=1 -C "$DEST"
 cd "$DEST"
 [ -f setup.sh ] || { echo "Archive does not look like Botwa (setup.sh missing)" >&2; exit 1; }
-if has_tty; then exec $SUDO bash setup.sh </dev/tty; else exec $SUDO bash setup.sh; fi
+# options passed through sudo (which drops the environment): BOTWA_LOCAL_LLM=1 installs the local language model without asking
+pass=(); [ -n "${BOTWA_LOCAL_LLM:-}" ] && pass=(env "BOTWA_LOCAL_LLM=$BOTWA_LOCAL_LLM")
+if has_tty; then exec $SUDO "${pass[@]}" bash setup.sh </dev/tty; else exec $SUDO "${pass[@]}" bash setup.sh; fi

@@ -16,7 +16,7 @@ const WARN: Record<string, string> = {
   restricted: 'החשבון הוגבל או נחסם (חשד). עצרו שליחה אוטומטית ובדקו את הטלפון/האפליקציה. אל תקשרו מחדש שוב ושוב.',
   logged_out: 'החשבון מנותק. נדרש קישור מחדש.',
   daily_cap_reached: 'הגעתם למכסה היומית. ההודעות לא יישלחו עד שהמכסה תתפנה.',
-  daily_cap_near: 'מתקרבים למכסה היומית.',
+  daily_cap_near: 'מתקרבים למכסה היומית.', monthly_limit_near: 'מתקרבים למגבלת ההודעות החודשית של המספר הרשמי.', monthly_limit_reached: 'המספר הרשמי הגיע למגבלת ההודעות החודשית.',
   warming_up: 'מכסה מוגדלת בהדרגה ככל שהמספר "מתבגר".',
 };
 
@@ -64,16 +64,27 @@ export function Channels({ me }: { me: Me }) {
           <div style={{ overflowX: 'auto' }}>
             <table>
               <caption className="sr-only">מצב ערוצים, כמות הודעות שנשלחו מול המכסה, ואזהרות</caption>
-              <thead><tr><th scope="col">ערוץ</th><th scope="col">מצב</th><th scope="col">נשלחו ב-24 שעות</th><th scope="col">סיכון חסימה</th><th scope="col">אזהרות</th><th scope="col">אירועים אחרונים</th></tr></thead>
+              <thead><tr><th scope="col">ערוץ</th><th scope="col">מצב</th><th scope="col">נשלחו (ב-24 שעות; ברשמי: החודש)</th><th scope="col">סיכון חסימה / מגבלה</th><th scope="col">אזהרות</th><th scope="col">אירועים אחרונים</th></tr></thead>
               <tbody>
                 {health.map((h) => (
                   <tr key={h.id}>
                     <th scope="row">{h.label}</th>
                     <td><span className={`badge ${h.status}`}>{t.status[h.status] ?? h.status}</span></td>
-                    <td>{h.sentLast24h} / {h.dailyCap}{h.warnings.includes('warming_up') ? ' (חימום מספר חדש)' : ''}</td>
+                    <td>{h.monthly
+                      ? <>החודש: {h.monthly.total.toLocaleString('he-IL')}{h.monthly.limit > 0 ? ` מתוך ${h.monthly.limit.toLocaleString('he-IL')}` : ' (בלי מגבלה)'}<br /><small>מתאפס ב-{new Date(h.monthly.resetsAt).toLocaleDateString('he-IL')}</small></>
+                      : <>{h.sentLast24h} / {h.dailyCap}{h.warnings.includes('warming_up') ? ' (חימום מספר חדש)' : ''}</>}</td>
                     <td>
-                      <strong className={h.risk.level === 'low' ? 'ok' : 'error'}>{RISK[h.risk.level]}</strong>
-                      {h.risk.reasons.length > 0 && <ul style={{ margin: 0, paddingInlineStart: '1rem' }}>{h.risk.reasons.map((r) => <li key={r}><small>{RISK_WHY[r] ?? r}</small></li>)}</ul>}
+                      {h.monthly ? (
+                        <>
+                          <strong className={h.monthly.limit > 0 && h.monthly.total >= h.monthly.limit ? 'error' : 'ok'}>{h.monthly.limit === 0 ? 'ספירה בלבד' : h.monthly.total >= h.monthly.limit ? 'הגיע למגבלה החודשית' : `${h.monthly.percent}% מהמגבלה החודשית`}</strong>
+                          <div><small>ערוץ רשמי: אין סיכון חסימה כמו בחיבור QR.</small></div>
+                        </>
+                      ) : (
+                        <>
+                          <strong className={h.risk.level === 'low' ? 'ok' : 'error'}>{RISK[h.risk.level]}</strong>
+                          {h.risk.reasons.length > 0 && <ul style={{ margin: 0, paddingInlineStart: '1rem' }}>{h.risk.reasons.map((r) => <li key={r}><small>{RISK_WHY[r] ?? r}</small></li>)}</ul>}
+                        </>
+                      )}
                       <div style={{ marginTop: '.4rem' }}>
                         {h.paused
                           ? <button onClick={() => run(() => api('POST', `/channels/${h.id}/resume`))}>חידוש שליחה<span className="sr-only"> {h.label}</span></button>

@@ -105,6 +105,18 @@ describe('official WhatsApp monthly outgoing count', () => {
     expect((await call('admin@t.io', 'POST', `/conversations/${conv}/messages`, { text: 'עכשיו כן' })).statusCode).toBe(201);
   });
 
+  it('channel health shows the official number by its monthly count (no daily cap or ban risk); other channels keep the daily view', async () => {
+    const h = (await call('admin@t.io', 'GET', '/channels/health')).json() as { id: string; monthly: { total: number; limit: number } | null; warnings: string[]; risk: { level: string } }[];
+    const c = h.find((x) => x.id === cloud)!;
+    expect(c.monthly).toMatchObject({ limit: 0 });
+    expect(c.monthly!.total).toBeGreaterThan(10);
+    expect(c.warnings.filter((w) => w.startsWith('daily_cap') || w === 'warming_up')).toEqual([]);
+    expect(c.risk.level).toBe('low');
+    expect(h.find((x) => x.id === qr)!.monthly).toBeNull();
+    await call('admin@t.io', 'PUT', `/channels/${cloud}/usage-limit`, { limit: 12, action: 'warn', warnAt: 80 });
+    expect((await call('admin@t.io', 'GET', '/channels/health')).json().find((x: { id: string }) => x.id === cloud).warnings).toContain('monthly_limit_reached');
+  });
+
   it('validates the settings and lets only channel managers change them', async () => {
     for (const bad of [{ limit: -1 }, { limit: 1.5 }, { action: 'explode' }, { warnAt: 10 }, { limit: 'x' }]) expect((await call('admin@t.io', 'PUT', `/channels/${cloud}/usage-limit`, bad)).statusCode, JSON.stringify(bad)).toBe(400);
     expect((await call('ag@t.io', 'PUT', `/channels/${cloud}/usage-limit`, { limit: 5 })).statusCode).toBe(403);

@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { api, CHANNEL_NAMES, type ChannelKind } from '../api';
 
 interface Case {
-  id: string; number: number; conversationId: string; openedAt: string; closedAt: string | null; closeKind: 'staff' | 'auto' | 'other' | null;
+  id: string; number: number; conversationId: string; openedAt: string; closedAt: string | null; closeKind: 'staff' | 'auto' | 'customer' | 'other' | null;
   firstMessage: string | null; rating: number | null; closedByName: string | null; assignedName: string | null; channelLabel: string; channelType: string; messages: number;
 }
 interface Msg { id: string; direction: 'in' | 'out'; body: string; createdAt: string; auto: boolean; senderName: string | null }
@@ -37,7 +37,7 @@ export function CaseHistory({ convId, refresh }: { convId: string; refresh: numb
                   <small>{fmt(c.openedAt)} · {CHANNEL_NAMES[c.channelType as ChannelKind] ?? c.channelType}{c.channelLabel && c.channelLabel !== c.channelType ? ` (${c.channelLabel})` : ''} · {c.messages} הודעות</small>
                 </span>
                 <span className="case-meta">
-                  <span className={`mchip ${c.closedAt ? '' : 'case-open'}`}>{!c.closedAt ? 'פתוחה' : c.closeKind === 'auto' ? 'נסגרה אוטומטית' : c.closedByName ? `נסגרה ע״י ${c.closedByName}` : 'נסגרה'}</span>
+                  <span className={`mchip ${c.closedAt ? '' : 'case-open'}`}>{!c.closedAt ? 'פתוחה' : c.closeKind === 'auto' ? 'נסגרה אוטומטית' : c.closeKind === 'customer' ? 'נסגרה לבקשת הלקוח' : c.closedByName ? `נסגרה ע״י ${c.closedByName}` : 'נסגרה'}</span>
                   {c.closedAt && <small>משך: {dur(c.openedAt, c.closedAt)}</small>}
                   {c.rating && <span className="case-rating" aria-label={`דירוג ${c.rating} מתוך 5`}><span aria-hidden="true">{'★'.repeat(c.rating)}{'☆'.repeat(5 - c.rating)}</span></span>}
                 </span>

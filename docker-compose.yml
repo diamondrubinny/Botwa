@@ -74,6 +74,24 @@ services:
       retries: 5
       start_period: 300s   # first start downloads signatures
 
+  # Optional local language model (Ollama) that words the bot's answers from the knowledge base only. Turned on by
+  # scripts/enable-local-llm.sh (adds "llm" to COMPOSE_PROFILES, pins OLLAMA_VERSION, pulls the model). No port is published:
+  # only the server reaches it on the internal network, and it never receives anything but knowledge-base passages and a question.
+  ollama:
+    image: ollama/ollama:${OLLAMA_VERSION:-latest}
+    profiles: ["llm"]
+    restart: unless-stopped
+    volumes: [ollama:/root/.ollama]
+    environment:
+      OLLAMA_KEEP_ALIVE: "30m"     # keep the model in memory between questions (the first answer after a pause is slower)
+    security_opt: ["no-new-privileges:true"]
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+
   caddy:
     image: caddy:2
     # Built-in HTTPS reverse proxy. Skipped (not in COMPOSE_PROFILES) when an existing nginx fronts Botwa: see docker-compose.external.yml
@@ -93,6 +111,7 @@ networks:
   webrender: {}
 
 volumes:
+  ollama:
   backups:
   media:
   models:

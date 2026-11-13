@@ -59,7 +59,7 @@ await page.click('aside.sidebar nav >> text=ערוצים');
 await page.fill('#ch-label', 'תמיכה ראשית'); await page.click('button:has-text("יצירה")');
 await page.waitForSelector('text=תמיכה ראשית');
 await page.waitForSelector('#health-h');
-await page.waitForSelector('th:has-text("נשלחו ב-24 שעות")');
+await page.waitForSelector('th:has-text("נשלחו (ב-24 שעות")');
 check('channel health panel present', true);
 await page.waitForSelector('th:has-text("סיכון חסימה")');
 await page.click('button:has-text("עצירת חירום של שליחה")');
@@ -74,6 +74,11 @@ await page.click('li.card:has-text("רשמי") >> button:has-text("הגדרת ה
 await page.waitForSelector('text=כתובת Webhook (Callback URL)');
 check('official channel shows webhook URL and verify token', (await page.textContent('li.card:has-text("רשמי")'))?.includes('/webhooks/whatsapp/') && (await page.textContent('li.card:has-text("רשמי")'))?.includes('Verify token'));
 await axe('channels: official WhatsApp setup');
+// the health table shows the official number by its monthly count, not the daily cap and ban risk of QR channels
+{ const row = 'section[aria-labelledby="health-h"] tbody tr:has(th:text-is("רשמי"))';
+  await page.waitForSelector(`${row} td:has-text("החודש:")`);
+  const txt = await page.textContent(row);
+  check('health: the official number shows its monthly count out of 1,000 and no ban risk', /מתוך 1,000/.test(txt) && txt.includes('אין סיכון חסימה'), txt); }
 // monthly outgoing count of the official number: shown on the card, the limit (1000 by default) can be changed
 await page.waitForSelector('li.card:has-text("רשמי") .usage meter');
 check('official channel: monthly outgoing count against 1000 by default', /0\s*מתוך\s*1,000/.test(await page.textContent('li.card:has-text("רשמי") .usage-num')), await page.textContent('li.card:has-text("רשמי") .usage-num'));
@@ -208,7 +213,7 @@ await page.click('button:has-text("בטי, הבוט של יחידת הבטיחו
 await page.waitForSelector('.persona-face img', { timeout: 15000 }).catch(() => undefined);
 check('bot identity: Betty is set with her picture and the word "בוט"', await page.isVisible('.persona-face img') && (await page.textContent('.persona-preview strong')) === 'בטי (בוט)');
 await axe('bot settings: identity');
-check('bot answers: choice between a quote and a local model, with the model status', await page.isVisible('text=אופן הניסוח של התשובה') && await page.isVisible('text=מודל מקומי לא הוגדר בשרת'));
+check('bot answers: choice between a quote and a local model, with the model status', await page.isVisible('text=אופן הניסוח של התשובה') && await page.isVisible('text=מודל מקומי לא הותקן בשרת'));
 await page.reload();
 await page.waitForSelector('#bt2');
 check('bot settings persisted (3 items, enabled)', (await page.inputValue('#bt2')) === 'משלוחים' && (await page.isChecked('text=הפעלת הבוט')));

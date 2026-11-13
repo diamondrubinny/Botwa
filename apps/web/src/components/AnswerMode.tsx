@@ -28,9 +28,9 @@ export function AnswerMode({ mode, onChange, canEdit }: { mode: 'quote' | 'local
         <p className="hint">מודל שרץ על השרת שלכם מנסח תשובה בטון נעים ומקצועי, <strong>רק</strong> מתוך הקטעים שנמצאו במאגר. שום מידע לא נשלח החוצה. אם המודל לא בטוח, או מזכיר מספר או קישור שלא מופיע בקטעים, נשלח במקומו הציטוט. המקור והערת החקיקה מצורפים תמיד.</p>
         <p className={ready ? 'ok' : 'hint'} role="status">
           {!st ? 'בודק את המודל המקומי…'
-            : !st.configured ? 'מודל מקומי לא הוגדר בשרת (LOCAL_LLM_URL). עד שיוגדר, נשלח ציטוט. הוראות התקנה: docs/LOCAL_LLM.he.md'
-            : !st.reachable ? 'המודל המקומי מוגדר אבל לא עונה. בדקו ששירות Ollama פועל.'
-            : !st.installed ? `השירות פועל, אבל המודל ${st.model} לא מותקן. הריצו: ollama pull ${st.model}`
+            : !st.configured ? 'מודל מקומי לא הותקן בשרת. עד שיותקן, נשלח ציטוט. התקנה אוטומטית: בשרת, בתיקיית ההתקנה, הריצו bash scripts/enable-local-llm.sh (או ענו "y" בשאלה על המודל המקומי בזמן העדכון).'
+            : !st.reachable ? 'המודל המקומי מוגדר אבל לא עונה. בשרת: docker compose ps ollama, או הריצו שוב bash scripts/enable-local-llm.sh.'
+            : !st.installed ? `השירות פועל, אבל המודל ${st.model} לא הורד. הריצו שוב בשרת: bash scripts/enable-local-llm.sh`
             : `המודל המקומי ${st.model} מוכן.`}
         </p>
       </fieldset>

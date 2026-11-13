@@ -1,6 +1,6 @@
 // Ready phrasings for automatic messages, by situation. Common customer-service wording in Hebrew: polite, short, gender-neutral
 // where possible, and always leaving the door open. Variables: {שם} customer, {נציג} agent, {שעות} business hours, {ערוץ} channel.
-export type Situation = 'idleReminder' | 'idleClose' | 'holding' | 'closing';
+export type Situation = 'idleReminder' | 'idleClose' | 'holding' | 'closing' | 'customerClose';
 export interface Phrase { style: string; text: string }
 
 export const PHRASES: Record<Situation, { title: string; items: Phrase[] }> = {
@@ -41,6 +41,15 @@ export const PHRASES: Record<Situation, { title: string; items: Phrase[] }> = {
       { style: 'קצר', text: 'שמחנו לעזור! יום נעים 🌞' },
       { style: 'אישי', text: 'היה נעים לעזור, {שם}. {נציג} מהצוות. אם צריך עוד משהו, כאן בשבילך.' },
       { style: 'בטיחות', text: 'תודה שפנית ליחידת הבטיחות, {שם}. שמירה על בטיחות היא אחריות של כולנו. לכל שאלה נוספת, אנחנו כאן.' },
+    ],
+  },
+  customerClose: {
+    title: 'סגירה לבקשת הלקוח ("הסתדרתי", "תסגרו את הקריאה")',
+    items: [
+      { style: 'חם', text: 'שמחים שהסתדר! סגרנו את הפנייה. אם יעלה משהו נוסף, אפשר לכתוב לנו כאן בכל עת והיא תיפתח מחדש.' },
+      { style: 'רשמי', text: 'הפנייה נסגרה לבקשתך. לכל שאלה נוספת ניתן להשיב להודעה זו והפנייה תיפתח מחדש.' },
+      { style: 'קצר', text: 'סגרנו את הפנייה 👍 אנחנו כאן אם צריך עוד משהו.' },
+      { style: 'בטיחות', text: 'הפנייה נסגרה לבקשתך. תודה שפנית ליחידת הבטיחות. לכל שאלה נוספת, אנחנו כאן.' },
     ],
   },
 };

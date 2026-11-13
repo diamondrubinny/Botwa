@@ -185,6 +185,18 @@ done; echo
 [ -n "$healthy" ] || { $DOCKER compose logs --tail=40 server; die "App did not become healthy. Fix the error above and re-run: docker compose up -d --build"; }
 ok "App is healthy"
 
+# ---------- optional: local language model for the bot's answers ----------
+if grep -qE '^COMPOSE_PROFILES=(.*,)?llm(,|$)' .env; then
+  ok "Local language model: on (kept as is)"
+else
+  LOCALLLM=n
+  if [ "${BOTWA_LOCAL_LLM:-}" = 1 ]; then LOCALLLM=y
+  else yesno LOCALLLM "Install a local AI model so the bot words answers from the knowledge base (no external service; needs ~4-8 GB RAM, ~5 GB disk)?" "n"; fi
+  if [ "$LOCALLLM" = y ]; then
+    bash scripts/enable-local-llm.sh || warn "The local model was not installed (see the message above). Botwa works without it; try later: bash scripts/enable-local-llm.sh"
+  fi
+fi
+
 setup_nginx() { # reverse proxy for DOMAIN -> 127.0.0.1:3000, with Let's Encrypt via certbot (only this one conf file is added)
   local dom conf ip listen80 listen443 email
   dom="$(grep '^DOMAIN=' .env | cut -d= -f2-)"

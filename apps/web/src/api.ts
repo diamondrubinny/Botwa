@@ -55,6 +55,8 @@ export interface ChannelHealth {
   id: string; label: string; type: string; status: string; sentLast24h: number; sentLastMinute: number; dailyCap: number; ageDays: number;
   warnings: string[]; events: { kind: string; at: string }[];
   inboundLast24h: number; paused: boolean; autoPausedUntil: string | null; risk: { level: 'low' | 'medium' | 'high'; reasons: string[] };
+  /** official WhatsApp only: outgoing messages this month against the number's limit */
+  monthly?: { total: number; limit: number; percent: number | null; action: 'warn' | 'block_auto' | 'block_all'; resetsAt: string } | null;
 }
 export interface SendingCfg { minDelayMs: number; maxDelayMs: number; perMinute: number; perDay: number; warmup: boolean; typing: boolean; replyWindowHours: number; failuresBeforePause: number; pauseMinutes: number; readReceipts: boolean }
 

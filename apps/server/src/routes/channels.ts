@@ -55,8 +55,12 @@ export function channelRoutes(app: FastifyInstance, db: Db, mgr: ChannelManager,
       const warnings: string[] = [];
       if (status === 'restricted') warnings.push('restricted');
       if (status === 'logged_out') warnings.push('logged_out');
-      if (u.day >= cap * 0.8) warnings.push(u.day >= cap ? 'daily_cap_reached' : 'daily_cap_near');
-      if (u.settings.warmup && cap < u.settings.perDay) warnings.push('warming_up');
+      // official WhatsApp has no daily cap or ban risk from an unofficial library: what matters is its monthly count against the limit
+      const official = ch.type === 'whatsapp_cloud';
+      const monthly = official ? await usageReport(db, mgr.usageKey(ch.id) ?? `channel:${ch.id}`, ch.id) : null;
+      if (!official && u.day >= cap * 0.8) warnings.push(u.day >= cap ? 'daily_cap_reached' : 'daily_cap_near');
+      if (!official && u.settings.warmup && cap < u.settings.perDay) warnings.push('warming_up');
+      if (monthly && monthly.limit.limit > 0 && monthly.total >= Math.ceil((monthly.limit.limit * monthly.limit.warnAt) / 100)) warnings.push(monthly.total >= monthly.limit.limit ? 'monthly_limit_reached' : 'monthly_limit_near');
       const inb = (await db.query(`SELECT count(*)::int AS n FROM messages m JOIN conversations c ON c.id = m.conversation_id WHERE c.channel_id = $1 AND m.direction = 'in' AND m.created_at > now() - interval '24 hours'`, [ch.id])).rows[0].n as number;
       const pausedRow = (await db.query('SELECT paused FROM channels WHERE id = $1', [ch.id])).rows[0];
       const autoPausedUntil = mgr.isAutoPausedUntil(ch.id);
@@ -66,6 +70,7 @@ export function channelRoutes(app: FastifyInstance, db: Db, mgr: ChannelManager,
         id: ch.id, label: ch.label, type: ch.type, status, sentLast24h: u.day, inboundLast24h: inb, sentLastMinute: u.minute, dailyCap: cap, ageDays: Math.floor(u.ageDays),
         paused: !!pausedRow?.paused, autoPausedUntil: autoPausedUntil > Date.now() ? new Date(autoPausedUntil).toISOString() : null,
         risk, warnings, events,
+        monthly: monthly ? { total: monthly.total, limit: monthly.limit.limit, percent: monthly.percent, action: monthly.limit.action, resetsAt: monthly.resetsAt } : null,
       });
     }
     return out;

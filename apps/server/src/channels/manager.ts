@@ -32,7 +32,7 @@ import type { AdapterFactory, ChannelAdapter, ChannelStatus, ChannelType, Outbou
 import { TelegramAdapter } from './telegram.js';
 import { CLOUD_CREDS_KEY, newVerifyToken, WhatsAppCloudAdapter, type CloudCreds } from './whatsapp-cloud.js';
 import { EMAIL_CREDS_KEY, EmailAdapter, type EmailCreds } from './email.js';
-import { thankForFeedback } from '../automations.js';
+import { closeByCustomer, isCloseRequest, thankForFeedback } from '../automations.js';
 import { composeAnswer, type KbAnswer } from '../kb/compose.js';
 import { loadPersona } from '../routes/branding.js';
 import { isCommentContact, META_CREDS_KEY, MetaMessagingAdapter, type CommentReplyMode, type MetaCreds } from './meta-messaging.js';
@@ -347,6 +347,14 @@ export class ChannelManager {
           if (r.messageId && !stop && !m.media && bot?.reactions.thanks && !isCommentContact(m.externalContactId) && isThanks(m.text)) {
             if ((await this.setOurReaction(r.messageId, bot.reactions.thanks, null).catch(() => 'error')) === 'ok') thanked = bot.reactions.thanks;
           }
+          // "הסתדרתי" / "תסגרו את הקריאה": the customer closes the inquiry; no bot, routing or away reply for this message
+          if (r.messageId && !stop && !m.media && !isCommentContact(m.externalContactId) && isCloseRequest(m.text)
+              && await closeByCustomer(this.db, this, r.conversationId, m.text ?? '').catch(() => false)) {
+            this.emit({ channelId, type: 'message', conversationId: r.conversationId, messageId: r.messageId });
+            this.hookMessage('message.received', r.conversationId, r.messageId);   // no "new message" push: it is closed, nothing to do
+            this.hookConversation('conversation.status_changed', r.conversationId);
+            return;
+          }
           if (r.messageId && stop) {
             // customer said stop: no bot, no away reply - a person decides what happens next
             if (r.needsRouting) await autoAssign(this.db, r.conversationId).catch(() => null);
@@ -543,7 +551,9 @@ export class ChannelManager {
 
   /** The official API needs no human-like pacing or warm-up (Meta enforces its own limits); the per-minute/day caps still apply. */
   private effective(channelId: string, s: SendingSettings): SendingSettings {
-    return ['whatsapp_cloud', 'webchat', 'messenger', 'instagram', 'email'].includes(this.types.get(channelId) ?? '') ? { ...s, warmup: false, typing: false, minDelayMs: 0, maxDelayMs: Math.min(s.maxDelayMs, 300) } : s;
+    const type = this.types.get(channelId) ?? '';
+    // official WhatsApp: no daily cap (its own monthly limit applies instead); the per-minute cap still stops runaway loops
+    return ['whatsapp_cloud', 'webchat', 'messenger', 'instagram', 'email'].includes(type) ? { ...s, warmup: false, typing: false, minDelayMs: 0, maxDelayMs: Math.min(s.maxDelayMs, 300), ...(type === 'whatsapp_cloud' ? { perDay: 20_000 } : {}) } : s;
   }
 
   // ---- Official WhatsApp (Cloud API) -------------------------------------------------------------------------------

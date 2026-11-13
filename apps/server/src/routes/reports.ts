@@ -136,7 +136,7 @@ export async function computeSummary(db: Db, cfg: Config, days: number, bucket: 
     // inquiries closed in the period and the customers' ratings of them
     const casesRow = (await db.query(
       `SELECT count(*)::int AS closed, count(rating)::int AS rated, round(avg(rating)::numeric, 2)::float AS "avgRating",
-              count(*) FILTER (WHERE close_kind = 'auto')::int AS "closedAuto",
+              count(*) FILTER (WHERE close_kind = 'auto')::int AS "closedAuto", count(*) FILTER (WHERE close_kind = 'customer')::int AS "closedByCustomer",
               array[count(*) FILTER (WHERE rating = 1), count(*) FILTER (WHERE rating = 2), count(*) FILTER (WHERE rating = 3), count(*) FILTER (WHERE rating = 4), count(*) FILTER (WHERE rating = 5)]::int[] AS distribution
          FROM cases WHERE closed_at >= now() - make_interval(days => $1)`, [days])).rows[0];
     return {

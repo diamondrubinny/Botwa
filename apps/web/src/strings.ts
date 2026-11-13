@@ -8,7 +8,7 @@ export const t = {
   nav: { inbox: 'שיחות', channels: 'ערוצים', team: 'צוות', account: 'החשבון שלי', a11y: 'הצהרת נגישות', privacy: 'פרטיות ועוגיות', logout: 'התנתקות' },
   roles: { admin: 'מנהל', supervisor: 'מפקח', agent: 'נציג' },
   status: {
-    stopped: 'לא פעיל', connecting: 'מתחבר…', qr: 'ממתין לסריקת QR', connected: 'מחובר', password: 'ממתין לסיסמת האימות הדו-שלבי של טלגרם', restricted: 'הוגבל / נחסם על ידי הפלטפורמה (חשד)', logged_out: 'מנותק (נדרשת סריקה מחדש)', error: 'שגיאה',
+    stopped: 'לא פעיל', monthly_limit_warning: 'התקרבות למגבלה החודשית', monthly_limit_reached: 'הגעה למגבלה החודשית', auto_paused: 'עצירה אוטומטית', auto_restart: 'הפעלה מחדש אוטומטית', connecting: 'מתחבר…', qr: 'ממתין לסריקת QR', connected: 'מחובר', password: 'ממתין לסיסמת האימות הדו-שלבי של טלגרם', restricted: 'הוגבל / נחסם על ידי הפלטפורמה (חשד)', logged_out: 'מנותק (נדרשת סריקה מחדש)', error: 'שגיאה',
   } as Record<string, string>,
   errors: {
     invalid_credentials: 'האימייל או הסיסמה שגויים.',

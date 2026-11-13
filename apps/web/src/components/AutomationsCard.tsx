@@ -8,6 +8,7 @@ interface Automations {
   holding: { enabled: boolean; after: number; text: string };
   closing: { defaultOn: boolean; text: string };
   feedback: { enabled: boolean; question: string; thanks: string; afterAuto: boolean };
+  customerClose: { enabled: boolean; text: string };
 }
 
 /** A text box with "choose a ready phrasing" for its situation. */
@@ -93,6 +94,13 @@ export function AutomationsCard({ canEdit }: { canEdit: boolean }) {
           </select>
           <textarea id="au-fq" rows={2} maxLength={1000} value={a.feedback.question} disabled={off} required onChange={(e) => set('feedback', { question: e.target.value })} /></div>
         <div className="field"><label htmlFor="au-ft">תודה על המשוב</label><input id="au-ft" maxLength={300} value={a.feedback.thanks} disabled={off} onChange={(e) => set('feedback', { thanks: e.target.value })} /></div>
+      </fieldset>
+
+      <fieldset>
+        <legend>סגירה לבקשת הלקוח</legend>
+        <label><input type="checkbox" role="switch" checked={a.customerClose?.enabled ?? true} disabled={off} onChange={(e) => set('customerClose', { enabled: e.target.checked })} /> לסגור את הפנייה כשהלקוח כותב שהעניין הסתדר או מבקש לסגור</label>
+        <p className="hint">למשל "הסתדרתי", "הסתדר, תודה", "הבעיה נפתרה", "תסגרו את הקריאה", "אפשר לסגור". הודעה עם שאלה, "עדיין", "אבל" או "אל תסגרו" לא סוגרת. הלקוח מקבל אישור, ואם המשוב פעיל הוא גם יתבקש לדרג. הודעה חדשה ממנו פותחת את הפנייה מחדש. בהיסטוריה הפנייה תסומן "נסגרה לבקשת הלקוח".</p>
+        <PhraseField id="au-cc" label="הודעת אישור ללקוח (ריק = לסגור בלי הודעה)" value={a.customerClose?.text ?? ''} onChange={(v) => set('customerClose', { text: v })} situation="customerClose" disabled={off || !(a.customerClose?.enabled ?? true)} />
       </fieldset>
 
       {canEdit && <button className="primary" type="submit">שמירת האוטומציות</button>}
