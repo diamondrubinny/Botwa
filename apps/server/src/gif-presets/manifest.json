@@ -1,0 +1,50 @@
+{
+  "thanks": {
+    "title": "תודה!",
+    "keywords": "תודה לב תודה רבה הערכה thanks love"
+  },
+  "hello": {
+    "title": "שלום!",
+    "keywords": "שלום היי ברוכים הבאים נפנוף hello hi welcome"
+  },
+  "working": {
+    "title": "בטיפול",
+    "keywords": "בטיפול מטפלים עובדים על זה בבדיקה working on it"
+  },
+  "moment": {
+    "title": "רגע אחד…",
+    "keywords": "רגע אחד המתנה סבלנות שעון חול wait moment"
+  },
+  "done": {
+    "title": "בוצע!",
+    "keywords": "בוצע טופל הושלם וי סיימנו done check"
+  },
+  "glad": {
+    "title": "שמחנו לעזור",
+    "keywords": "שמחנו לעזור בשמחה לייק אגודל מעולה glad to help thumbs up"
+  },
+  "safety": {
+    "title": "בטיחות קודם!",
+    "keywords": "בטיחות קודם קסדה זהירות הגנה safety first helmet"
+  },
+  "received": {
+    "title": "קיבלנו!",
+    "keywords": "קיבלנו התקבל הפנייה נקלטה מכתב received got it"
+  },
+  "niceday": {
+    "title": "יום נעים!",
+    "keywords": "יום נעים יום טוב שמש ברכה have a nice day"
+  },
+  "bravo": {
+    "title": "כל הכבוד!",
+    "keywords": "כל הכבוד הצלחה גביע מעולה אלופים bravo well done"
+  },
+  "agent": {
+    "title": "נציג/ה בדרך אליך",
+    "keywords": "נציג בדרך מיד חוזרים אליך נציגה ממתינים agent coming"
+  },
+  "takecare": {
+    "title": "שמרו על עצמכם",
+    "keywords": "שמרו על עצמכם בריאות בטיחות מגן דאגה take care"
+  }
+}

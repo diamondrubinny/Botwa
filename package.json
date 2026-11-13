@@ -1,0 +1,6 @@
+{
+  "name": "botwa",
+  "private": true,
+  "workspaces": ["apps/*", "e2e"],
+  "engines": { "node": ">=20" }
+}

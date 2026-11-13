@@ -1,0 +1,410 @@
+import { isBackRequest, isMenuRequest, normalize, waLink } from '../bot.js';
+import { NODE_WAITS, type Flow, type FlowNode } from './schema.js';
+
+export type Vars = Record<string, string>;
+export interface FlowState {
+  /** node the customer is answering now (menu, question, media or list), or null before the first message / after the flow ended */
+  node: string | null;
+  vars: Vars;
+  invalid: number;
+  done: boolean;
+  /** set when the flow finished without a person taking over: after a while the next message starts it again */
+  endedAt?: number;
+  /** files received during the flow (photos, documents) */
+  files?: number;
+  /** progress inside a `list` node */
+  list?: { items: string[]; phase: 'item' | 'more' };
+  /** "did you mean" candidates offered after a question the knowledge base could not answer with confidence (picked by letter) */
+  suggest?: { id: string; label: string }[];
+  /** the question those suggestions were for (learned as a new wording when one is picked) */
+  suggestFor?: string;
+  /** free text the menu did not understand; if the customer then picks an option, that text is a learning example for it */
+  freeText?: { node: string; text: string };
+  /** a topic the customer already named (e.g. during identification): the menu that offers it opens straight at it */
+  pendingTopic?: { node: string; index: number };
+  /** the nodes the customer answered on the way here (newest last), so "back" can return one step */
+  history?: string[];
+}
+export const NEW_FLOW_STATE: FlowState = { node: null, vars: {}, invalid: 0, done: false };
+
+export type Effect =
+  | { kind: 'handoff'; reason: 'requested' | 'flow' | 'unrecognized' | 'media'; userId?: string; text?: string; /** the person was chosen by the place the customer named */ viaArea?: boolean; officerTopic?: string; showContact?: boolean }
+  | { kind: 'tag'; tagId: string }
+  | { kind: 'note'; text: string }
+  | { kind: 'name'; value: string }
+  | { kind: 'profile'; vars: Vars }
+  /** the customer's free text turned out to mean this menu option (a suggestion for a person to approve) */
+  | { kind: 'learn_option'; node: string; label: string; text: string };
+
+/** What the customer sent: text (null for a message without any), and whether it carried a photo or file. */
+export interface FlowInput { text: string | null; media?: boolean }
+
+export interface FlowContext {
+  isOpen: boolean;
+  channelType: string;
+  humanKeywords: string[];
+  humanOption: boolean;
+  invalidRetries: number;
+  invalidMessage: string;
+  now?: number;
+  /** what is already known about this customer (from earlier conversations), used when a conversation starts */
+  profile?: Vars;
+  /** confident knowledge-base answer text (already formatted) or null */
+  kbAnswer: (text: string) => Promise<string | null>;
+  /** index of the option whose meaning matches the free text, or null (needs the local model; returns null when it is off) */
+  matchOption: (text: string, options: { label: string; examples: string[] }[]) => Promise<number | null>;
+  /** close-but-not-confident knowledge-base entries for a question, offered as "did you mean" (max 3) */
+  kbSuggest?: (text: string) => Promise<{ id: string; label: string }[]>;
+  /** the formatted answer of one knowledge-base entry chosen from the suggestions */
+  kbSource?: (id: string, question: string) => Promise<string | null>;
+  /** the person responsible for the area a free text names (building, place), or null */
+  resolveArea?: (text: string) => Promise<string | null>;
+}
+
+export interface FlowResult { replies: string[]; state: FlowState; effects: Effect[]; /** the last reply is a menu node's numbered menu */ menu?: boolean }
+const MAX_STEPS = 60;
+export const RESTART_AFTER_MS = 30 * 60_000;
+const MENU_WORDS = { has: (t: string) => isMenuRequest(t) };
+/**
+ * The menu "תפריט" goes to: the flow's chosen main menu, else the first menu reachable from the start that accepts free text
+ * (the topics menu, not a menu inside identification), else the first menu with 3+ options, else the first menu.
+ */
+export function mainMenuOf(flow: Flow): string | null {
+  const nodes = new Map(flow.nodes.map((n) => [n.id, n]));
+  if (flow.mainMenu && nodes.get(flow.mainMenu)?.type === 'menu') return flow.mainMenu;
+  const order: FlowNode[] = [];
+  const seen = new Set<string>();
+  const queue = [flow.start];
+  while (queue.length) {
+    const id = queue.shift()!;
+    const n = nodes.get(id);
+    if (!n || seen.has(id)) continue;
+    seen.add(id);
+    order.push(n);
+    const r = n as Record<string, unknown>;
+    for (const k of ['next', 'yes', 'no', 'found', 'notFound']) if (typeof r[k] === 'string') queue.push(r[k] as string);
+    if (n.type === 'menu') for (const o of n.options) if (o.next) queue.push(o.next);
+  }
+  const menus = order.filter((n): n is Extract<FlowNode, { type: 'menu' }> => n.type === 'menu');
+  return (menus.find((m) => m.kbOnFreeText) ?? menus.find((m) => m.options.length >= 3) ?? menus[0])?.id ?? null;
+}
+
+/** shown under a step that is not the first, so customers know they can go back */
+export const NAV_HINT = 'לחזרה לשלב הקודם כתבו "אחורה". לתפריט הראשי כתבו "תפריט".';
+const SKIP_WORDS = new Set(['דלג', 'דלגי', 'skip', 'לא', 'אין']);
+const YES = new Set(['כן', 'yes', 'y', '1', 'עוד']);
+const NO = new Set(['לא', 'no', 'n', '2', 'די', 'זהו', 'סיימתי']);
+const GREETINGS = new Set(['שלום', 'היי', 'הי', 'הלו', 'אהלן', 'בוקר טוב', 'ערב טוב', 'צהריים טובים', 'תודה', 'תודה רבה', 'ok', 'אוקיי', 'אוקי', 'hello', 'hi']);
+const LETTERS = ['א', 'ב', 'ג'];
+/** added under a knowledge-base answer instead of repeating the menu or the pending question */
+export const ANSWER_HINT = 'לשאלה נוספת פשוט כתבו אותה. לתפריט כתבו "תפריט", ולשלב הקודם "אחורה".';
+const withHint = (a: string) => `${a}\n\n${ANSWER_HINT}`;
+const DEFAULT_LABELS: Record<string, string> = { name: 'שם', phone: 'טלפון', email: 'אימייל', text: 'פירוט' };
+
+// the hint goes between the text and the options: the numbered options must stay the last lines (they become buttons)
+const menuText = (n: Extract<FlowNode, { type: 'menu' }>, humanOption: boolean, humanLabel = 'נציג אנושי', hint = '') =>
+  `${n.text}${hint ? `\n\n${hint}` : ''}\n\n${[...n.options.map((o, i) => `${i + 1}. ${o.label}`), ...(humanOption ? [`0. ${humanLabel}`] : [])].join('\n')}`;
+
+function validate(kind: string, raw: string): string | null {
+  const t = raw.trim();
+  if (kind === 'email') return /^[^\s@]{1,64}@[^\s@]{1,200}\.[^\s@]{2,}$/.test(t) ? t.slice(0, 254) : null;
+  if (kind === 'phone') { const d = t.replace(/[\s()-]/g, ''); return /^\+?\d{8,15}$/.test(d) ? d : null; }
+  if (kind === 'name') return t.length >= 2 && t.length <= 60 && !/[<>{}\n]/.test(t) ? t : null;
+  return t.length >= 1 ? t.slice(0, 500) : null;
+}
+const QUESTION_WORDS = new Set(['אם', 'לגבי', 'בנוגע', 'רציתי', 'שאלה', 'מה', 'מי', 'מתי', 'איך', 'איפה', 'האם', 'כמה', 'למה', 'מדוע', 'מהו', 'מהי', 'אילו', 'איזה', 'איזו', 'היכן', 'אפשר', 'צריך', 'חייב', 'מותר', 'אסור', 'יש']);
+/** Looks like a question rather than an answer to "your name / building / ...". */
+export const looksLikeQuestion = (t: string): boolean => /[?؟]/.test(t) || QUESTION_WORDS.has(normalize(t).split(' ')[0] ?? '');
+const wordCount = (t: string) => normalize(t).split(' ').filter(Boolean).length;
+/** "no, I meant ..." after "did you mean": a correction, not an answer to the pending question */
+const RE_PHRASE = /^(לא|ממש לא|התכוונתי|הכוונה|כוונתי|לא הכוונה|אני מתכוון|אני מתכוונת)(\s|$)/;
+const kindOf = (n: Extract<FlowNode, { type: 'question' }>) => n.kind ?? (['name', 'phone', 'email'].includes(n.save) ? n.save : 'text');
+
+/** Run the flow for one customer message. Pure apart from the injected context functions. */
+export async function runFlow(flow: Flow, prev: FlowState | null, input: FlowInput | string | null, ctx: FlowContext, humanLabel?: string): Promise<FlowResult> {
+  const inp: FlowInput = input !== null && typeof input === 'object' ? input : { text: input };
+  const nodes = new Map(flow.nodes.map((n) => [n.id, n]));
+  const now = ctx.now ?? Date.now();
+  let state: FlowState = prev ? { ...prev, vars: { ...prev.vars } } : { ...NEW_FLOW_STATE, vars: {} };
+  if (state.done && state.endedAt && now - state.endedAt > RESTART_AFTER_MS) state = { ...NEW_FLOW_STATE, vars: {} };
+  const fresh = state.node === null && !state.done;
+  if (fresh && ctx.profile) state = { ...state, vars: { ...ctx.profile, ...state.vars } };
+  const replies: string[] = [];
+  const effects: Effect[] = [];
+  const labels = { ...DEFAULT_LABELS, ...(flow.labels ?? {}) };
+  /** the topic of the main menu(s) a free text names (menus that accept free text), other than the one being answered */
+  const findTopic = async (text: string, except?: string): Promise<{ node: Extract<FlowNode, { type: 'menu' }>; index: number } | null> => {
+    for (const n of flow.nodes) {
+      if (n.type !== 'menu' || !n.kbOnFreeText || n.id === except || n.options.length < 3) continue;
+      const i = await ctx.matchOption(text, n.options).catch(() => null);
+      if (i !== null && i >= 0 && i < n.options.length) return { node: n, index: i };
+    }
+    return null;
+  };
+  /** what to say for a named topic: an information topic (its next step is a message) is answered at once; others wait for the menu */
+  const topicReply = (m: { node: Extract<FlowNode, { type: 'menu' }>; index: number }): string | null => {
+    const nx = m.node.options[m.index]!.next ? nodes.get(m.node.options[m.index]!.next!) : undefined;
+    return nx?.type === 'message' ? nx.text : null;
+  };
+
+  const summary = () => {
+    const order = [...Object.keys(flow.labels ?? {}), ...Object.keys(state.vars)];
+    const keys = [...new Set(order)].filter((k) => state.vars[k]);
+    const parts = keys.map((k) => `${labels[k] ?? k}: ${state.vars[k]}`);
+    if (state.files) parts.push(`קבצים שנשלחו: ${state.files}`);
+    if (parts.length) effects.push({ kind: 'note', text: `פרטים שנאספו בבוט:\n${parts.join('\n')}` });
+  };
+  const handoff = (reason: 'requested' | 'flow' | 'unrecognized' | 'media', userId?: string, t?: string, extra: { viaArea?: boolean; officerTopic?: string; showContact?: boolean } = {}): FlowResult => {
+    summary();
+    effects.push({ kind: 'handoff', reason, userId, text: t, ...extra });
+    return { replies, state: { ...state, node: null, list: undefined, done: true }, effects };
+  };
+  const finished = (): FlowResult => { summary(); return { replies, state: { ...state, node: null, list: undefined, done: true, endedAt: now }, effects }; };
+
+  // a flow that finished on its own (not handed to a person): "תפריט" opens the main menu again at once
+  if (state.done && state.endedAt && inp.text && isMenuRequest(normalize(inp.text))) state = { ...NEW_FLOW_STATE, vars: { ...state.vars }, node: '__menu__' };
+  if (state.done) return { replies: [], state, effects: [] }; // a person (or the end node) has the conversation
+
+  const hasText = inp.text !== null && inp.text.trim() !== '';
+  const waiting = state.node ? nodes.get(state.node) : undefined;
+  const mediaNode = waiting?.type === 'media';
+
+  // a photo or file where the flow wants text: when files already came in (several photos in a row) stay quiet, else it needs a person
+  if (inp.media && state.node !== null && !mediaNode) {
+    state = { ...state, files: (state.files ?? 0) + 1 };
+    if ((state.files ?? 0) > 1 || (prev?.files ?? 0) > 0) return { replies, state, effects };
+    if (!hasText) return handoff('media');
+  }
+  if (!hasText && !inp.media && state.node !== null) return handoff('media'); // sticker, location...
+
+  const t = hasText ? normalize(inp.text!) : '';
+  let jumpTo: string | null = null;
+  if (hasText && state.node !== null) {
+    if (ctx.humanKeywords.some((k) => t.includes(normalize(k)))) return handoff('requested');
+    if (MENU_WORDS.has(t)) { state = { ...state, node: null, invalid: 0, list: undefined, history: [], suggest: undefined, suggestFor: undefined, pendingTopic: undefined }; jumpTo = mainMenuOf(flow); } // to the main menu
+    else if (isBackRequest(t)) {
+      // one step back: ask the previous step again (the first step has nothing before it: start over)
+      const hist = [...(state.history ?? [])];
+      let target: FlowNode | undefined;
+      while (hist.length && !target) { const id = hist.pop()!; const n = nodes.get(id); if (n && NODE_WAITS.has(n.type)) target = n; }
+      if (!target) state = { ...state, node: null, invalid: 0, list: undefined, history: [] };
+      else {
+        state = { ...state, node: target.id, invalid: 0, list: target.type === 'list' ? { items: [], phase: 'item' } : undefined, history: hist, suggest: undefined, suggestFor: undefined };
+        if (target.type === 'menu') return { replies: [menuText(target, ctx.humanOption, humanLabel, hist.length ? NAV_HINT : '')], state, effects, menu: true };
+        if (target.type === 'question' || target.type === 'media' || target.type === 'list') return { replies: [target.text], state, effects };
+      }
+    }
+  }
+  // the step being answered now: remembered when the flow moves on to the next one, for "back"
+  const answering = state.node;
+  const histFor = (next: string): string[] => {
+    const h = state.history ?? [];
+    return answering && answering !== next ? [...h.filter((x) => x !== answering), answering].slice(-20) : h;
+  };
+  const hintFor = (h: string[]) => (h.length ? NAV_HINT : '');
+
+  // 1. handle the answer to the node we were waiting at
+  let cursor: string | undefined;
+  const w = state.node ? nodes.get(state.node) : undefined;
+  // a letter picks one of the "did you mean" suggestions offered with the last reply
+  if ((w?.type === 'menu' || (w?.type === 'question' && w.kbAside)) && state.suggest?.length && hasText) {
+    const k = LETTERS.indexOf(t.replace(/[.'׳)]/g, ''));
+    const pick = k >= 0 ? state.suggest[k] : undefined;
+    if (pick && ctx.kbSource) {
+      const a = await ctx.kbSource(pick.id, state.suggestFor ?? pick.label).catch(() => null);
+      if (a) { replies.push(withHint(a)); return { replies, state: { ...state, suggest: undefined, suggestFor: undefined, invalid: 0 }, effects }; }
+    }
+  }
+  const hadSuggest = !!state.suggest?.length;
+  if (state.suggest) state = { ...state, suggest: undefined, suggestFor: undefined };
+  if (w && state.node !== null) {
+    if (w.type === 'menu') {
+      let idx: number | null = null;
+      if (ctx.humanOption && t === '0') return handoff('requested');
+      if (/^\d{1,2}$/.test(t)) idx = Number(t) - 1 < w.options.length ? Number(t) - 1 : null;
+      if (idx === null) { const k = w.options.findIndex((o) => normalize(o.label) === t); if (k >= 0) idx = k; }
+      const typedPick = idx !== null;   // a number or the exact label (not a guess from the meaning)
+      if (idx === null && !/^\d{1,2}$/.test(t)) idx = await ctx.matchOption(inp.text!, w.options).catch(() => null);
+      if (idx !== null && idx >= 0 && idx < w.options.length) {
+        if (typedPick && state.freeText?.node === w.id) effects.push({ kind: 'learn_option', node: w.id, label: w.options[idx]!.label, text: state.freeText.text });
+        state = { ...state, invalid: 0, freeText: undefined };
+        if (w.save) state = { ...state, vars: { ...state.vars, [w.save]: w.options[idx]!.label } };
+        cursor = w.options[idx]!.next;
+        if (!cursor) return finished();
+      } else {
+        if (hasText && !/^\d{1,2}$/.test(t) && t.length >= 3) state = { ...state, freeText: { node: w.id, text: inp.text!.trim().slice(0, 200) } };
+        const a = w.kbOnFreeText && !/^\d{1,2}$/.test(t) ? await ctx.kbAnswer(inp.text!).catch(() => null) : null;
+        if (a) { replies.push(withHint(a)); return { replies, state: { ...state, invalid: 0, freeText: undefined }, effects }; }
+        // no confident answer: offer the closest entries ("did you mean")
+        const sug = w.kbOnFreeText && ctx.kbSuggest && !/^\d{1,2}$/.test(t) ? (await ctx.kbSuggest(inp.text!).catch(() => [])).slice(0, 3) : [];
+        if (sug.length && state.invalid < ctx.invalidRetries) {
+          replies.push(`לא מצאתי תשובה מדויקת. האם התכוונתם לאחד מאלה?\n${sug.map((x, i) => `${LETTERS[i]}. ${x.label}`).join('\n')}\n\nכתבו את האות. לתפריט כתבו "תפריט".`);
+          return { replies, state: { ...state, suggest: sug, suggestFor: inp.text!.slice(0, 300), invalid: state.invalid + 1 }, effects };
+        }
+        if (state.invalid < ctx.invalidRetries) { replies.push(`${ctx.invalidMessage}\n\n${menuText(w, ctx.humanOption, humanLabel)}`); return { replies, state: { ...state, invalid: state.invalid + 1 }, effects, menu: true }; }
+        return handoff('unrecognized');
+      }
+    } else if (w.type === 'question' && w.kbAside && hasText && t.length >= 6 && !SKIP_WORDS.has(t)
+      && (looksLikeQuestion(t) || wordCount(t) >= 5 || (hadSuggest && (RE_PHRASE.test(t) || wordCount(t) >= 3)))) {
+      // a question instead of the answer: answer it from the knowledge base and ask again. It is never stored as the answer.
+      const a = await ctx.kbAnswer(inp.text!).catch(() => null);
+      if (a) return { replies: [withHint(a)], state: { ...state, invalid: 0 }, effects };
+      const topic = await findTopic(inp.text!, w.id);
+      if (topic) {
+        const info = topicReply(topic);
+        const label = topic.node.options[topic.index]!.label;
+        if (info) return { replies: [withHint(info)], state: { ...state, invalid: 0 }, effects };
+        return { replies: [`הבנתי, "${label}". נשלים קודם את הפרטים ואז נמשיך ישר לנושא.\n\n${w.text}`], state: { ...state, invalid: 0, pendingTopic: { node: topic.node.id, index: topic.index } }, effects };
+      }
+      const sug = ctx.kbSuggest ? (await ctx.kbSuggest(inp.text!).catch(() => [])).slice(0, 3) : [];
+      if (sug.length) {
+        return { replies: [`לא מצאתי תשובה מדויקת. האם התכוונתם לאחד מאלה?\n${sug.map((x, i) => `${LETTERS[i]}. ${x.label}`).join('\n')}\n\nכתבו את האות.`], state: { ...state, suggest: sug, suggestFor: inp.text!.slice(0, 300) }, effects };
+      }
+      return { replies: ['לא מצאתי תשובה לשאלה הזו במאגר. אפשר לנסח אחרת, או לכתוב "נציג" ונציג יחזור אליכם.'], state, effects };
+    } else if (w.type === 'question') {
+      if (w.optional && SKIP_WORDS.has(t)) {
+        state = { ...state, invalid: 0 };
+      } else {
+        const v = validate(kindOf(w), inp.text!);
+        if (v === null) {
+          if (state.invalid < 2) { replies.push(w.retryText); return { replies, state: { ...state, invalid: state.invalid + 1 }, effects }; }
+          state = { ...state, invalid: 0 }; // give up on this answer and move on
+        } else {
+          state = { ...state, invalid: 0, vars: { ...state.vars, [w.save]: v } };
+          if (kindOf(w) === 'name') effects.push({ kind: 'name', value: v });
+        }
+      }
+      cursor = w.next;
+      if (!cursor) return finished();
+    } else if (w.type === 'media') {
+      const got = inp.media || hasText;
+      if (w.optional && !inp.media && SKIP_WORDS.has(t)) { /* skipped */ }
+      else if (!got || (!inp.media && !w.allowText)) {
+        if (state.invalid < 2) { replies.push(w.retryText); return { replies, state: { ...state, invalid: state.invalid + 1 }, effects }; }
+      } else {
+        if (inp.media) state = { ...state, files: (state.files ?? 0) + 1 };
+        if (hasText && w.save) state = { ...state, vars: { ...state.vars, [w.save]: [state.vars[w.save], inp.text!.trim().slice(0, 500)].filter(Boolean).join(' | ').slice(0, 900) } };
+      }
+      state = { ...state, invalid: 0 };
+      cursor = w.next;
+      if (!cursor) return finished();
+    } else if (w.type === 'list') {
+      const cur = state.list ?? { items: [], phase: 'item' as const };
+      if (cur.phase === 'item') {
+        const first = cur.items.length === 0;
+        if (first && w.optional && SKIP_WORDS.has(t)) {
+          state = { ...state, list: undefined, invalid: 0 };
+          cursor = w.next;
+          if (!cursor) return finished();
+        } else {
+          const items = [...cur.items, inp.text!.trim().slice(0, 120)];
+          if (items.length >= w.max) {
+            state = { ...state, vars: { ...state.vars, [w.save]: items.join('; ') }, list: undefined, invalid: 0 };
+            cursor = w.next;
+            if (!cursor) return finished();
+          } else {
+            replies.push(`${w.moreText}\n\n1. כן\n2. לא`);
+            return { replies, state: { ...state, list: { items, phase: 'more' }, invalid: 0 }, effects };
+          }
+        }
+      } else if (YES.has(t)) {
+        replies.push(w.text);
+        return { replies, state: { ...state, list: { items: cur.items, phase: 'item' }, invalid: 0 }, effects };
+      } else if (NO.has(t)) {
+        state = { ...state, vars: { ...state.vars, [w.save]: cur.items.join('; ') }, list: undefined, invalid: 0 };
+        cursor = w.next;
+        if (!cursor) return finished();
+      } else {
+        if (state.invalid < 2) { replies.push(`${w.moreText}\n\n1. כן\n2. לא`); return { replies, state: { ...state, invalid: state.invalid + 1 }, effects }; }
+        state = { ...state, vars: { ...state.vars, [w.save]: cur.items.join('; ') }, list: undefined, invalid: 0 };
+        cursor = w.next;
+        if (!cursor) return finished();
+      }
+    }
+  }
+  if (state.node === '__menu__') { state = { ...state, node: null }; jumpTo = mainMenuOf(flow); }
+  if (jumpTo) cursor = jumpTo;   // "תפריט": straight to the main menu (not through identification again)
+  else if (!w || state.node === null) {
+    cursor = flow.start;
+    // flows with kbFirst answer a question in the very first message before anything else (then carry on, e.g. with identification)
+    const askable = hasText && !/^\d{1,2}$/.test(t) && !MENU_WORDS.has(t) && !GREETINGS.has(t) && t.length >= 6 && !ctx.humanKeywords.some((k) => t.includes(normalize(k)));
+    if (flow.kbFirst && fresh && askable) {
+      // answered: just the answer. The flow starts with the next message that is not another question.
+      const a = await ctx.kbAnswer(inp.text!).catch(() => null);
+      if (a) return { replies: [withHint(a)], state, effects };
+      // not in the knowledge base, but it names a topic of the menu: information topics answer now, others open once reached
+      const topic = await findTopic(inp.text!);
+      if (topic) {
+        const info = topicReply(topic);
+        if (info) return { replies: [withHint(info)], state, effects };
+        state = { ...state, pendingTopic: { node: topic.node.id, index: topic.index } };
+        replies.push(`הבנתי, "${topic.node.options[topic.index]!.label}".`);
+      }
+    }
+    // the very first message may already be a question the knowledge base can answer
+    const first = nodes.get(flow.start);
+    if (first?.type === 'menu' && askable && first.kbOnFreeText && !flow.kbFirst) {
+      const a = await ctx.kbAnswer(inp.text!).catch(() => null);
+      if (a) { replies.push(withHint(a)); return { replies, state: { ...state, node: first.id }, effects }; }
+    }
+  }
+
+  // 2. advance through the graph until something waits for the customer
+  const lastText = hasText ? inp.text! : '';
+  for (let steps = 0; cursor && steps < MAX_STEPS; steps++) {
+    const n = nodes.get(cursor);
+    if (!n) break;
+    switch (n.type) {
+      case 'message': replies.push(n.text); cursor = n.next; break;
+      case 'referral': replies.push(`${n.text}\n\n${n.contactName}:\n${waLink(n.phone, n.message)}`); cursor = n.next; break;
+      case 'tag': effects.push({ kind: 'tag', tagId: n.tagId }); cursor = n.next; break;
+      case 'remember': {
+        const keep: Vars = {};
+        for (const k of n.vars) if (state.vars[k]) keep[k] = state.vars[k]!;
+        effects.push({ kind: 'profile', vars: keep });
+        cursor = n.next;
+        break;
+      }
+      case 'condition': {
+        const c = n.check;
+        const yes = c.kind === 'hours' ? ctx.isOpen : c.kind === 'channel' ? ctx.channelType === c.is : c.kind === 'has' ? !!state.vars[c.name] : (state.vars[c.name] ?? '').toLowerCase().includes(c.contains.toLowerCase());
+        cursor = yes ? n.yes : n.no;
+        break;
+      }
+      case 'kb': {
+        const a = lastText ? await ctx.kbAnswer(lastText).catch(() => null) : null;
+        if (a) replies.push(n.intro ? `${n.intro}\n\n${a}` : a);
+        cursor = a ? n.found : n.notFound;
+        break;
+      }
+      case 'menu': {
+        const pt = state.pendingTopic;
+        if (pt && pt.node === n.id && n.options[pt.index]) {
+          // the customer already said what they want: go straight into that topic
+          const o = n.options[pt.index]!;
+          state = { ...state, pendingTopic: undefined, invalid: 0 };
+          if (n.save) state = { ...state, vars: { ...state.vars, [n.save]: o.label } };
+          cursor = o.next;
+          if (!cursor) return finished();
+          break;
+        }
+        { const h = histFor(n.id); replies.push(menuText(n, ctx.humanOption, humanLabel, hintFor(h))); return { replies, state: { ...state, node: n.id, invalid: 0, history: h }, effects, menu: true }; }
+      }
+      // questions stay short (a hint under every question of a form is noise); "back" still works there
+      case 'question': case 'media': replies.push(n.text); return { replies, state: { ...state, node: n.id, invalid: 0, history: histFor(n.id) }, effects };
+      case 'list': replies.push(n.text); return { replies, state: { ...state, node: n.id, invalid: 0, list: { items: [], phase: 'item' }, history: histFor(n.id) }, effects };
+      case 'handoff': {
+        let who = n.userId;
+        let viaArea = false;
+        if (n.areaVars?.length && ctx.resolveArea) {
+          for (const v of n.areaVars) { const hit = state.vars[v] ? await ctx.resolveArea(state.vars[v]!).catch(() => null) : null; if (hit) { who = hit; viaArea = true; break; } }
+        }
+        return handoff('flow', who, n.text || undefined, { viaArea, officerTopic: n.officerTopic, showContact: n.showContact });
+      }
+      case 'end': if (n.text) replies.push(n.text); return finished();
+    }
+  }
+  return finished(); // fell off the graph (a node without next)
+}
+
+export { NODE_WAITS };

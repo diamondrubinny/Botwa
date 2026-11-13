@@ -1,0 +1,906 @@
+import { DEFAULT_AUTOMATIONS } from '../src/automations.js';
+import ExcelJS from 'exceljs';
+import { randomBytes } from 'node:crypto';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { buildApp } from '../src/app.js';
+import { DEFAULT_BOT } from '../src/bot.js';
+import { ChannelManager } from '../src/channels/manager.js';
+import type { AdapterContext, AdapterFactory, ChannelAdapter } from '../src/channels/types.js';
+import { loadConfig } from '../src/config.js';
+import { createDb } from '../src/db.js';
+import { ANSWER_HINT, runFlow, type FlowContext, type FlowState } from '../src/flow/engine.js';
+const ANSWER_TAIL = `\n\n${ANSWER_HINT}`;
+import { flowFromMenu } from '../src/flow/fromMenu.js';
+import { matchOptionLexical } from '../src/flow/match.js';
+import { flowSchema, unreachable, validateFlow, type Flow } from '../src/flow/schema.js';
+import { migrate } from '../src/migrate.js';
+import { hashPassword } from '../src/password.js';
+
+const TAG = '11111111-1111-4111-8111-111111111111';
+const flow: Flow = flowSchema.parse({
+  start: 'hours', nodes: [
+    { id: 'hours', type: 'condition', check: { kind: 'hours' }, yes: 'menu', no: 'closed' },
+    { id: 'closed', type: 'message', text: 'סגורים כרגע, נחזור אליכם.', next: 'name' },
+    { id: 'menu', type: 'menu', text: 'במה נוכל לעזור?', options: [{ label: 'בטיחות בגובה', next: 'name', examples: ['פיגומים'] }, { label: 'שעות פעילות', next: 'info' }, { label: 'שאלה אחרת', next: 'kb' }] },
+    { id: 'info', type: 'message', text: 'פתוחים 9-17.', next: 'menu' },
+    { id: 'kb', type: 'kb', intro: 'מצאתי:', found: 'menu', notFound: 'name' },
+    { id: 'name', type: 'question', text: 'מה שמך?', save: 'name', next: 'phone' },
+    { id: 'phone', type: 'question', text: 'מספר טלפון?', save: 'phone', retryText: 'מספר לא תקין', next: 'tag' },
+    { id: 'tag', type: 'tag', tagId: TAG, next: 'ref' },
+    { id: 'ref', type: 'referral', text: 'הממונה:', contactName: 'דני', phone: '0501234567', message: 'היי', next: 'bye' },
+    { id: 'bye', type: 'handoff', text: '', userId: undefined },
+  ],
+});
+const ctx = (over: Partial<FlowContext> = {}): FlowContext => ({
+  isOpen: true, channelType: 'whatsapp', humanKeywords: ['נציג'], humanOption: true, invalidRetries: 1, invalidMessage: 'לא הבנתי', now: 1_000_000,
+  kbAnswer: async () => null, matchOption: async () => null, ...over,
+});
+
+describe('flow validation', () => {
+  it('rejects dangling targets, duplicate ids, missing start and loops that never wait for the customer', () => {
+    expect(validateFlow(flow)).toEqual([]);
+    expect(unreachable(flow)).toEqual([]);
+    const bad = flowSchema.parse({ start: 'a', nodes: [{ id: 'a', type: 'message', text: 'x', next: 'b' }, { id: 'b', type: 'message', text: 'y', next: 'a' }, { id: 'a', type: 'end', text: '' }, { id: 'c', type: 'message', text: 'z', next: 'nowhere' }] });
+    const codes = validateFlow(bad).join(' ');
+    expect(codes).toContain('duplicate_id:a');
+    expect(codes).toContain('missing_target:c->nowhere');
+    expect(validateFlow(flowSchema.parse({ start: 'zz', nodes: [{ id: 'a', type: 'end', text: '' }] }))).toContain('missing_start');
+    expect(validateFlow(flowSchema.parse({ start: 'a', nodes: [{ id: 'a', type: 'message', text: 'x', next: 'b' }, { id: 'b', type: 'message', text: 'y', next: 'a' }] })).join()).toContain('loop:');
+    // a menu in the loop is fine: it waits for the customer
+    expect(validateFlow(flowSchema.parse({ start: 'm', nodes: [{ id: 'm', type: 'menu', text: 'x', options: [{ label: 'a', next: 'i' }] }, { id: 'i', type: 'message', text: 'y', next: 'm' }] }))).toEqual([]);
+    expect(unreachable(flowSchema.parse({ start: 'a', nodes: [{ id: 'a', type: 'end', text: '' }, { id: 'orphan', type: 'end', text: '' }] }))).toEqual(['orphan']);
+    expect(flowSchema.safeParse({ start: 'a', nodes: [{ id: 'a', type: 'message', text: 'x', next: 'b' }, { id: 'Bad Id', type: 'end' }] }).success).toBe(false);
+    expect(flowSchema.safeParse({ start: 'a', nodes: [{ id: 'a', type: 'referral', text: 'x', contactName: 'n', phone: 'abc' }] }).success).toBe(false);
+  });
+  it('converts the current numbered menu into an equivalent, valid flow', () => {
+    const f = flowFromMenu({ ...DEFAULT_BOT, items: [...DEFAULT_BOT.items, { title: 'בטיחות', answer: 'לממונה', contact: { name: 'דני', phone: '0501234567', message: '' }, route: { userId: '22222222-2222-4222-8222-222222222222' } }] });
+    expect(validateFlow(f)).toEqual([]);
+    expect(f.nodes.find((n) => n.type === 'handoff' && n.userId)).toBeTruthy();
+    expect(f.nodes.find((n) => n.id === 'a1')).toMatchObject({ type: 'message', next: 'menu' });
+  });
+});
+
+describe('flow engine', () => {
+  it('walks: condition -> menu, free text matched by words, questions validated, tag, referral, hand-over with a summary note', async () => {
+    let r = await runFlow(flow, null, 'שלום', ctx());
+    expect(r.replies[0]).toContain('1. בטיחות בגובה');
+    expect(r.replies[0]).toContain('0. נציג אנושי');
+    expect(r.state.node).toBe('menu');
+    r = await runFlow(flow, r.state, '2', ctx());
+    expect(r.replies).toEqual(['פתוחים 9-17.', expect.stringContaining('במה נוכל לעזור')]); // answer, then back to the menu
+    r = await runFlow(flow, r.state, 'אני צריך משהו עם פיגומים', ctx({ matchOption: async (t, o) => matchOptionLexical(t, o) }));
+    expect(r.replies).toEqual(['מה שמך?']);
+    expect(r.state.node).toBe('name');
+    r = await runFlow(flow, r.state, 'a', ctx());               // too short: asks again, up to twice
+    expect(r.replies).toEqual(['לא הצלחתי להבין, אפשר לנסות שוב?']);
+    r = await runFlow(flow, r.state, 'דנה לוי', ctx());
+    expect(r.effects).toContainEqual({ kind: 'name', value: 'דנה לוי' });
+    expect(r.replies).toEqual(['מספר טלפון?']);
+    r = await runFlow(flow, r.state, 'abc', ctx());
+    expect(r.replies).toEqual(['מספר לא תקין']);
+    r = await runFlow(flow, r.state, '050-123 4567', ctx());
+    expect(r.state.vars).toEqual({ name: 'דנה לוי', phone: '0501234567' });
+    expect(r.effects).toContainEqual({ kind: 'tag', tagId: TAG });
+    expect(r.replies[0]).toContain('https://wa.me/972501234567?text=%D7%94%D7%99%D7%99');
+    expect(r.effects.find((e) => e.kind === 'note')).toMatchObject({ text: expect.stringContaining('דנה לוי') });
+    expect(r.effects.find((e) => e.kind === 'handoff')).toMatchObject({ reason: 'flow' });
+    expect(r.state.done).toBe(true);
+    expect((await runFlow(flow, r.state, 'עוד משהו', ctx())).replies).toEqual([]); // silent once a person has it
+  });
+
+  it('hours branch, knowledge base inside the menu, unknown input retries then hands over, keywords and files hand over', async () => {
+    expect((await runFlow(flow, null, 'שלום', ctx({ isOpen: false }))).replies).toEqual(['סגורים כרגע, נחזור אליכם.', 'מה שמך?']);
+    const kbCtx = ctx({ kbAnswer: async (t) => (t.includes('חניה') ? 'יש חניה חינם.' : null) });
+    let r = await runFlow(flow, null, 'שלום', kbCtx);
+    r = await runFlow(flow, r.state, 'יש חניה?', kbCtx);
+    expect(r.replies).toEqual([`יש חניה חינם.${ANSWER_TAIL}`]);   // the answer only: the menu is not repeated
+    expect(r.state.node).toBe('menu');                             // ...but the customer is still at the menu (digits work)
+    expect(r.state.node).toBe('menu');
+    const first = await runFlow({ ...flow, start: 'menu' }, null, 'יש חניה?', kbCtx); // even the very first message when the flow starts at a menu
+    expect(first.replies).toEqual([`יש חניה חינם.${ANSWER_TAIL}`]);
+    r = await runFlow(flow, r.state, 'בלה בלה', ctx());
+    expect(r.replies[0]).toContain('לא הבנתי');
+    r = await runFlow(flow, r.state, 'עוד בלה', ctx());
+    expect(r.effects).toContainEqual(expect.objectContaining({ kind: 'handoff', reason: 'unrecognized' }));
+    expect((await runFlow(flow, (await runFlow(flow, null, 'x', ctx())).state, 'אפשר נציג', ctx())).effects).toContainEqual(expect.objectContaining({ kind: 'handoff', reason: 'requested' }));
+    expect((await runFlow(flow, (await runFlow(flow, null, 'x', ctx())).state, '0', ctx())).effects).toContainEqual(expect.objectContaining({ kind: 'handoff', reason: 'requested' }));
+    expect((await runFlow(flow, (await runFlow(flow, null, 'x', ctx())).state, null, ctx())).effects).toContainEqual(expect.objectContaining({ kind: 'handoff', reason: 'media' }));
+  });
+
+  it('a finished flow without a hand-over starts again after 30 minutes; "תפריט" restarts at any time', async () => {
+    const f = flowSchema.parse({ start: 'm', nodes: [{ id: 'm', type: 'menu', text: 'בחרו', options: [{ label: 'תודה', next: 'e' }] }, { id: 'e', type: 'end', text: 'להתראות' }] });
+    let r = await runFlow(f, null, 'היי', ctx());
+    r = await runFlow(f, r.state, '1', ctx());
+    expect(r.replies).toEqual(['להתראות']);
+    expect(r.state).toMatchObject({ done: true, endedAt: 1_000_000 });
+    expect((await runFlow(f, r.state, 'תודה', ctx({ now: 1_000_000 + 60_000 }))).replies).toEqual([]);
+    expect((await runFlow(f, r.state, 'שלום שוב', ctx({ now: 1_000_000 + 31 * 60_000 }))).replies[0]).toContain('בחרו');
+    const mid = await runFlow(flow, null, 'שלום', ctx());
+    const q = await runFlow(flow, { ...mid.state, node: 'name' } as FlowState, 'תפריט', ctx());
+    expect(q.replies[0]).toContain('1. בטיחות בגובה');
+  });
+
+  it('matches free text to an option only when exactly one option fits all its words', () => {
+    const opts = [{ label: 'בטיחות בגובה', examples: ['פיגומים'] }, { label: 'בטיחות אש', examples: [] }, { label: 'שעות פעילות', examples: [] }];
+    expect(matchOptionLexical('אני רוצה לשאול על בטיחות בגובה', opts)).toBe(0);
+    expect(matchOptionLexical('יש לי שאלה על פיגומים', opts)).toBe(0);
+    expect(matchOptionLexical('מתי שעות הפעילות', opts)).toBe(2);
+    expect(matchOptionLexical('בטיחות', opts)).toBeNull();            // ambiguous: two options share it
+    expect(matchOptionLexical('מה מזג האוויר', opts)).toBeNull();
+  });
+});
+
+describe('flow bot end to end', () => {
+  const ORIGIN = 'https://panel.test';
+  const PW = 'correct-horse-battery';
+  const cfg = loadConfig({
+    NODE_ENV: 'test', DATABASE_URL: process.env.TEST_DATABASE_URL ?? 'postgres://postgres@localhost:5432/botwa_test',
+    ENCRYPTION_KEY: randomBytes(32).toString('base64'), APP_ORIGIN: ORIGIN, COOKIE_SECURE: 'false', REQUIRE_MFA_FOR_PRIVILEGED: 'false',
+  });
+  const db = createDb(cfg.DATABASE_URL);
+  let app: Awaited<ReturnType<typeof buildApp>>;
+  let mgr: ChannelManager;
+  let ctxA: AdapterContext;
+  const sent: string[] = [];
+  const cookies: Record<string, string> = {};
+  const ids: Record<string, string> = {};
+  let ip = 0;
+  class Fake implements ChannelAdapter {
+    constructor(c: AdapterContext) { ctxA = c; }
+    async start() { ctxA.events.onStatus('connected'); }
+    async stop() {}
+    async logout() {}
+    async sendText(_t: string, text: string) { sent.push(text); return { externalMessageId: `f${sent.length}` }; }
+  }
+  const factory: AdapterFactory = (t, c) => (t === 'whatsapp' ? new Fake(c) : null);
+  const call = (method: 'GET' | 'POST' | 'PUT', url: string, who?: string, payload?: object) =>
+    app.inject({ method, url, payload, remoteAddress: `10.62.${Math.floor(++ip / 250)}.${ip % 250}`, headers: { origin: ORIGIN, ...(who ? { cookie: cookies[who]! } : {}) } });
+  let mid = 0;
+  const say = async (who: string, text: string) => {
+    sent.length = 0;
+    await ctxA.events.onMessage({ externalContactId: who, externalMessageId: `w${++mid}`, text, timestamp: new Date() });
+    return [...sent];
+  };
+  let tagId = '';
+
+  beforeAll(async () => {
+    await db.query('DROP SCHEMA public CASCADE; CREATE SCHEMA public;');
+    await migrate(db);
+    await db.query(`INSERT INTO settings (key, value) VALUES ('automations', $1) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`, [JSON.stringify({ ...DEFAULT_AUTOMATIONS, introduce: { ...DEFAULT_AUTOMATIONS.introduce, enabled: false } })]);   // these tests check the exact replies; the introduction has its own tests
+    mgr = new ChannelManager(db, cfg, factory);
+    app = await buildApp(cfg, db, mgr);
+    for (const [e, r] of [['admin', 'admin'], ['sup', 'supervisor'], ['a1', 'agent']] as const) {
+      ids[e] = (await db.query('INSERT INTO users (email,name,role,password_hash) VALUES ($1,$2,$3,$4) RETURNING id', [`${e}@t.io`, e, r, await hashPassword(PW)])).rows[0].id;
+      cookies[`${e}@t.io`] = `botwa_sid=${(await call('POST', '/auth/login', undefined, { email: `${e}@t.io`, password: PW })).cookies[0]!.value}`;
+    }
+    tagId = (await db.query(`INSERT INTO tags (name) VALUES ('בטיחות') RETURNING id`)).rows[0].id;
+    const ch = (await call('POST', '/channels', 'admin@t.io', { type: 'whatsapp', label: 'WA' })).json().id;
+    await call('POST', `/channels/${ch}/start`, 'admin@t.io');
+    await new Promise((r) => setTimeout(r, 40));
+  });
+  afterAll(async () => { await mgr.stopAll(); await app.close(); await db.end(); });
+
+  const myFlow = (): Flow => flowSchema.parse({
+    start: 'menu', nodes: [
+      { id: 'menu', type: 'menu', text: 'ברוכים הבאים', options: [{ label: 'בטיחות בגובה', next: 'name' }, { label: 'שעות', next: 'hrs' }] },
+      { id: 'hrs', type: 'message', text: 'פתוחים 9-17', next: 'menu' },
+      { id: 'name', type: 'question', text: 'איך קוראים לך?', save: 'name', next: 'tag' },
+      { id: 'tag', type: 'tag', tagId, next: 'go' },
+      { id: 'go', type: 'handoff', text: 'מעביר אותך לממונה', userId: ids.a1 },
+    ],
+  });
+
+  it('only people who manage the bot can save; invalid flows and unknown people/tags are refused; permissions are enforced', async () => {
+    expect((await call('GET', '/flow', 'a1@t.io')).statusCode).toBe(403);
+    expect((await call('PUT', '/flow', 'sup@t.io', { flow: myFlow() })).statusCode).toBe(403);
+    expect((await call('GET', '/flow', 'sup@t.io')).json()).toMatchObject({ flow: null, mode: 'menu' });
+    const bad = await call('PUT', '/flow', 'admin@t.io', { flow: { start: 'x', nodes: [{ id: 'a', type: 'end', text: '' }] } });
+    expect(bad.statusCode).toBe(400);
+    expect(bad.json().problems).toContain('missing_start');
+    const f = myFlow();
+    (f.nodes.find((n) => n.id === 'go') as { userId?: string }).userId = '33333333-3333-4333-8333-333333333333';
+    expect((await call('PUT', '/flow', 'admin@t.io', { flow: f })).json()).toEqual({ error: 'unknown_user' });
+    (f.nodes.find((n) => n.id === 'go') as { userId?: string }).userId = ids.a1;
+    (f.nodes.find((n) => n.id === 'tag') as { tagId?: string }).tagId = '44444444-4444-4444-8444-444444444444';
+    expect((await call('PUT', '/flow', 'admin@t.io', { flow: f })).json()).toEqual({ error: 'unknown_tag' });
+    expect((await call('PUT', '/flow', 'admin@t.io', { flow: myFlow() })).statusCode).toBe(200);
+    expect((await call('GET', '/flow/refs', 'sup@t.io')).json().tags[0].name).toBe('בטיחות');
+  });
+
+  it('simulate runs the engine without storing anything', async () => {
+    const r1 = (await call('POST', '/flow/simulate', 'sup@t.io', { state: null, text: 'שלום' })).json();
+    expect(r1.replies[0]).toContain('1. בטיחות בגובה');
+    const r2 = (await call('POST', '/flow/simulate', 'sup@t.io', { state: r1.state, text: '2' })).json();
+    expect(r2.replies[0]).toBe('פתוחים 9-17');
+    expect((await db.query('SELECT count(*)::int AS n FROM conversations')).rows[0].n).toBe(0);
+    expect((await call('POST', '/flow/simulate', 'a1@t.io', { state: null, text: 'x' })).statusCode).toBe(403);
+    expect((await call('POST', '/flow/from-menu', 'admin@t.io')).json().flow.nodes.length).toBeGreaterThan(1);
+  });
+
+  it('live: the flow drives a real conversation (menu, question, tag, contact name, summary note, assignment)', async () => {
+    await call('PUT', '/settings/bot', 'admin@t.io', { ...DEFAULT_BOT, enabled: true, mode: 'flow' });
+    expect((await say('fl1', 'היי'))[0]).toContain('1. בטיחות בגובה');
+    expect(await say('fl1', '2')).toEqual(['פתוחים 9-17', expect.stringContaining('ברוכים הבאים')]);
+    expect(await say('fl1', '1')).toEqual(['איך קוראים לך?']);
+    const out = await say('fl1', 'דנה לוי');
+    expect(out[0]).toBe('מעביר אותך לממונה');
+    const c = (await db.query(`SELECT c.id, c.assigned_to, c.bot_state, ct.display_name FROM conversations c JOIN contacts ct ON ct.id = c.contact_id WHERE ct.external_id = 'fl1'`)).rows[0];
+    expect(c).toMatchObject({ assigned_to: ids.a1, bot_state: 'human', display_name: 'דנה לוי' });
+    expect((await db.query('SELECT count(*)::int AS n FROM conversation_tags WHERE conversation_id = $1 AND tag_id = $2', [c.id, tagId])).rows[0].n).toBe(1);
+    expect((await db.query('SELECT body FROM conversation_notes WHERE conversation_id = $1', [c.id])).rows.map((r) => r.body).join('|')).toContain('דנה לוי');
+    expect(await say('fl1', 'עוד שאלה')).toEqual([]); // a person has it
+    // switching back to the menu bot uses the numbered menu again
+    await call('PUT', '/settings/bot', 'admin@t.io', { ...DEFAULT_BOT, enabled: true, mode: 'menu' });
+    expect((await say('fl2', 'היי'))[0]).toContain('1. שעות פעילות');
+  });
+});
+
+describe('flow engine: identification, reports with photos, lists, areas', () => {
+  const U1 = '55555555-5555-4555-8555-555555555555';
+  const f: Flow = flowSchema.parse({
+    start: 'known', labels: { fullName: 'שם מלא', building: 'בניין', chemicals: 'כימיקלים', status: 'סטטוס', where: 'מיקום' },
+    nodes: [
+      { id: 'known', type: 'condition', check: { kind: 'has', name: 'fullName' }, yes: 'topics', no: 'q_name' },
+      { id: 'q_name', type: 'question', text: 'שם מלא?', save: 'fullName', kind: 'name', next: 'q_bld' },
+      { id: 'q_bld', type: 'question', text: 'שם בניין? (אפשר לדלג)', save: 'building', optional: true, next: 'm_status' },
+      { id: 'm_status', type: 'menu', text: 'מה הסטטוס שלך?', save: 'status', options: [{ label: 'משתלם', next: 'keep' }, { label: 'עובד טכני', next: 'keep' }] },
+      { id: 'keep', type: 'remember', vars: ['fullName', 'building', 'status'], next: 'topics' },
+      { id: 'topics', type: 'menu', text: 'נושא?', kbOnFreeText: false, options: Array.from({ length: 12 }, (_, i) => ({ label: i === 0 ? 'חומרים' : i === 1 ? 'מפגע' : `נושא ${i + 1}`, next: i === 0 ? 'chem' : i === 1 ? 'haz' : undefined })) },
+      { id: 'chem', type: 'list', text: 'שם הכימיקל?', save: 'chemicals', max: 3, moreText: 'עוד כימיקל?', next: 'sds' },
+      { id: 'sds', type: 'media', text: 'אפשר להעלות SDS (או דלגו)', optional: true, allowText: false, next: 'q', },
+      { id: 'q', type: 'question', text: 'מה השאלה?', save: 'question', next: 'tag' },
+      { id: 'tag', type: 'tag', tagId: TAG, next: 'ho' },
+      { id: 'ho', type: 'handoff', text: 'הועבר לרוברט', userId: U1 },
+      { id: 'haz', type: 'media', text: 'שלחו תמונה או תארו', save: 'description', next: 'where' },
+      { id: 'where', type: 'question', text: 'מיקום מדויק?', save: 'where', next: 'ho2' },
+      { id: 'ho2', type: 'handoff', text: 'הועבר לממונה האזור', areaVars: ['where', 'building'], userId: U1 },
+    ],
+  });
+  const c = (over: Partial<FlowContext> = {}) => ctx(over);
+  const say = async (st: FlowState | null, text: string | null, over: Partial<FlowContext> = {}, media = false) => runFlow(f, st, { text, media }, c(over));
+
+  it('identifies a new customer, allows skipping optional questions, offers more than nine menu options, and remembers the answers', async () => {
+    expect(validateFlow(f)).toEqual([]);
+    let r = await say(null, 'שלום');
+    expect(r.replies).toEqual(['שם מלא?']);
+    r = await say(r.state, 'ד');                                  // too short
+    expect(r.replies).toEqual(['לא הצלחתי להבין, אפשר לנסות שוב?']);
+    r = await say(r.state, 'דנה לוי');
+    expect(r.effects).toContainEqual({ kind: 'name', value: 'דנה לוי' });
+    r = await say(r.state, 'דלג');                                 // optional building skipped
+    expect(r.replies[0]).toContain('מה הסטטוס שלך?');
+    r = await say(r.state, '1');
+    expect(r.state.vars).toEqual({ fullName: 'דנה לוי', status: 'משתלם' });
+    expect(r.effects).toContainEqual({ kind: 'profile', vars: { fullName: 'דנה לוי', status: 'משתלם' } });
+    expect(r.replies[0]).toContain('12. נושא 12');                   // two-digit options work
+    // next conversation: the profile is known, identification is skipped
+    const again = await say(null, 'היי', { profile: { fullName: 'דנה לוי', status: 'משתלם' } });
+    expect(again.replies[0]).toContain('נושא?');
+  });
+
+  it('collects up to N items, an optional file, then the question; the summary note has labelled details', async () => {
+    const known = { profile: { fullName: 'דנה לוי', building: '12' } };
+    let r = await say(null, 'x', known);
+    r = await say(r.state, '1', known);
+    expect(r.replies).toEqual(['שם הכימיקל?']);
+    r = await say(r.state, 'אצטון');
+    expect(r.replies[0]).toContain('עוד כימיקל?');
+    r = await say(r.state, 'כן');
+    expect(r.replies).toEqual(['שם הכימיקל?']);
+    r = await say(r.state, 'אתנול');
+    r = await say(r.state, '2');                                   // no more
+    expect(r.state.vars.chemicals).toBe('אצטון; אתנול');
+    expect(r.replies[0]).toContain('SDS');
+    r = await say(r.state, null, {}, true);                         // a file
+    expect(r.state.files).toBe(1);
+    expect(r.replies).toEqual(['מה השאלה?']);
+    r = await say(r.state, 'האם מותר לערבב?');
+    const note = r.effects.find((e) => e.kind === 'note') as { text: string };
+    expect(note.text).toContain('שם מלא: דנה לוי');
+    expect(note.text).toContain('כימיקלים: אצטון; אתנול');
+    expect(note.text).toContain('קבצים שנשלחו: 1');
+    expect(r.effects).toContainEqual({ kind: 'tag', tagId: TAG });
+    expect(r.effects.find((e) => e.kind === 'handoff')).toMatchObject({ userId: U1, text: 'הועבר לרוברט' });
+    expect(r.replies).toEqual([]);                                  // the hand-over text is sent by the hand-over itself, once
+
+    // the list stops by itself at its maximum
+    let l = await say(null, 'x', known); l = await say(l.state, '1', known);
+    for (const item of ['א', 'ב']) { l = await say(l.state, item); l = await say(l.state, 'כן'); }
+    l = await say(l.state, 'ג');
+    expect(l.state.vars.chemicals).toBe('א; ב; ג');
+    // the optional file can be skipped
+    const skip = await say(null, 'x', known).then((a) => say(a.state, '1')).then((a) => say(a.state, 'אצטון')).then((a) => say(a.state, '2')).then((a) => say(a.state, 'דלג'));
+    expect(skip.replies).toEqual(['מה השאלה?']);
+  });
+
+  it('a report takes a photo or a description, asks where, and sends it to the officer of that area', async () => {
+    const known = { profile: { fullName: 'דנה לוי', building: 'בניין 5' } };
+    let r = await say(null, 'x', known);
+    r = await say(r.state, '2', known);
+    expect(r.replies).toEqual(['שלחו תמונה או תארו']);
+    r = await say(r.state, null, {}, true);                         // photo only
+    expect(r.replies).toEqual(['מיקום מדויק?']);
+    r = await say(r.state, 'מעבדה 214 בניין 12 קומה 2', { resolveArea: async (t) => (/בניין 12/.test(t) ? '66666666-6666-4666-8666-666666666666' : null) });
+    expect(r.effects.find((e) => e.kind === 'handoff')).toMatchObject({ userId: '66666666-6666-4666-8666-666666666666' });
+    // no area matches: the fallback officer
+    let r2 = await say(null, 'x', known); r2 = await say(r2.state, '2'); r2 = await say(r2.state, 'דליפה');
+    r2 = await say(r2.state, 'מקום לא ידוע', { resolveArea: async () => null });
+    expect(r2.effects.find((e) => e.kind === 'handoff')).toMatchObject({ userId: U1 });
+    // a description alone is also accepted; an empty retry asks again
+    let r3 = await say(null, 'x', known); r3 = await say(r3.state, '2');
+    r3 = await say(r3.state, '   ');
+    expect(r3.effects.find((e) => e.kind === 'handoff')).toMatchObject({ reason: 'media' });
+  });
+
+  it('extra photos in a row do not interrupt, and a stray first photo at a text question goes to a person', async () => {
+    let r = await say(null, 'x', { profile: { fullName: 'דנה' } });
+    r = await say(r.state, '2');
+    r = await say(r.state, null, {}, true);                         // photo 1 accepted by the media node
+    expect(r.replies).toEqual(['מיקום מדויק?']);
+    const p2 = await say(r.state, null, {}, true);                  // photo 2 arrives while it asks where
+    expect(p2.replies).toEqual([]);
+    expect(p2.state.node).toBe('where');
+    expect(p2.effects).toEqual([]);
+    const stray = await say((await say(null, 'x')).state, null, {}, true); // first message of a new customer is a question; a photo there needs a person
+    expect(stray.effects.find((e) => e.kind === 'handoff')).toMatchObject({ reason: 'media' });
+  });
+});
+
+import { buildSafetyFlow, STATUSES, TEMPLATE_TAGS } from '../src/flow/safetyTemplate.js';
+import { unfinished } from '../src/flow/schema.js';
+
+describe('the safety unit template', () => {
+  const tagIds = new Map(TEMPLATE_TAGS.map((n, i) => [n, `00000000-0000-4000-8000-${String(i + 1).padStart(12, '0')}`]));
+  const t = buildSafetyFlow((n) => tagIds.get(n as never) ?? '');
+  const byId = new Map(t.nodes.map((n) => [n.id, n]));
+  const U = '77777777-7777-4777-8777-777777777777';
+
+  it('links given for the forms, training and privacy are placed in the messages; none are invented', () => {
+    const t = buildSafetyFlow((n) => tagIds.get(n as never) ?? '', { waste: 'https://forms.example/waste', accident: 'https://forms.example/accident', training: 'https://train.example/', privacy: 'https://example.org/privacy' });
+    const text = (id: string) => (t.nodes.find((n) => n.id === id) as { text: string }).text;
+    expect(text('waste')).toContain('https://forms.example/waste');
+    expect(text('accident')).toContain('https://forms.example/accident');
+    expect(text('event')).not.toContain('https://');
+    expect(text('id_intro')).toContain('https://example.org/privacy');
+    expect(JSON.stringify(t)).toContain('https://train.example/');
+    expect(JSON.stringify(buildSafetyFlow((n) => tagIds.get(n as never) ?? ''))).not.toMatch(/https?:\/\//);
+    expect(unfinished(t)).toEqual([]);
+  });
+
+  it('is a valid flow that follows the specification: 15 topics, 9 statuses, forms as links', () => {
+    expect(validateFlow(t)).toEqual([]);
+    expect(unreachable(t)).toEqual([]);
+    expect(t.nodes.length).toBeLessThanOrEqual(150);
+    const topics = byId.get('topics')!;
+    expect(topics.type === 'menu' && topics.options.length).toBe(15);
+    expect(byId.get('m_status')!.type === 'menu' && (byId.get('m_status') as { options: unknown[] }).options.length).toBe(STATUSES.length);
+    expect(STATUSES).toHaveLength(9);
+    expect(unfinished(t)).toEqual([]);                                                       // nothing is left to fill in before switching on
+    const required = ['q_name', 'q_faculty', 'q_pi'].map((id) => (byId.get(id) as { optional: boolean }).optional);
+    expect(required).toEqual([false, false, false]);                                         // name, faculty, PI are mandatory
+    expect(['q_building', 'q_room'].map((id) => (byId.get(id) as { optional: boolean }).optional)).toEqual([true, true]);
+    const chem = byId.get('chem_list') as { max: number };
+    expect(chem.max).toBe(10);
+    const unknownTags = t.nodes.filter((n) => n.type === 'tag' && !n.tagId);
+    expect(unknownTags).toEqual([]);
+    // every report ends in a hand-over, hazards by area
+    expect((byId.get('hz_ho') as { areaVars?: string[] }).areaVars).toEqual(['where', 'building']);
+    expect(['waste', 'accident', 'event', 'offsite'].every((id) => byId.get(id)!.type === 'message')).toBe(true);
+  });
+
+  const run = (state: FlowState | null, text: string | null, over: Partial<FlowContext> = {}, media = false) => runFlow(t, state, { text, media }, ctx({ humanOption: true, matchOption: async (x, o) => matchOptionLexical(x, o), ...over }));
+
+  it('walks a new customer through identification and a laser report, then a returning customer straight to the topics', async () => {
+    let r = await run(null, 'היי');
+    expect(r.replies.join('\n')).toContain('שם מלא:');
+    for (const a of ['דנה לוי', 'דלג', 'דלג', 'הנדסה', 'פרופ׳ כהן']) r = await run(r.state, a);
+    expect(r.replies[0]).toContain('מה הסטטוס שלך?');
+    r = await run(r.state, '2');                                                                // משתלם
+    expect(r.effects).toContainEqual({ kind: 'profile', vars: { fullName: 'דנה לוי', faculty: 'הנדסה', pi: 'פרופ׳ כהן', status: 'משתלם' } });
+    expect(r.replies[1]).toContain('15. שאלה כללית / דיווח אחר');
+    r = await run(r.state, 'יש לי שאלה על לייזר במעבדה');                                         // free text -> the laser topic by words
+    expect(r.replies.join('\n')).toContain('שלחו תמונה של האזור');
+    r = await run(r.state, null, {}, true);                                                     // photo
+    expect(r.replies).toEqual(['ציינו מיקום מדויק (בניין, קומה, חדר, ליד מה):']);
+    r = await run(r.state, 'בניין 3 חדר 12');
+    expect(r.replies[0]).toContain('מסמכים של המכשור');
+    r = await run(r.state, 'דלג');
+    expect(r.effects).toContainEqual({ kind: 'tag', tagId: tagIds.get('לייזרים') });
+    expect(r.effects.find((e) => e.kind === 'handoff')).toMatchObject({ reason: 'flow', text: expect.stringContaining('הועברה לטיפול') });
+    const note = (r.effects.find((e) => e.kind === 'note') as { text: string }).text;
+    for (const part of ['שם מלא: דנה לוי', 'פקולטה: הנדסה', 'שם ה-PI: פרופ׳ כהן', 'סטטוס: משתלם', 'מיקום: בניין 3 חדר 12', 'קבצים שנשלחו: 1']) expect(note).toContain(part);
+
+    const back = await run(null, 'שלום', { profile: { fullName: 'דנה לוי', faculty: 'הנדסה', pi: 'פרופ׳ כהן', status: 'משתלם' } });
+    expect(back.replies[0]).toBe('היי {שם פרטי}, טוב לראות אותך שוב! כאן {בוט} מיחידת הבטיחות 😊'); expect(back.replies[1]).toContain('ברצוני לקבל מידע / לדווח על:');
+  });
+
+  it('forms are links, chemicals take up to ten items and an optional SDS, the question goes to the officer, hazards to the area officer', async () => {
+    const known = { profile: { fullName: 'דנה', faculty: 'x', pi: 'y', status: 'משתלם', building: 'בניין 7' } };
+    let r = await run(null, 'x', known);
+    r = await run(r.state, '1');                                                                 // waste form
+    expect(r.replies[0]).toContain('פינוי פסולת כימית');
+    expect(r.replies[0]).toContain('פנו ליחידת הבטיחות');                                      // no link given: the customer is told to ask the unit
+    expect(r.replies[1]).toContain('1. שאלתא'.slice(0, 0) + 'שאילתא בנושא פינוי פסולת כימית');       // back at the topics
+    r = await run(r.state, '5');                                                                 // chemicals
+    r = await run(r.state, 'אצטון');
+    r = await run(r.state, 'כן');
+    r = await run(r.state, 'אתנול');
+    r = await run(r.state, '2');
+    r = await run(r.state, null, {}, true);                                                      // SDS file
+    r = await run(r.state, 'האם אפשר לאחסן יחד?');
+    expect(r.state.vars.chemicals).toBe('אצטון; אתנול');
+    expect(r.effects.filter((e) => e.kind === 'tag').map((e) => (e as { tagId: string }).tagId)).toEqual([tagIds.get('חומ״ס'), tagIds.get('כימיקלים המחייבים ניטור')]);
+    expect(r.effects.find((e) => e.kind === 'handoff')).toMatchObject({ reason: 'flow' });
+
+    let h = await run(null, 'x', known);
+    h = await run(h.state, '6');
+    h = await run(h.state, 'כבל חשוף על הרצפה');
+    h = await run(h.state, 'ליד המעלית');
+    const hh = await run(h.state, 'x'); void hh;
+    // officer by area: the answer to "where" names a building that belongs to an area
+    let a = await run(null, 'x', known); a = await run(a.state, '6'); a = await run(a.state, 'כבל חשוף');
+    a = await run(a.state, 'בניין 12 קומה 1', { resolveArea: async (s) => (s.includes('בניין 12') ? U : null) });
+    expect(a.effects.find((e) => e.kind === 'handoff')).toMatchObject({ userId: U });
+    // when the place is not recognised the identification building is tried, then the default
+    let b = await run(null, 'x', known); b = await run(b.state, '6'); b = await run(b.state, 'כבל חשוף');
+    b = await run(b.state, 'מקום לא מוכר', { resolveArea: async (s) => (s.includes('בניין 7') ? U : null) });
+    expect(b.effects.find((e) => e.kind === 'handoff')).toMatchObject({ userId: U });
+  });
+});
+
+describe('safety flow live: areas, template endpoint, placeholders, profile, files', () => {
+  const ORIGIN = 'https://panel.test';
+  const PW = 'correct-horse-battery';
+  const cfg = loadConfig({
+    NODE_ENV: 'test', DATABASE_URL: process.env.TEST_DATABASE_URL ?? 'postgres://postgres@localhost:5432/botwa_test',
+    ENCRYPTION_KEY: randomBytes(32).toString('base64'), APP_ORIGIN: ORIGIN, COOKIE_SECURE: 'false', REQUIRE_MFA_FOR_PRIVILEGED: 'false',
+  });
+  const db = createDb(cfg.DATABASE_URL);
+  let app: Awaited<ReturnType<typeof buildApp>>;
+  let mgr: ChannelManager;
+  let ctxA: AdapterContext;
+  const sent: string[] = [];
+  const cookies: Record<string, string> = {};
+  const ids: Record<string, string> = {};
+  let ip = 0;
+  class Fake implements ChannelAdapter {
+    constructor(c: AdapterContext) { ctxA = c; }
+    async start() { ctxA.events.onStatus('connected'); }
+    async stop() {}
+    async logout() {}
+    async sendText(_t: string, text: string) { sent.push(text); return { externalMessageId: `s${sent.length}` }; }
+  }
+  const factory: AdapterFactory = (ty, c) => (ty === 'whatsapp' ? new Fake(c) : null);
+  const call = (method: 'GET' | 'POST' | 'PUT' | 'DELETE', url: string, who?: string, payload?: object) =>
+    app.inject({ method, url, payload, remoteAddress: `10.68.${Math.floor(++ip / 250)}.${ip % 250}`, headers: { origin: ORIGIN, ...(who ? { cookie: cookies[who]! } : {}) } });
+  let mid = 0;
+  const say = async (who: string, text: string, media = false) => {
+    sent.length = 0;
+    await ctxA.events.onMessage({ externalContactId: who, externalMessageId: `sf${++mid}`, text, timestamp: new Date(), media: media ? { fileName: 'p.png', download: async () => Buffer.alloc(0) } : undefined });
+    return [...sent];
+  };
+  const conv = async (who: string) => (await db.query(`SELECT c.id, c.assigned_to, c.bot_state, ct.display_name, ct.profile FROM conversations c JOIN contacts ct ON ct.id = c.contact_id WHERE ct.external_id = $1`, [who])).rows[0];
+
+  beforeAll(async () => {
+    await db.query('DROP SCHEMA public CASCADE; CREATE SCHEMA public;');
+    await migrate(db);
+    await db.query(`INSERT INTO settings (key, value) VALUES ('automations', $1) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`, [JSON.stringify({ ...DEFAULT_AUTOMATIONS, introduce: { ...DEFAULT_AUTOMATIONS.introduce, enabled: false } })]);   // these tests check the exact replies; the introduction has its own tests
+    mgr = new ChannelManager(db, cfg, factory);
+    app = await buildApp(cfg, db, mgr);
+    for (const [e, r] of [['admin', 'admin'], ['sup', 'supervisor'], ['o1', 'agent'], ['o2', 'agent']] as const) {
+      ids[e] = (await db.query('INSERT INTO users (email,name,role,password_hash) VALUES ($1,$2,$3,$4) RETURNING id', [`${e}@t.io`, e, r, await hashPassword(PW)])).rows[0].id;
+      cookies[`${e}@t.io`] = `botwa_sid=${(await call('POST', '/auth/login', undefined, { email: `${e}@t.io`, password: PW })).cookies[0]!.value}`;
+    }
+    const ch = (await call('POST', '/channels', 'admin@t.io', { type: 'whatsapp', label: 'WA' })).json().id;
+    await call('POST', `/channels/${ch}/start`, 'admin@t.io');
+    await new Promise((r) => setTimeout(r, 40));
+  });
+  afterAll(async () => { await mgr.stopAll(); await app.close(); await db.end(); });
+
+  it('areas: only bot managers edit, active users only; matching is by whole words and in order', async () => {
+    expect((await call('POST', '/safety/areas', 'sup@t.io', { name: 'x', keywords: ['a'], userId: ids.o1 })).statusCode).toBe(403);
+    expect((await call('POST', '/safety/areas', 'admin@t.io', { name: 'x', keywords: ['a'], userId: '00000000-0000-4000-8000-000000000000' })).json()).toEqual({ error: 'unknown_user' });
+    expect((await call('POST', '/safety/areas', 'admin@t.io', { name: 'מדעי החיים', keywords: ['בניין 12', 'בניין 13'], userId: ids.o1 })).statusCode).toBe(201);
+    const second = (await call('POST', '/safety/areas', 'admin@t.io', { name: 'הנדסה', keywords: ['בניין 5', 'חדר מחשבים'], userId: ids.o2 })).json().id as string;
+    const { resolveArea } = await import('../src/safety/areas.js');
+    expect(await resolveArea(db, 'מעבדה 214, בניין 12, קומה 2')).toBe(ids.o1);
+    expect(await resolveArea(db, 'בניין 125')).toBeNull();                 // "בניין 12" is not a prefix match of 125
+    expect(await resolveArea(db, 'ליד חדר המחשבים בקומה 1')).toBeNull();   // different phrase
+    expect(await resolveArea(db, 'חדר מחשבים בבניין 5')).toBe(ids.o2);
+    expect((await call('GET', '/safety/areas', 'sup@t.io')).json()).toHaveLength(2);
+    await db.query('UPDATE users SET active = false WHERE id = $1', [ids.o2]);
+    expect(await resolveArea(db, 'בניין 5')).toBeNull();                    // an inactive officer is skipped
+    await db.query('UPDATE users SET active = true WHERE id = $1', [ids.o2]);
+    expect((await call('PUT', `/safety/areas/${second}`, 'admin@t.io', { name: 'הנדסה', keywords: ['בניין 5'], userId: ids.o2 })).statusCode).toBe(200);
+    expect((await call('DELETE', `/safety/areas/${second}`, 'admin@t.io')).statusCode).toBe(200);
+    expect((await call('GET', '/safety/areas', 'sup@t.io')).json()).toHaveLength(1);
+  });
+
+  it('the template endpoint creates the tags, and the bot cannot be switched on while placeholders remain', async () => {
+    expect((await call('POST', '/flow/templates/safety', 'sup@t.io')).statusCode).toBe(403);
+    expect((await call('POST', '/flow/templates/safety', 'admin@t.io', { links: { waste: 'http://insecure.example/x' } })).statusCode).toBe(400);   // https only
+    expect((await call('POST', '/flow/templates/safety', 'admin@t.io', { links: { waste: 'javascript:alert(1)' } })).statusCode).toBe(400);
+    const withLink = (await call('POST', '/flow/templates/safety', 'admin@t.io', { links: { waste: 'https://forms.example/waste', event: '' } })).json();
+    expect((withLink.flow.nodes.find((n: { id: string }) => n.id === 'waste') as { text: string }).text).toContain('https://forms.example/waste');
+    const tpl = (await call('POST', '/flow/templates/safety', 'admin@t.io')).json();
+    expect(tpl.flow.nodes.length).toBeGreaterThan(60);
+    expect((await db.query(`SELECT count(*)::int AS n FROM tags WHERE name IN ('לייזרים','חומ״ס','מפגע','Biosafety','סולמות')`)).rows[0].n).toBe(5);
+    // the template is ready to use; a flow that still has a "[להשלים" placeholder cannot be switched on
+    const draft = JSON.parse(JSON.stringify(tpl.flow)) as { nodes: { id: string; text?: string }[] };
+    draft.nodes.find((n) => n.id === 'offsite')!.text += ' [להשלים: קישור]';
+    expect((await call('PUT', '/flow', 'admin@t.io', { flow: draft })).statusCode).toBe(200);
+    expect((await call('GET', '/flow', 'admin@t.io')).json().unfinished).toEqual(['offsite']);
+    const blocked = await call('PUT', '/flow/mode', 'admin@t.io', { mode: 'flow' });
+    expect(blocked.statusCode).toBe(409);
+    expect(blocked.json()).toMatchObject({ error: 'unfinished_flow' });
+    // fixed: the chemicals officer is chosen and the placeholder is gone
+    const f = JSON.parse(JSON.stringify(tpl.flow)) as { nodes: { id: string; userId?: string }[] };
+    f.nodes.find((n) => n.id === 'chem_ho')!.userId = ids.o2;
+    expect((await call('PUT', '/flow', 'admin@t.io', { flow: f })).statusCode).toBe(200);
+    expect((await call('PUT', '/flow/mode', 'admin@t.io', { mode: 'flow' })).statusCode).toBe(200);
+  });
+
+  it('a real conversation: identification once, a hazard with a photo routed by area, a chemicals question routed to its officer, tags and the summary note', async () => {
+    await call('PUT', '/settings/bot', 'admin@t.io', { ...DEFAULT_BOT, enabled: true, mode: 'flow' });
+    const first = await say('wa1', 'שלום'); expect(first.join(' ')).toContain('שם מלא');
+    await say('wa1', 'רונית כהן'); await say('wa1', 'דלג'); await say('wa1', 'דלג'); await say('wa1', 'מדעי החיים'); await say('wa1', 'פרופ׳ לוי');
+    expect(first.join(' ')).toContain('שלום, כאן הבוט מיחידת הבטיחות');                     // no persona name yet: "the bot"
+    const topics = await say('wa1', '1');                                                    // status: manager
+    expect(topics[0]).toBe('תודה רונית! שמרתי את הפרטים, כך שבפעם הבאה לא נשאל אותם שוב.');  // thanked by first name
+    expect(topics[1]).toContain('ברצוני לקבל מידע / לדווח על:');
+    const c0 = await conv('wa1');
+    expect(c0.display_name).toBe('רונית כהן');
+    expect(c0.profile).toMatchObject({ fullName: 'רונית כהן', faculty: 'מדעי החיים', pi: 'פרופ׳ לוי', status: 'מנהל / מהנדס מעבדה' });
+    expect(await say('wa1', '6')).toEqual(['שלחו תמונה של המפגע או תארו אותו בכתב:']);
+    expect(await say('wa1', '', true)).toEqual(['ציינו מיקום מדויק (בניין, קומה, חדר, ליד מה):']);   // photo only
+    const out = await say('wa1', 'מעבדה 214 בניין 12 קומה 2');
+    expect(out).toEqual(['הפנייה התקבלה והועברה לטיפול. נחזור אליך בהקדם.']);                    // one confirmation, not two
+    const c1 = await conv('wa1');
+    expect(c1).toMatchObject({ assigned_to: ids.o1, bot_state: 'human' });                   // officer of building 12
+    expect((await db.query(`SELECT t.name FROM conversation_tags x JOIN tags t ON t.id = x.tag_id WHERE x.conversation_id = $1`, [c1.id])).rows.map((r) => r.name)).toEqual(['מפגע']);
+    const note = (await db.query(`SELECT body FROM conversation_notes WHERE conversation_id = $1 AND body LIKE 'פרטים שנאספו%'`, [c1.id])).rows[0].body as string;
+    for (const part of ['שם מלא: רונית כהן', 'פקולטה: מדעי החיים', 'מיקום: מעבדה 214 בניין 12 קומה 2', 'קבצים שנשלחו: 1']) expect(note).toContain(part);
+
+    // the same person writes again from a new contact id? no: same contact, new topic after a person closed the case
+    await db.query(`UPDATE conversations SET status = 'closed', flow_state = NULL, bot_state = NULL, assigned_to = NULL WHERE id = $1`, [c1.id]);
+    await call('PUT', '/branding/bot', 'admin@t.io', { name: 'בטי', role: 'הבוט של יחידת הבטיחות' });
+    const again = await say('wa1', 'שלום שוב');
+    expect(again[0]).toBe('היי רונית, טוב לראות אותך שוב! כאן בטי מיחידת הבטיחות 😊');          // remembered by first name, the bot by its name
+    expect(again[1]).toContain('ברצוני לקבל מידע / לדווח על:');                                 // identification is not asked again
+    await say('wa1', '5');                                                                    // chemicals
+    await say('wa1', 'אצטון'); await say('wa1', '2');                                          // one item, no more
+    await say('wa1', 'דלג');                                                                  // no SDS
+    await say('wa1', 'האם אפשר לאחסן אצטון ליד חומצה?');
+    const c2 = await conv('wa1');
+    expect(c2.assigned_to).toBe(ids.o2);                                                     // the chemicals officer chosen in the flow
+    expect((await db.query(`SELECT t.name FROM conversation_tags x JOIN tags t ON t.id = x.tag_id WHERE x.conversation_id = $1 ORDER BY t.name`, [c2.id])).rows.map((r) => r.name)).toEqual(['חומ״ס', 'כימיקלים המחייבים ניטור', 'מפגע']);  // the earlier hazard tag stays on the same thread
+  });
+
+  it('numbered menu: a topic routed by area asks for the place and hands over to the officer of that place', async () => {
+    await call('PUT', '/flow/mode', 'admin@t.io', { mode: 'menu' });
+    const put = await call('PUT', '/settings/bot', 'admin@t.io', { ...DEFAULT_BOT, enabled: true, mode: 'menu', items: [{ title: 'מפגע בטיחותי', answer: 'תודה על הדיווח.', route: { userId: ids.o2, byArea: true } }] });
+    expect(put.statusCode).toBe(200);
+    const first = await say('wa9', 'שלום');
+    expect(first[0]).toContain('מפגע בטיחותי');
+    const ask = await say('wa9', '1');
+    expect(ask.join(' ')).toContain('באיזה בניין או מקום');
+    await say('wa9', 'בניין 12 קומה 3');
+    const c = await conv('wa9');
+    expect(c).toMatchObject({ assigned_to: ids.o1, bot_state: 'human' });            // building 12 belongs to o1, not the topic's fallback o2
+    // no match: the topic's own officer
+    await say('wa10', 'שלום'); await say('wa10', '1'); await say('wa10', 'מקום לא מוכר');
+    expect((await conv('wa10')).assigned_to).toBe(ids.o2);
+  });
+});
+
+describe('areas workbook import', () => {
+  const ORIGIN = 'https://panel.test';
+  const cfg = loadConfig({ NODE_ENV: 'test', DATABASE_URL: process.env.TEST_DATABASE_URL ?? 'postgres://postgres@localhost:5432/botwa_test', ENCRYPTION_KEY: randomBytes(32).toString('base64'), APP_ORIGIN: ORIGIN, COOKIE_SECURE: 'false', REQUIRE_MFA_FOR_PRIVILEGED: 'false', MEDIA_ALLOW_UNSCANNED: 'true' });
+  const db = createDb(cfg.DATABASE_URL);
+  let app: Awaited<ReturnType<typeof buildApp>>;
+  let mgr: ChannelManager;
+  let cookie = '';
+  let uid = '';
+  beforeAll(async () => {
+    await db.query('DROP SCHEMA public CASCADE; CREATE SCHEMA public;');
+    await migrate(db);
+    await db.query(`INSERT INTO settings (key, value) VALUES ('automations', $1) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`, [JSON.stringify({ ...DEFAULT_AUTOMATIONS, introduce: { ...DEFAULT_AUTOMATIONS.introduce, enabled: false } })]);   // these tests check the exact replies; the introduction has its own tests
+    mgr = new ChannelManager(db, cfg, () => null);
+    app = await buildApp(cfg, db, mgr);
+    uid = (await db.query('INSERT INTO users (email,name,role,password_hash) VALUES ($1,$2,$3,$4) RETURNING id', ['boss@t.io', 'boss', 'admin', await hashPassword('correct-horse-battery')])).rows[0].id;
+    await db.query(`INSERT INTO users (email,name,role,password_hash) VALUES ('o@t.io','officer','agent',$1)`, [await hashPassword('correct-horse-battery')]);
+    cookie = `botwa_sid=${(await app.inject({ method: 'POST', url: '/auth/login', payload: { email: 'boss@t.io', password: 'correct-horse-battery' }, remoteAddress: '10.69.0.1', headers: { origin: ORIGIN } })).cookies[0]!.value}`;
+  });
+  afterAll(async () => { await mgr.stopAll(); await app.close(); await db.end(); });
+
+  async function upload(rows: string[][]) {
+    const wb = new ExcelJS.Workbook(); const ws = wb.addWorksheet('x'); rows.forEach((r) => ws.addRow(r));
+    const buf = Buffer.from(await wb.xlsx.writeBuffer());
+    const b = '----t';
+    const body = Buffer.concat([Buffer.from(`--${b}\r\nContent-Disposition: form-data; name="file"; filename="a.xlsx"\r\nContent-Type: application/octet-stream\r\n\r\n`), buf, Buffer.from(`\r\n--${b}--\r\n`)]);
+    return app.inject({ method: 'POST', url: '/safety/areas/import', payload: body, remoteAddress: '10.69.0.2', headers: { origin: ORIGIN, cookie, 'content-type': `multipart/form-data; boundary=${b}` } });
+  }
+
+  it('serves a template, imports rows by officer e-mail, updates by name, and reports what it skipped', async () => {
+    expect((await app.inject({ method: 'GET', url: '/safety/areas/template.xlsx', headers: { cookie } })).statusCode).toBe(200);
+    const head = ['שם האזור', 'מילות זיהוי', 'אימייל הממונה'];
+    const r1 = await upload([head, ['בניין 12', 'בניין 12\nבניין י״ב', 'O@t.io'], ['הנדסה', 'בניין 5', 'nobody@t.io'], ['ריק', '', 'o@t.io']]);
+    expect(r1.statusCode).toBe(200);
+    expect(r1.json()).toEqual({ created: 1, updated: 0, skipped: [{ row: 3, reason: 'unknown_officer' }, { row: 4, reason: 'missing_fields' }] });
+    const r2 = await upload([head, ['בניין 12', 'בניין 12, בניין 13', 'o@t.io']]);
+    expect(r2.json()).toMatchObject({ created: 0, updated: 1 });
+    expect((await db.query('SELECT keywords FROM responsibility_areas')).rows).toEqual([{ keywords: ['בניין 12', 'בניין 13'] }]);
+    expect((await upload([['a', 'b'], ['c', 'd']])).json()).toEqual({ error: 'unknown_workbook' });
+    void uid;
+  });
+});
+
+describe('smart questions (kbFirst + did-you-mean)', () => {
+  const smart: Flow = flowSchema.parse({
+    start: 'menu', kbFirst: true, nodes: [
+      { id: 'menu', type: 'menu', text: 'במה נוכל לעזור?', kbOnFreeText: true, options: [{ label: 'לייזרים', next: 'bye', examples: [] }] },
+      { id: 'bye', type: 'handoff', text: '' },
+    ],
+  });
+  const sugCtx = (over: Partial<FlowContext> = {}) => ctx({
+    kbSuggest: async () => [{ id: 's1', label: 'נהלי עבודה עם לייזר' }, { id: 's2', label: 'הגנת עיניים' }],
+    kbSource: async (id) => (id === 's1' ? 'תשובה: נהלי לייזר' : null), ...over,
+  });
+
+  it('answers a question in the first message with the answer only; the flow starts with the next ordinary message', async () => {
+    const c = ctx({ kbAnswer: async (t) => (t.includes('פסולת') ? 'תשובה על פסולת' : null) });
+    const r = await runFlow(smart, null, 'איך מפנים פסולת כימית?', c);
+    expect(r.replies).toEqual([`תשובה על פסולת${ANSWER_TAIL}`]);
+    expect(r.state.node).toBeNull();
+    const again = await runFlow(smart, r.state, 'ועוד שאלה על פסולת?', c);   // a second question: answered too, still no menu
+    expect(again.replies).toEqual([`תשובה על פסולת${ANSWER_TAIL}`]);
+    const next = await runFlow(smart, again.state, 'תפריט', c);
+    expect(next.replies.join('\n')).toContain('במה נוכל לעזור?');
+  });
+  it('does not search for greetings, numbers or very short text, nor when the flow is not kbFirst', async () => {
+    let calls = 0;
+    const c = ctx({ kbAnswer: async () => { calls++; return 'x'; } });
+    for (const t of ['שלום', 'היי', '1', 'מה?']) await runFlow(smart, null, t, c);
+    expect(calls).toBe(0);
+    // a flow that starts with a condition and is not kbFirst never searches on the first message
+    await runFlow(flowSchema.parse({ start: 'c', nodes: [{ id: 'c', type: 'condition', check: { kind: 'hours' }, yes: 'm', no: 'm' }, { id: 'm', type: 'menu', text: 'x', options: [{ label: 'a', next: 'e' }] }, { id: 'e', type: 'end', text: '' }] }), null, 'איך מפנים פסולת כימית?', c);
+    expect(calls).toBe(0);
+  });
+  it('offers "did you mean" when unsure, and a letter picks one', async () => {
+    const first = await runFlow(smart, null, 'שלום', sugCtx());          // shows the menu
+    const r1 = await runFlow(smart, first.state, 'משהו על עבודה עם קרן', sugCtx());
+    expect(r1.replies[0]).toContain('א. נהלי עבודה עם לייזר');
+    expect(r1.replies[0]).toContain('ב. הגנת עיניים');
+    expect(r1.state.suggest).toHaveLength(2);
+    const r2 = await runFlow(smart, r1.state, 'א', sugCtx());
+    expect(r2.replies).toEqual([`תשובה: נהלי לייזר${ANSWER_TAIL}`]);
+    expect(r2.state.suggest).toBeUndefined();
+  });
+  it('forgets the suggestions once the customer does something else', async () => {
+    const first = await runFlow(smart, null, 'שלום', sugCtx());
+    const r1 = await runFlow(smart, first.state, 'משהו על עבודה עם קרן', sugCtx());
+    const r2 = await runFlow(smart, r1.state, '1', sugCtx());       // a menu number wins over any suggestion
+    expect(r2.effects.some((e) => e.kind === 'handoff')).toBe(true);
+    expect(r2.state.suggest).toBeUndefined();
+  });
+  it('the safety template is smart by default', async () => {
+    const { buildSafetyFlow } = await import('../src/flow/safetyTemplate.js');
+    const f = buildSafetyFlow(() => '11111111-1111-4111-8111-111111111111');
+    expect(f.kbFirst).toBe(true);
+    expect((f.nodes.find((n) => n.id === 'topics') as { kbOnFreeText: boolean }).kbOnFreeText).toBe(true);
+  });
+});
+
+describe('a question typed during identification', () => {
+  const q: Flow = flowSchema.parse({
+    start: 'n', kbFirst: true, nodes: [
+      { id: 'n', type: 'question', text: 'שם מלא:', save: 'fullName', kind: 'name', kbAside: true, next: 'b' },
+      { id: 'b', type: 'question', text: 'שם הבניין:', save: 'building', kbAside: true, next: 'e' },
+      { id: 'e', type: 'end', text: '' },
+    ],
+  });
+  const ans = ctx({ kbAnswer: async (t) => (t.includes('גובה') ? 'עד 2 מטר ללא היתר' : null) });
+  it('is answered from the knowledge base and the same question is asked again', async () => {
+    const first = await runFlow(q, null, 'שלום', ans);
+    expect(first.replies).toEqual(['שם מלא:']);
+    const r = await runFlow(q, first.state, 'מה הגובה המותר לעבוד ללא היתר', ans);
+    expect(r.replies).toEqual([`עד 2 מטר ללא היתר${ANSWER_TAIL}`]);   // the answer only, the name is not asked again
+    expect(r.state.node).toBe('n');
+    expect(r.state.vars.fullName).toBeUndefined();            // the question was not taken as the name
+    const ok = await runFlow(q, r.state, 'דנה לוי', ans);
+    expect(ok.state.vars.fullName).toBe('דנה לוי');
+    expect(ok.replies).toEqual(['שם הבניין:']);
+  });
+  it('an unanswerable question is never stored as the answer (name or free text), and the question is asked again', async () => {
+    const first = await runFlow(q, null, 'שלום', ans);
+    const r = await runFlow(q, first.state, 'מתי הקורס הבא בנושא אחר?', ans);
+    expect(r.state.vars.fullName).toBeUndefined();
+    expect(r.state.node).toBe('n');
+    expect(r.replies[0]).toContain('לא מצאתי תשובה');
+    expect(r.replies[0]).not.toContain('שם מלא:');
+    const named = await runFlow(q, r.state, 'דנה', ans);
+    const b = await runFlow(q, named.state, 'האם אפשר לעבוד מעל 7 שלבים בסולם ללא היתר?', ans);
+    expect(b.state.node).toBe('b');
+    expect(b.state.vars.building).toBeUndefined();
+  });
+  it('offers "did you mean" while asking for details, and a letter picks one, then the same question again', async () => {
+    const c = ctx({ kbAnswer: async () => null, kbSuggest: async () => [{ id: 's1', label: 'עבודה על סולמות' }], kbSource: async () => 'סולם: עד 2 מטר' });
+    const first = await runFlow(q, null, 'שלום', c);
+    const r = await runFlow(q, first.state, 'האם אפשר לעבוד מעל 7 שלבים בסולם ללא היתר?', c);
+    expect(r.replies[0]).toContain('א. עבודה על סולמות');
+    const p = await runFlow(q, r.state, 'א', c);
+    expect(p.replies).toEqual([`סולם: עד 2 מטר${ANSWER_TAIL}`]);
+    expect(p.state.vars.fullName).toBeUndefined();
+    const n = await runFlow(q, p.state, 'דנה לוי', c);
+    expect(n.state.vars.fullName).toBe('דנה לוי');
+  });
+  it('plain answers (even short or odd ones) still go through', async () => {
+    const first = await runFlow(q, null, 'שלום', ans);
+    const r = await runFlow(q, first.state, 'יוסי כהן', ans);
+    expect(r.state.vars.fullName).toBe('יוסי כהן');
+  });
+});
+
+describe('migration 034: existing safety flows become smart once', () => {
+  it('upgrades a stored template flow without the new settings, leaves others alone', async () => {
+    const { migrate: mig } = await import('../src/migrate.js');
+    const { createDb: mk } = await import('../src/db.js');
+    const url = process.env.TEST_DATABASE_URL ?? 'postgres://postgres@localhost:5432/botwa_test';
+    const d = mk(url);
+    try {
+      const old = JSON.parse(JSON.stringify(buildSafetyFlow(() => '11111111-1111-4111-8111-111111111111')));
+      delete old.kbFirst;
+      for (const n of old.nodes) { delete n.kbAside; if (n.id === 'topics') n.kbOnFreeText = false; }
+      await d.query(`INSERT INTO settings (key, value) VALUES ('flow', $1) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`, [JSON.stringify(old)]);
+      await d.query(`DELETE FROM schema_migrations WHERE name LIKE '034%'`).catch(() => undefined);
+      await mig(d);
+      const v = (await d.query(`SELECT value FROM settings WHERE key = 'flow'`)).rows[0].value;
+      expect(v.kbFirst).toBe(true);
+      const by = new Map<string, { kbAside?: boolean; kbOnFreeText?: boolean }>(v.nodes.map((n: { id: string }) => [n.id, n]));
+      expect(by.get('q_name')!.kbAside).toBe(true);
+      expect(by.get('q_pi')!.kbAside).toBe(true);
+      expect(by.get('topics')!.kbOnFreeText).toBe(true);
+      expect(by.get('waste' as never)).toBeDefined();
+      expect(flowSchema.safeParse(v).success).toBe(true);
+    } finally { await d.end(); }
+  });
+});
+
+describe('migration 036: conversations stopped by the old loop guard go back to the bot', () => {
+  it('resumes untouched ones, leaves those a person answered', async () => {
+    const { migrate: mig } = await import('../src/migrate.js');
+    const { createDb: mk } = await import('../src/db.js');
+    const d = mk(process.env.TEST_DATABASE_URL ?? 'postgres://postgres@localhost:5432/botwa_test');
+    try {
+      const ch = (await d.query(`INSERT INTO channels (type,label) VALUES ('whatsapp','m36') RETURNING id`)).rows[0].id;
+      const mkc = async (ext: string) => {
+        const ct = (await d.query(`INSERT INTO contacts (channel_id, external_id) VALUES ($1,$2) RETURNING id`, [ch, ext])).rows[0].id;
+        const c = (await d.query(`INSERT INTO conversations (channel_id, contact_id, bot_state, flow_state) VALUES ($1,$2,'human',$3) RETURNING id`, [ch, ct, JSON.stringify({ node: 'q_faculty', vars: { fullName: 'x' }, invalid: 0, done: false })])).rows[0].id as string;
+        await d.query(`INSERT INTO conversation_notes (conversation_id, body, created_at) VALUES ($1, 'הבוט נעצר: יותר מדי הודעות אוטומטיות בזמן קצר (ייתכן בוט בצד הלקוח).', now() - interval '1 hour')`, [c]);
+        return c;
+      };
+      const stuck = await mkc('m36a');
+      const answered = await mkc('m36b');
+      await d.query(`INSERT INTO messages (conversation_id, direction, body, auto) VALUES ($1,'out','נציג כאן',false)`, [answered]);
+      await d.query(`DELETE FROM schema_migrations WHERE name LIKE '036%'`);
+      await mig(d);
+      const st = async (id: string) => (await d.query('SELECT bot_state, flow_state FROM conversations WHERE id = $1', [id])).rows[0];
+      expect(await st(stuck)).toMatchObject({ bot_state: 'menu', flow_state: { node: 'q_faculty' } });
+      expect((await st(answered)).bot_state).toBe('human');
+      expect((await d.query(`SELECT count(*)::int AS n FROM conversation_notes WHERE conversation_id = $1 AND body LIKE 'הבוט חזר לפעול%'`, [stuck])).rows[0].n).toBe(1);
+    } finally { await d.end(); }
+  });
+});
+
+describe('after "did you mean" during identification', () => {
+  const q: Flow = flowSchema.parse({
+    start: 'f', kbFirst: true, nodes: [
+      { id: 'f', type: 'question', text: 'פקולטה:', save: 'faculty', kbAside: true, next: 'p' },
+      { id: 'p', type: 'question', text: 'שם ה-PI:', save: 'pi', kbAside: true, next: 'e' },
+      { id: 'e', type: 'end', text: '' },
+    ],
+  });
+  const c = ctx({ kbAnswer: async (t) => (t.includes('נפצע') ? 'עזרה ראשונה ודיווח לממונה' : null), kbSuggest: async () => [{ id: 's', label: 'מידת חום' }], kbSource: async () => 'x' });
+  it('a correction ("לא, הכוונה ...") is treated as a new question, never stored as the answer', async () => {
+    const s0 = (await runFlow(q, null, 'שלום', c)).state;
+    const s1 = await runFlow(q, s0, 'מה עושים כשיש תאונה', c);
+    expect(s1.state.suggest).toHaveLength(1);
+    const s2 = await runFlow(q, s1.state, 'לא הכוונה אם עובד נפצע', c);
+    expect(s2.replies[0]).toContain('עזרה ראשונה');
+    expect(s2.state.vars.faculty).toBeUndefined();
+    expect(s2.state.node).toBe('f');
+    const s3 = await runFlow(q, s2.state, 'הנדסה', c);
+    expect(s3.state.vars.faculty).toBe('הנדסה');
+  });
+  it('an ordinary short answer right after the suggestions is still taken as the answer', async () => {
+    const s0 = (await runFlow(q, null, 'שלום', c)).state;
+    const s1 = await runFlow(q, s0, 'מה עושים כשיש תאונה', c);
+    const s2 = await runFlow(q, s1.state, 'מדעי החיים', c);
+    expect(s2.state.vars.faculty).toBe('מדעי החיים');
+    expect(s2.replies).toEqual(['שם ה-PI:']);
+  });
+  it('a long sentence is never stored as a faculty or name', async () => {
+    const s0 = (await runFlow(q, null, 'שלום', c)).state;
+    const r = await runFlow(q, s0, 'עובד אצלנו נפצע היום ביד במעבדה', c);
+    expect(r.state.vars.faculty).toBeUndefined();
+    expect(r.replies[0]).toContain('עזרה ראשונה');
+  });
+});
+
+describe('a question that names a menu topic', () => {
+  const tagIds = new Map(TEMPLATE_TAGS.map((n, i) => [n, `00000000-0000-4000-8000-${String(i + 1).padStart(12, '0')}`]));
+  const t = buildSafetyFlow((n) => tagIds.get(n as never) ?? '');
+  const c = () => ctx({ matchOption: async (x, o) => matchOptionLexical(x, o) });
+  it('during identification: an information topic (form) is answered at once, and identification stays where it was', async () => {
+    const s0 = await runFlow(t, null, 'היי', c());
+    expect(s0.replies.join('\n')).toContain('שם מלא:');
+    const r = await runFlow(t, s0.state, 'איך אני מדווח על תאונה', c());
+    expect(r.replies).toHaveLength(1);
+    expect(r.replies[0]).toContain('תאונה');
+    expect(r.replies[0]).not.toContain('לא מצאתי');
+    expect(r.state.node).toBe('q_name');
+    expect(r.state.vars.fullName).toBeUndefined();
+  });
+  it('during identification: a report topic is remembered, and after identification the bot goes straight into it', async () => {
+    let r = await runFlow(t, null, 'היי', c());
+    r = await runFlow(t, r.state, 'יש לי שאלה על לייזר במעבדה', c());
+    expect(r.replies[0]).toContain('"לייזרים"');
+    expect(r.state.pendingTopic).toBeTruthy();
+    for (const a of ['דנה לוי', 'דלג', 'דלג', 'הנדסה', 'פרופ׳ כהן']) r = await runFlow(t, r.state, a, c());
+    r = await runFlow(t, r.state, '2', c());                                        // status
+    expect(r.replies.join('\n')).not.toContain('ברצוני לקבל מידע');                 // no topics menu
+    expect(r.replies.join('\n')).toContain('שלחו תמונה של האזור');                  // straight into the laser topic
+    expect(r.state.pendingTopic).toBeUndefined();
+  });
+  it('in the first message: a known customer goes straight into the topic', async () => {
+    const r = await runFlow(t, null, 'איך מדווחים על מפגע בטיחותי שראיתי', ctx({ matchOption: async (x, o) => matchOptionLexical(x, o), profile: { fullName: 'דנה', faculty: 'x', pi: 'y', status: 'משתלם' } }));
+    expect(r.replies.join('\n')).toContain('המפגע');
+    expect(r.replies.join('\n')).not.toContain('ברצוני לקבל מידע');
+  });
+});
+
+describe('editor positions', () => {
+  it('a flow keeps where each node was placed; bad positions or ids are refused', () => {
+    const f = flowSchema.parse({ start: 'm', nodes: [{ id: 'm', type: 'end', text: '' }], layout: { m: { x: 120, y: 40 } } });
+    expect(f.layout).toEqual({ m: { x: 120, y: 40 } });
+    expect(flowSchema.safeParse({ start: 'm', nodes: [{ id: 'm', type: 'end', text: '' }], layout: { m: { x: 'a', y: 1 } } }).success).toBe(false);
+    expect(flowSchema.safeParse({ start: 'm', nodes: [{ id: 'm', type: 'end', text: '' }], layout: { 'Bad Id': { x: 1, y: 1 } } }).success).toBe(false);
+    expect(flowSchema.safeParse({ start: 'm', nodes: [{ id: 'm', type: 'end', text: '' }], layout: { m: { x: 1e9, y: 1 } } }).success).toBe(false);
+  });
+});
+
+describe('migration 063: the bot names itself and greets known customers', () => {
+  it('upgrades a stored template flow once, sets Betty when no identity was chosen, updates the untouched welcome', async () => {
+    const { migrate: mig } = await import('../src/migrate.js');
+    const { createDb: mk } = await import('../src/db.js');
+    const d = mk(process.env.TEST_DATABASE_URL ?? 'postgres://postgres@localhost:5432/botwa_test');
+    try {
+      // the template as it was before 063
+      const old = JSON.parse(JSON.stringify(buildSafetyFlow(() => '11111111-1111-4111-8111-111111111111'))) as { nodes: { id: string; yes?: string; next?: string; text?: string }[] };
+      old.nodes = old.nodes.filter((n) => n.id !== 'welcome_back' && n.id !== 'id_saved');
+      old.nodes.find((n) => n.id === 'start')!.yes = 'topics';
+      old.nodes.find((n) => n.id === 'remember')!.next = 'topics';
+      const intro = old.nodes.find((n) => n.id === 'id_intro')!;
+      intro.text = intro.text!.replace('שלום, כאן {בוט} מיחידת הבטיחות 👋', 'שלום, כאן הבוט של יחידת הבטיחות.');
+      await d.query(`INSERT INTO settings (key, value) VALUES ('flow', $1) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`, [JSON.stringify(old)]);
+      await d.query(`DELETE FROM settings WHERE key = 'bot_persona'`);
+      await d.query(`INSERT INTO settings (key, value) VALUES ('bot', $1) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`, [JSON.stringify({ ...DEFAULT_BOT, welcome: 'שלום! אני הבוט של השירות. במה אפשר לעזור? השיבו במספר:' })]);
+      await d.query(`DELETE FROM schema_migrations WHERE name LIKE '063%'`);
+      await mig(d);
+      const v = (await d.query(`SELECT value FROM settings WHERE key = 'flow'`)).rows[0].value;
+      expect(flowSchema.safeParse(v).success).toBe(true);
+      expect(validateFlow(v)).toEqual([]);
+      const by = new Map<string, { yes?: string; next?: string; text?: string }>(v.nodes.map((n: { id: string }) => [n.id, n]));
+      expect(by.get('start')!.yes).toBe('welcome_back');
+      expect(by.get('remember')!.next).toBe('id_saved');
+      expect(by.get('id_intro')!.text).toBe((buildSafetyFlow(() => '11111111-1111-4111-8111-111111111111').nodes.find((n) => n.id === 'id_intro') as { text: string }).text);
+      expect((await d.query(`SELECT value FROM settings WHERE key = 'bot_persona'`)).rows[0].value).toEqual({ name: 'בטי', role: 'הבוט של יחידת הבטיחות' });
+      expect((await d.query(`SELECT value->>'welcome' AS w FROM settings WHERE key = 'bot'`)).rows[0].w).toBe('שלום {שם פרטי}! כאן {בוט}. במה אפשר לעזור? השיבו במספר:');
+      // once only: running it again changes nothing (no duplicate nodes)
+      await d.query(`DELETE FROM schema_migrations WHERE name LIKE '063%'`);
+      await mig(d);
+      const again = (await d.query(`SELECT value FROM settings WHERE key = 'flow'`)).rows[0].value;
+      expect(again.nodes.length).toBe(v.nodes.length);
+    } finally { await d.end(); }
+  });
+});
