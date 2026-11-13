@@ -227,7 +227,8 @@ export function conversationRoutes(app: FastifyInstance, db: Db, mgr: ChannelMan
     await audit(db, { actorId: u.id, action: handover ? 'conversation.handover' : 'conversation.assign', target: conv.id, ip: req.ip, meta: { to: target, from: handover ? conv.assigned_to : undefined } });
     mgr.hookConversation('conversation.assigned', conv.id);
     if (target && target !== u.id) mgr.onAssigned?.(conv.id, target, handover ? 'handover' : 'assigned');
-    return { ok: true };
+    const introduced = target ? await mgr.introduce(conv.id) : false;   // "שלום, כאן <name>, <role>. אני אטפל בפנייתך"
+    return { ok: true, introduced };
   });
 
   app.post('/conversations/:id/status', { preHandler: any }, async (req, reply) => {
@@ -345,7 +346,8 @@ export function conversationRoutes(app: FastifyInstance, db: Db, mgr: ChannelMan
     const c = (await db.query('SELECT body FROM canned_replies WHERE id = $1', [p.data.id])).rows[0];
     if (!c) return reply.code(404).send({ error: 'not_found' });
     const info = (await db.query(`SELECT ct.display_name AS name, ch.label FROM conversations v JOIN contacts ct ON ct.id = v.contact_id JOIN channels ch ON ch.id = v.channel_id WHERE v.id = $1`, [conv.id])).rows[0];
-    return { text: renderCanned(c.body, { customerName: info?.name, agentName: req.user!.name, hours: await loadBusinessHours(db), channelLabel: info?.label }) };
+    const me = (await db.query('SELECT job_title, intro_phone FROM users WHERE id = $1', [req.user!.id])).rows[0];
+    return { text: renderCanned(c.body, { customerName: info?.name, agentName: req.user!.name, agentTitle: me?.job_title, agentPhone: me?.intro_phone, hours: await loadBusinessHours(db), channelLabel: info?.label }) };
   });
 
   // Privacy: data-subject export / erasure for one contact (admin only, audited).

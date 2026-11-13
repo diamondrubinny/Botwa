@@ -1,3 +1,4 @@
+import { DEFAULT_AUTOMATIONS } from '../src/automations.js';
 import ExcelJS from 'exceljs';
 import { randomBytes } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -165,6 +166,7 @@ describe('flow bot end to end', () => {
   beforeAll(async () => {
     await db.query('DROP SCHEMA public CASCADE; CREATE SCHEMA public;');
     await migrate(db);
+    await db.query(`INSERT INTO settings (key, value) VALUES ('automations', $1) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`, [JSON.stringify({ ...DEFAULT_AUTOMATIONS, introduce: { ...DEFAULT_AUTOMATIONS.introduce, enabled: false } })]);   // these tests check the exact replies; the introduction has its own tests
     mgr = new ChannelManager(db, cfg, factory);
     app = await buildApp(cfg, db, mgr);
     for (const [e, r] of [['admin', 'admin'], ['sup', 'supervisor'], ['a1', 'agent']] as const) {
@@ -482,6 +484,7 @@ describe('safety flow live: areas, template endpoint, placeholders, profile, fil
   beforeAll(async () => {
     await db.query('DROP SCHEMA public CASCADE; CREATE SCHEMA public;');
     await migrate(db);
+    await db.query(`INSERT INTO settings (key, value) VALUES ('automations', $1) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`, [JSON.stringify({ ...DEFAULT_AUTOMATIONS, introduce: { ...DEFAULT_AUTOMATIONS.introduce, enabled: false } })]);   // these tests check the exact replies; the introduction has its own tests
     mgr = new ChannelManager(db, cfg, factory);
     app = await buildApp(cfg, db, mgr);
     for (const [e, r] of [['admin', 'admin'], ['sup', 'supervisor'], ['o1', 'agent'], ['o2', 'agent']] as const) {
@@ -597,6 +600,7 @@ describe('areas workbook import', () => {
   beforeAll(async () => {
     await db.query('DROP SCHEMA public CASCADE; CREATE SCHEMA public;');
     await migrate(db);
+    await db.query(`INSERT INTO settings (key, value) VALUES ('automations', $1) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`, [JSON.stringify({ ...DEFAULT_AUTOMATIONS, introduce: { ...DEFAULT_AUTOMATIONS.introduce, enabled: false } })]);   // these tests check the exact replies; the introduction has its own tests
     mgr = new ChannelManager(db, cfg, () => null);
     app = await buildApp(cfg, db, mgr);
     uid = (await db.query('INSERT INTO users (email,name,role,password_hash) VALUES ($1,$2,$3,$4) RETURNING id', ['boss@t.io', 'boss', 'admin', await hashPassword('correct-horse-battery')])).rows[0].id;

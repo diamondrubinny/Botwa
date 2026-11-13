@@ -45,6 +45,11 @@ export const automationsSchema = z.object({
     enabled: z.boolean(),
     text: text,
   }).default({ enabled: true, text: 'סגרנו את הפנייה לבקשתך. אם יעלה משהו נוסף, אפשר לכתוב לנו כאן בכל עת והיא תיפתח מחדש.' }),
+  /** when a person (an officer or an agent) takes the inquiry, they introduce themselves to the customer once */
+  introduce: z.object({
+    enabled: z.boolean(),
+    text: text.min(1),
+  }).default({ enabled: true, text: 'שלום {שם}, כאן {נציג}, {תפקיד}. אני אטפל בפנייתך מעכשיו ואחזור אליך בהקדם.' }),
 }).strict();
 export type Automations = z.infer<typeof automationsSchema>;
 
@@ -58,6 +63,7 @@ export const DEFAULT_AUTOMATIONS: Automations = {
   closing: { defaultOn: false, text: 'תודה שפנית אלינו, {שם}! אם יעלה משהו נוסף, אנחנו כאן.' },
   feedback: { enabled: false, question: 'נשמח לשמוע איך היה השירות: השיבו במספר מ-1 עד 5 (5 = מצוין).', thanks: 'תודה רבה על המשוב!', afterAuto: false },
   customerClose: { enabled: true, text: 'סגרנו את הפנייה לבקשתך. אם יעלה משהו נוסף, אפשר לכתוב לנו כאן בכל עת והיא תיפתח מחדש.' },
+  introduce: { enabled: true, text: 'שלום {שם}, כאן {נציג}, {תפקיד}. אני אטפל בפנייתך מעכשיו ואחזור אליך בהקדם.' },
 };
 
 export async function loadAutomations(db: Db): Promise<Automations> {
@@ -71,9 +77,9 @@ export interface AutoSender {
   notifyMessage(channelId: string, conversationId: string, messageId: string): void;
 }
 
-type ConvRow = AccessibleConversation & { contact_name: string | null; channel_label: string; agent_name: string | null };
+type ConvRow = AccessibleConversation & { contact_name: string | null; channel_label: string; agent_name: string | null; agent_title: string | null; agent_phone: string | null };
 const CONV = `SELECT c.id, c.channel_id, c.assigned_to, c.status, ct.external_id, ct.blocked, ct.opted_out, ch.type AS channel_type,
-                     ct.display_name AS contact_name, ch.label AS channel_label, u.name AS agent_name
+                     ct.display_name AS contact_name, ch.label AS channel_label, u.name AS agent_name, u.job_title AS agent_title, u.intro_phone AS agent_phone
                 FROM conversations c JOIN contacts ct ON ct.id = c.contact_id JOIN channels ch ON ch.id = c.channel_id LEFT JOIN users u ON u.id = c.assigned_to`;
 /** comment threads (public posts) never get automatic messages */
 const NOT_COMMENT = `ct.external_id !~ '@(fb|ig)comment$'`;
@@ -82,11 +88,11 @@ const NOT_COMMENT = `ct.external_id !~ '@(fb|ig)comment$'`;
  * Send one automatic message to a conversation if the rules allow it (not blocked, not opted out, inside the platform's
  * reply window). Returns false when it was not sent; the caller decides what that means (e.g. close anyway).
  */
-export async function sendAutomatic(db: Db, out: AutoSender, conv: ConvRow, body: string, kind: 'idle_reminder' | 'idle_close' | 'holding' | 'closing' | 'feedback' | 'feedback_thanks' | 'customer_close'): Promise<boolean> {
+export async function sendAutomatic(db: Db, out: AutoSender, conv: ConvRow, body: string, kind: 'idle_reminder' | 'idle_close' | 'holding' | 'closing' | 'feedback' | 'feedback_thanks' | 'customer_close' | 'introduce'): Promise<boolean> {
   if (!body.trim() || /@(fb|ig)comment$/.test(conv.external_id)) return false;
   if (await sendBlock(db, conv, (await loadSending(db)).replyWindowHours)) return false;
   const hours = await loadBusinessHours(db);
-  const textOut = renderCanned(body, { customerName: conv.contact_name, agentName: conv.agent_name ?? 'הצוות', hours, channelLabel: conv.channel_label });
+  const textOut = renderCanned(body, { customerName: conv.contact_name, agentName: conv.agent_name ?? 'הצוות', agentTitle: conv.agent_title, agentPhone: conv.agent_phone, hours, channelLabel: conv.channel_label });
   try {
     const sent = await out.sendText(conv.channel_id, conv.external_id, textOut, { background: true });
     const ins = await db.query(`INSERT INTO messages (conversation_id, direction, body, external_id, auto, automation) VALUES ($1,'out',$2,$3,true,$4) RETURNING id`, [conv.id, textOut, sent.externalMessageId ?? null, kind]);
@@ -143,6 +149,27 @@ export async function closeByCustomer(db: Db, out: AutoSender, convId: string, s
   await db.query('INSERT INTO conversation_notes (conversation_id, body) VALUES ($1, $2)', [convId, `הפנייה נסגרה לבקשת הלקוח ("${said.trim().slice(0, 80)}"). הודעה חדשה ממנו תפתח אותה מחדש.`]);
   await askFeedback(db, out, convId, 'customer').catch(() => false);
   return true;
+}
+
+/**
+ * The person who now holds the inquiry introduces themselves to the customer ("שלום, כאן דנה, ממונת בטיחות. אני אטפל בפנייתך"):
+ * once per person per inquiry, so a hand-over to someone else or a new inquiry introduces again, re-assigning the same person does not.
+ * Not for closed conversations, public comment threads, blocked or opted-out customers, or outside the platform's reply window.
+ */
+export async function introduceAgent(db: Db, out: AutoSender, convId: string): Promise<boolean> {
+  const a = (await loadAutomations(db)).introduce;
+  if (!a.enabled) return false;
+  const conv = (await db.query(`${CONV} WHERE c.id = $1 AND c.status = 'open' AND c.assigned_to IS NOT NULL AND ${NOT_COMMENT}`, [convId])).rows[0] as ConvRow | undefined;
+  if (!conv || !conv.assigned_to) return false;
+  const kase = (await db.query(`SELECT id FROM cases WHERE conversation_id = $1 AND closed_at IS NULL ORDER BY opened_at DESC LIMIT 1`, [convId])).rows[0]?.id as string | undefined;
+  // claim it first, so two quick assignments (routing + a person) cannot both send it
+  const claim = await db.query(
+    `UPDATE conversations SET introduced_to = $2, introduced_case = $3 WHERE id = $1 AND (introduced_to IS DISTINCT FROM $2 OR introduced_case IS DISTINCT FROM $3) RETURNING id`,
+    [convId, conv.assigned_to, kase ?? null]);
+  if (!claim.rowCount) return false;
+  const sent = await sendAutomatic(db, out, conv, a.text, 'introduce');
+  if (!sent) await db.query('UPDATE conversations SET introduced_to = NULL, introduced_case = NULL WHERE id = $1 AND introduced_to = $2', [convId, conv.assigned_to]);
+  return sent;
 }
 
 /** Rating 1-5 from a reply: a digit, or 1-5 stars. null when the reply is something else. */

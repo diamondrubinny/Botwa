@@ -19,7 +19,9 @@ describe('canned reply variables (pure)', () => {
     const ctx = { customerName: 'דנה\nלוי', agentName: 'יוסי', hours: DEFAULT_HOURS, channelLabel: 'ווצאפ ראשי', now: new Date('2026-11-09T10:00:00Z') };
     expect(renderCanned('שלום {שם}, כאן {נציג}. פתוחים {שעות}. ({ערוץ}) {name} {x}', ctx)).toBe('שלום דנה לוי, כאן יוסי. פתוחים א׳–ה׳ 09:00–17:00. (ווצאפ ראשי) דנה לוי {x}');
     expect(renderCanned('היום {תאריך}', ctx)).toContain('2026');
-    expect(renderCanned('שלום {שם}!', { ...ctx, customerName: null })).toBe('שלום !');
+    expect(renderCanned('שלום {שם}!', { ...ctx, customerName: null })).toBe('שלום!');   // an empty variable leaves no stray space
+    expect(renderCanned('כאן {נציג}, {תפקיד}. {טלפון נציג}', { ...ctx, agentTitle: 'ממונה בטיחות', agentPhone: '04-8291234' })).toBe('כאן יוסי, ממונה בטיחות. 04-8291234');
+    expect(renderCanned('כאן {נציג}, {תפקיד}.', ctx)).toBe('כאן יוסי.');
     expect(renderCanned('<b>{שם}</b>', { ...ctx, customerName: '<script>' })).toBe('<b><script></b>');   // no markup is interpreted here: the panel shows plain text
     expect(unknownVariables('{שם} {foo} {בר} {foo}')).toEqual(['foo', 'בר']);
   });
@@ -65,7 +67,7 @@ describe('canned replies API', () => {
     expect((await call('PUT', `/canned-replies/${a.json().id}`, 'agent', { title: 'z', body: 'z' })).statusCode).toBe(403);
     expect((await call('PUT', `/canned-replies/${a.json().id}`, 'admin', { title: 'ברכה חדשה', body: 'שלום {שם}', folder: 'פתיחה' })).json()).toMatchObject({ title: 'ברכה חדשה', body: 'שלום {שם}' });
     expect((await call('PUT', '/canned-replies/00000000-0000-4000-8000-000000000000', 'admin', { title: 'z', body: 'z' })).statusCode).toBe(404);
-    expect((await call('GET', '/canned-replies/variables', 'agent')).json().map((v: { name: string }) => v.name)).toEqual(['{שם}', '{נציג}', '{שעות}', '{תאריך}', '{ערוץ}']);
+    expect((await call('GET', '/canned-replies/variables', 'agent')).json().map((v: { name: string }) => v.name)).toEqual(['{שם}', '{נציג}', '{תפקיד}', '{טלפון נציג}', '{שעות}', '{תאריך}', '{ערוץ}']);
   });
 
   it('renders a reply for a conversation the agent can open, with the customer, the agent, the hours and the channel', async () => {

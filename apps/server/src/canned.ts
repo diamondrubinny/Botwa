@@ -2,7 +2,7 @@ import { isOpen, type BusinessHours } from './business-hours.js';
 
 /** The variables a canned reply may contain. Anything else in curly braces is left as typed so the agent sees it. */
 export const CANNED_VARIABLES = [
-  ['{שם}', 'שם הלקוח'], ['{נציג}', 'שם הנציג ששולח'], ['{שעות}', 'שעות הפעילות'], ['{תאריך}', 'התאריך היום'], ['{ערוץ}', 'שם הערוץ'],
+  ['{שם}', 'שם הלקוח'], ['{נציג}', 'שם הנציג ששולח'], ['{תפקיד}', 'התפקיד של הנציג'], ['{טלפון נציג}', 'הטלפון שהנציג בחר להציג'], ['{שעות}', 'שעות הפעילות'], ['{תאריך}', 'התאריך היום'], ['{ערוץ}', 'שם הערוץ'],
 ] as const;
 
 const DAYS = ['א׳', 'ב׳', 'ג׳', 'ד׳', 'ה׳', 'ו׳', 'ש׳'];
@@ -20,7 +20,7 @@ export function hoursSummary(h: BusinessHours): string {
   return groups.map((g) => `${g.from === g.to ? DAYS[g.from] : `${DAYS[g.from]}–${DAYS[g.to]}`} ${g.text}`).join(', ');
 }
 
-export interface CannedContext { customerName?: string | null; agentName: string; hours: BusinessHours; channelLabel?: string | null; now?: Date }
+export interface CannedContext { customerName?: string | null; agentName: string; agentTitle?: string | null; agentPhone?: string | null; hours: BusinessHours; channelLabel?: string | null; now?: Date }
 
 /** Fill the variables of a canned reply. Values are plain text (no markup is interpreted) and stay on one line. */
 export function renderCanned(body: string, c: CannedContext): string {
@@ -29,13 +29,17 @@ export function renderCanned(body: string, c: CannedContext): string {
   const vals: Record<string, string> = {
     'שם': one(c.customerName), 'name': one(c.customerName), 'נציג': one(c.agentName), 'agent': one(c.agentName),
     'שעות': hoursSummary(c.hours), 'hours': hoursSummary(c.hours), 'תאריך': date, 'date': date, 'ערוץ': one(c.channelLabel), 'channel': one(c.channelLabel),
+    'תפקיד': one(c.agentTitle), 'title': one(c.agentTitle), 'טלפון נציג': one(c.agentPhone), 'agent phone': one(c.agentPhone),
   };
-  return body.replace(/\{([^{}\n]{1,20})\}/g, (m, k: string) => (k in vals ? vals[k]! : m));
+  let empty = false;
+  const out = body.replace(/\{([^{}\n]{1,20})\}/g, (m, k: string) => { if (!(k in vals)) return m; if (!vals[k]) empty = true; return vals[k]!; });
+  // a variable with no value (no customer name, no role) must not leave "שלום , כאן דנה, ." behind
+  return empty ? out.replace(/[ \t]{2,}/g, ' ').replace(/[ \t]+([,.!?:;])/g, '$1').replace(/,([.!?:;,])/g, '$1').replace(/,\s*$/gm, '').trim() : out;
 }
 
 /** Variables in a body that are not known ones, to warn the author. */
 export function unknownVariables(body: string): string[] {
-  const known = new Set(['שם', 'name', 'נציג', 'agent', 'שעות', 'hours', 'תאריך', 'date', 'ערוץ', 'channel']);
+  const known = new Set(['שם', 'name', 'נציג', 'agent', 'תפקיד', 'title', 'טלפון נציג', 'agent phone', 'שעות', 'hours', 'תאריך', 'date', 'ערוץ', 'channel']);
   return [...new Set([...body.matchAll(/\{([^{}\n]{1,20})\}/g)].map((m) => m[1]!).filter((k) => !known.has(k)))];
 }
 

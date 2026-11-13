@@ -833,3 +833,4 @@ button.linkish { min-height: 36px; padding: 0 .2rem; border: 0; background: none
 :root[data-theme="dark"] .mchip.h-agent { background: #1e3a8a; color: #dbeafe; border-color: #3b5bdb; }
 :root[data-theme="dark"] .mchip.h-bot { background: #3b2a6b; color: #e9e3ff; border-color: #5b46a8; }
 .head-meta .mchip.handler { font-size: .8rem; }
+.intro-preview { background: var(--surface-2); border-radius: 12px; padding: .6rem .8rem; margin: .4rem 0 .8rem; white-space: pre-wrap; }

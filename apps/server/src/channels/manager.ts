@@ -32,7 +32,7 @@ import type { AdapterFactory, ChannelAdapter, ChannelStatus, ChannelType, Outbou
 import { TelegramAdapter } from './telegram.js';
 import { CLOUD_CREDS_KEY, newVerifyToken, WhatsAppCloudAdapter, type CloudCreds } from './whatsapp-cloud.js';
 import { EMAIL_CREDS_KEY, EmailAdapter, type EmailCreds } from './email.js';
-import { closeByCustomer, isCloseRequest, thankForFeedback } from '../automations.js';
+import { closeByCustomer, introduceAgent, isCloseRequest, thankForFeedback } from '../automations.js';
 import { composeAnswer, type KbAnswer } from '../kb/compose.js';
 import { loadPersona } from '../routes/branding.js';
 import { isCommentContact, META_CREDS_KEY, MetaMessagingAdapter, type CommentReplyMode, type MetaCreds } from './meta-messaging.js';
@@ -119,6 +119,9 @@ export class ChannelManager {
   standards?: StandardsImporter;
   /** automatic import of the fire-safety licensing requirements */
   fire?: FireImporter;
+
+  /** The person who now holds the conversation introduces themselves to the customer (see introduceAgent). Never throws. */
+  introduce(convId: string): Promise<boolean> { return introduceAgent(this.db, this, convId).catch(() => false); }
 
   /** Set by the app: called for each new customer message that reached staff (not blocked, not a duplicate). */
   onInbound?: (conversationId: string) => void;
@@ -368,10 +371,12 @@ export class ChannelManager {
             if (r.needsRouting) {
               const to = await autoAssign(this.db, r.conversationId).catch(() => null);
               if (to) await audit(this.db, { action: 'conversation.auto_assign', target: r.conversationId, meta: { to } }).catch(() => undefined);
-              if (to) this.onAssigned?.(r.conversationId, to);
+              if (to) { this.onAssigned?.(r.conversationId, to); void this.introduce(r.conversationId); }
             }
             await this.maybeAway(channelId, r.conversationId, m.externalContactId).catch(() => undefined);
           }
+          // a new inquiry that stays with the person who held the conversation: they introduce themselves again (no-op otherwise)
+          if (r.messageId && !stop && !isCommentContact(m.externalContactId)) await this.introduce(r.conversationId);
           if (r.messageId) this.emit({ channelId, type: 'message', conversationId: r.conversationId, messageId: r.messageId });
           if (r.messageId && !r.blocked) { this.onInbound?.(r.conversationId); this.hookMessage('message.received', r.conversationId, r.messageId); }
         },
@@ -893,7 +898,7 @@ export class ChannelManager {
       if (to) await audit(this.db, { action: 'conversation.topic_assign', target: convId, meta: { to, topic: topic.topic } }).catch(() => undefined);
     }
     if (!to) to = await autoAssign(this.db, convId).catch(() => null);
-    if (to) this.onAssigned?.(convId, to);
+    if (to) { this.onAssigned?.(convId, to); void this.introduce(convId); }
     if (to && !topic) await audit(this.db, { action: 'conversation.auto_assign', target: convId, meta: { to, via: 'bot' } }).catch(() => undefined);
     const hours = await loadBusinessHours(this.db);
     const closed = hours.enabled && !isOpen(hours, new Date());

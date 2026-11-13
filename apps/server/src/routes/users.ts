@@ -10,7 +10,7 @@ import { BUILTIN_ROLES, cleanPermissions, isSubset } from '../permissions.js';
 
 const idParam = z.object({ id: z.string().uuid() });
 const TEMP_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789';   // no look-alike characters
-const publicCols = 'id, email, username, name, role, active, available, totp_enabled AS "mfaEnabled", created_at AS "createdAt", (SELECT floor(extract(epoch FROM a.updated_at))::float8 FROM user_avatars a WHERE a.user_id = users.id) AS "avatarV"';
+const publicCols = 'id, email, username, name, role, active, available, job_title AS "jobTitle", totp_enabled AS "mfaEnabled", created_at AS "createdAt", (SELECT floor(extract(epoch FROM a.updated_at))::float8 FROM user_avatars a WHERE a.user_id = users.id) AS "avatarV"';
 
 export async function permissionsOfRole(db: Db, key: string): Promise<string[] | null> {
   const { rows } = await db.query('SELECT permissions, builtin FROM roles WHERE key = $1', [key]);
@@ -67,7 +67,7 @@ export function userRoutes(app: FastifyInstance, db: Db) {
   app.patch('/users/:id', { preHandler: manage }, async (req, reply) => {
     const p = idParam.safeParse(req.params);
     const body = z
-      .object({ name: z.string().min(1).max(100), role: z.string().min(1).max(41), active: z.boolean(), username: usernameSchema })
+      .object({ name: z.string().min(1).max(100), role: z.string().min(1).max(41), active: z.boolean(), username: usernameSchema, jobTitle: z.string().trim().max(80).transform((v) => v.replace(/[\r\n]+/g, ' ')) })
       .partial()
       .refine((o) => Object.keys(o).length > 0)
       .safeParse(req.body);
@@ -92,9 +92,10 @@ export function userRoutes(app: FastifyInstance, db: Db) {
     let rows;
     try {
       ({ rows } = await db.query(
-        `UPDATE users SET name = COALESCE($2, name), role = COALESCE($3, role), active = COALESCE($4, active), username = COALESCE($5, username), updated_at = now()
+        `UPDATE users SET name = COALESCE($2, name), role = COALESCE($3, role), active = COALESCE($4, active), username = COALESCE($5, username),
+                job_title = CASE WHEN $6::boolean THEN NULLIF($7, '') ELSE job_title END, updated_at = now()
           WHERE id = $1 RETURNING ${publicCols}`,
-        [id, b.name ?? null, b.role ?? null, b.active ?? null, b.username ?? null],
+        [id, b.name ?? null, b.role ?? null, b.active ?? null, b.username ?? null, b.jobTitle !== undefined, b.jobTitle ?? null],
       ));
     } catch (e) {
       if ((e as { code?: string }).code === '23505') return reply.code(409).send({ error: 'username_taken' });

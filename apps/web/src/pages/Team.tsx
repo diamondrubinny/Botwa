@@ -14,6 +14,7 @@ export function Team({ me }: { me: Me }) {
   const [roles, setRoles] = useState<RoleRow[]>([]);
   const [f, setF] = useState({ name: '', email: '', role: 'agent', password: '', username: '' });
   const [unFor, setUnFor] = useState<{ id: string; name: string; value: string } | null>(null);
+  const [jtFor, setJtFor] = useState<{ id: string; value: string } | null>(null);
   // you can only hand out roles whose permissions you hold yourself
   const assignable = roles.filter((r) => r.permissions.every((p) => me.permissions.includes(p)));
   usePoll(async () => { const r = await api<{ roles: RoleRow[] }>('GET', '/roles').catch(() => null); if (r) setRoles(r.roles); }, 60000);
@@ -68,7 +69,17 @@ export function Team({ me }: { me: Me }) {
             {users.map((u) => (
               <tr key={u.id}>
                 <th scope="row"><span className="row" style={{ flexWrap: 'nowrap' }}><Avatar userId={u.id} name={u.name} v={u.avatarV} size={32} />{u.name}</span>
-                  {isAdmin && assignable.some((r) => r.key === u.role) && <AvatarEditor compact userId={u.id} name={u.name} v={u.avatarV} uploadUrl={`/users/${u.id}/avatar`} onChanged={reload} />}</th>
+                  {isAdmin && assignable.some((r) => r.key === u.role) && <AvatarEditor compact userId={u.id} name={u.name} v={u.avatarV} uploadUrl={`/users/${u.id}/avatar`} onChanged={reload} />}
+                  {jtFor?.id === u.id ? (
+                    <form className="row" onSubmit={async (e) => { e.preventDefault(); await run(() => api('PATCH', `/users/${u.id}`, { jobTitle: jtFor.value })); setJtFor(null); }}>
+                      <label htmlFor={`jt-${u.id}`} className="sr-only">התפקיד ש{u.name} מוצג/ת בו ללקוחות</label>
+                      <input id={`jt-${u.id}`} maxLength={80} style={{ maxWidth: 220 }} value={jtFor.value} onChange={(e) => setJtFor({ ...jtFor, value: e.target.value })} placeholder="למשל: ממונה בטיחות" />
+                      <button type="submit">שמירה</button><button type="button" onClick={() => setJtFor(null)}>ביטול</button>
+                    </form>
+                  ) : (
+                    <small className="hint" style={{ display: 'block', fontWeight: 400 }}>{u.jobTitle || 'בלי תפקיד מוצג'}
+                      {isAdmin && assignable.some((r) => r.key === u.role) && <button type="button" style={{ minHeight: 32, marginInlineStart: '.4rem' }} onClick={() => setJtFor({ id: u.id, value: u.jobTitle ?? '' })}>שינוי<span className="sr-only"> התפקיד המוצג של {u.name}</span></button>}</small>
+                  )}</th>
                 <td dir="ltr">
                   {unFor?.id === u.id ? (
                     <form className="row" onSubmit={async (e) => { e.preventDefault(); await run(() => api('PATCH', `/users/${u.id}`, { username: unFor.value })); setUnFor(null); }}>

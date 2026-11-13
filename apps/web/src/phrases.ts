@@ -1,6 +1,6 @@
 // Ready phrasings for automatic messages, by situation. Common customer-service wording in Hebrew: polite, short, gender-neutral
 // where possible, and always leaving the door open. Variables: {שם} customer, {נציג} agent, {שעות} business hours, {ערוץ} channel.
-export type Situation = 'idleReminder' | 'idleClose' | 'holding' | 'closing' | 'customerClose';
+export type Situation = 'idleReminder' | 'idleClose' | 'holding' | 'closing' | 'customerClose' | 'introduce';
 export interface Phrase { style: string; text: string }
 
 export const PHRASES: Record<Situation, { title: string; items: Phrase[] }> = {
@@ -50,6 +50,16 @@ export const PHRASES: Record<Situation, { title: string; items: Phrase[] }> = {
       { style: 'רשמי', text: 'הפנייה נסגרה לבקשתך. לכל שאלה נוספת ניתן להשיב להודעה זו והפנייה תיפתח מחדש.' },
       { style: 'קצר', text: 'סגרנו את הפנייה 👍 אנחנו כאן אם צריך עוד משהו.' },
       { style: 'בטיחות', text: 'הפנייה נסגרה לבקשתך. תודה שפנית ליחידת הבטיחות. לכל שאלה נוספת, אנחנו כאן.' },
+    ],
+  },
+  introduce: {
+    title: 'הצגה: נציג/ה או ממונה לוקחים את הפנייה',
+    items: [
+      { style: 'חם', text: 'שלום {שם}, כאן {נציג}, {תפקיד}. אני אטפל בפנייתך מעכשיו ואחזור אליך בהקדם.' },
+      { style: 'רשמי', text: 'שלום {שם}, שמי {נציג}, {תפקיד}. פנייתך הועברה אליי ואני מטפל/ת בה.' },
+      { style: 'קצר', text: 'היי {שם}, {נציג} כאן 👋 אני ממשיך/ה איתך מכאן.' },
+      { style: 'עם טלפון', text: 'שלום {שם}, כאן {נציג}, {תפקיד}. אני אטפל בפנייתך. אם נוח יותר בטלפון: {טלפון נציג}.' },
+      { style: 'בטיחות', text: 'שלום {שם}, כאן {נציג}, {תפקיד} ביחידת הבטיחות. קיבלתי את פנייתך ואני מטפל/ת בה.' },
     ],
   },
 };

@@ -154,6 +154,7 @@ export function apiRoutes(app: FastifyInstance, db: Db, mgr: ChannelManager, cfg
     const r = await db.query(`UPDATE conversations SET assigned_to = $2, bot_state = CASE WHEN $2::uuid IS NOT NULL THEN 'human' ELSE bot_state END WHERE id = $1`, [p.data.id, b.data.userId]);
     if (!r.rowCount) return reply.code(404).send({ error: 'not_found' });
     mgr.hookConversation('conversation.assigned', p.data.id);
+    if (b.data.userId) void mgr.introduce(p.data.id);
     await audit(db, { action: 'api.assign', target: p.data.id, meta: { key: req.apiKey!.name, to: b.data.userId } });
     return { ok: true };
   });

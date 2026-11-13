@@ -1,3 +1,4 @@
+import { IntroCard } from '../components/IntroCard';
 import { PageTitle } from '../components/Illustration';
 import QRCode from 'qrcode';
 import { useState, type FormEvent } from 'react';
@@ -95,6 +96,8 @@ export function Account({ me, onChanged, onLogout }: { me: Me; onChanged: () => 
         </section>
       )}
       <p>{me.name} · {me.email} · {me.roleName}{me.username ? <> · שם משתמש: <bdi dir="ltr">@{me.username}</bdi></> : null}</p>
+      <IntroCard me={me} onChanged={onChanged} />
+
       <section className="card" aria-labelledby="av-h">
         <h2 id="av-h">תמונת פרופיל</h2>
         <p className="hint">מוצגת לצוות בלבד (לא ללקוחות). התמונה נחתכת לריבוע ומוקטנת בדפדפן, ופרטי מיקום ומצלמה מוסרים לפני השמירה.</p>

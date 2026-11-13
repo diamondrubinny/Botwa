@@ -9,6 +9,7 @@ interface Automations {
   closing: { defaultOn: boolean; text: string };
   feedback: { enabled: boolean; question: string; thanks: string; afterAuto: boolean };
   customerClose: { enabled: boolean; text: string };
+  introduce: { enabled: boolean; text: string };
 }
 
 /** A text box with "choose a ready phrasing" for its situation. */
@@ -94,6 +95,13 @@ export function AutomationsCard({ canEdit }: { canEdit: boolean }) {
           </select>
           <textarea id="au-fq" rows={2} maxLength={1000} value={a.feedback.question} disabled={off} required onChange={(e) => set('feedback', { question: e.target.value })} /></div>
         <div className="field"><label htmlFor="au-ft">תודה על המשוב</label><input id="au-ft" maxLength={300} value={a.feedback.thanks} disabled={off} onChange={(e) => set('feedback', { thanks: e.target.value })} /></div>
+      </fieldset>
+
+      <fieldset>
+        <legend>הצגת המטפל/ת ללקוח</legend>
+        <label><input type="checkbox" role="switch" checked={a.introduce?.enabled ?? true} disabled={off} onChange={(e) => set('introduce', { enabled: e.target.checked })} /> כשפנייה עוברת לנציג/ה או לממונה, להציג אותם ללקוח</label>
+        <p className="hint">נשלח פעם אחת לכל מטפל/ת בכל פנייה: בשיוך אוטומטי, כשהבוט מעביר, כשמישהו לוקח את הפנייה או מעביר אותה לעמית. משתנים: {'{נציג}'} שם, {'{תפקיד}'} התפקיד (כל אחד ממלא ב"החשבון שלי"), {'{טלפון נציג}'} טלפון עבודה אם מולא, {'{שם}'} שם הלקוח. משתנה בלי ערך נשמט יחד עם הפסיק שלו.</p>
+        <PhraseField id="au-in" label="הודעת ההצגה" value={a.introduce?.text ?? ''} onChange={(v) => set('introduce', { text: v })} situation="introduce" disabled={off || !(a.introduce?.enabled ?? true)} required />
       </fieldset>
 
       <fieldset>

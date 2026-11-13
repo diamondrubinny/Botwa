@@ -1,3 +1,4 @@
+import { DEFAULT_AUTOMATIONS } from '../src/automations.js';
 import http from 'node:http';
 import { randomBytes } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -65,6 +66,7 @@ beforeAll(async () => {
   });
   await db.query('DROP SCHEMA public CASCADE; CREATE SCHEMA public;');
   await migrate(db);
+  await db.query(`INSERT INTO settings (key, value) VALUES ('automations', $1) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`, [JSON.stringify({ ...DEFAULT_AUTOMATIONS, introduce: { ...DEFAULT_AUTOMATIONS.introduce, enabled: false } })]);   // these tests check the exact replies; the introduction has its own tests
   mgr = new ChannelManager(db, cfg2, factory);
   app = await buildApp(cfg2, db, mgr);
   for (const [e, r] of [['admin', 'admin'], ['sup', 'supervisor'], ['a1', 'agent']] as const) {
