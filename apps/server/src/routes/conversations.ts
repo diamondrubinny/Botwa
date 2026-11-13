@@ -11,6 +11,7 @@ import { loadSending, PolicyRejected, SendError } from '../channels/sender.js';
 import type { Db } from '../db.js';
 import { MediaService } from '../media/store.js';
 import { isCommentContact } from '../channels/meta-messaging.js';
+import { sendClosingMessage } from '../automations.js';
 
 const idParam = z.object({ id: z.string().uuid() });
 export function conversationRoutes(app: FastifyInstance, db: Db, mgr: ChannelManager, media: MediaService) {
@@ -210,15 +211,17 @@ export function conversationRoutes(app: FastifyInstance, db: Db, mgr: ChannelMan
 
   app.post('/conversations/:id/status', { preHandler: any }, async (req, reply) => {
     const p = idParam.safeParse(req.params);
-    const b = z.object({ status: z.enum(['open', 'closed']) }).safeParse(req.body);
+    const b = z.object({ status: z.enum(['open', 'closed']), closingMessage: z.boolean().optional() }).safeParse(req.body);
     if (!p.success || !b.success) return reply.code(400).send({ error: 'bad_request' });
     if (!(await loadAccessible(db, req.user!, p.data.id))) return reply.code(404).send({ error: 'not_found' });
+    // the closing message goes out before the status changes (a closed conversation is still the same chat for the customer)
+    const closingSent = b.data.status === 'closed' && b.data.closingMessage ? await sendClosingMessage(db, mgr, p.data.id) : undefined;
     await db.query(
       `UPDATE conversations SET status = $2, bot_state = CASE WHEN $2 = 'closed' THEN NULL ELSE bot_state END, flow_state = CASE WHEN $2 = 'closed' THEN NULL ELSE flow_state END, bot_invalid = CASE WHEN $2 = 'closed' THEN 0 ELSE bot_invalid END WHERE id = $1`,
       [p.data.id, b.data.status],
     );
     mgr.hookConversation('conversation.status_changed', p.data.id);
-    return { ok: true };
+    return { ok: true, ...(closingSent !== undefined ? { closingSent } : {}) };
   });
 
   // Snooze: hide until a time (minutes from now, max 30 days) or wake now with minutes = 0. A new customer message wakes it automatically.

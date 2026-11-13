@@ -3,6 +3,7 @@ import { audit } from '../audit.js';
 import { requireAuth } from '../auth.js';
 import { businessHoursSchema, DEFAULT_HOURS, type BusinessHours } from '../business-hours.js';
 import type { Db } from '../db.js';
+import { automationsSchema, loadAutomations } from '../automations.js';
 import { botSchema, formatMenu, loadBot } from '../bot.js';
 import { loadSending, sendingSchema } from '../channels/sender.js';
 import { loadRouting, routingSchema } from '../routing.js';
@@ -28,6 +29,18 @@ export function settingsRoutes(app: FastifyInstance, db: Db, mgrRef: Pick<Channe
     if (!b.success) return reply.code(400).send({ error: 'bad_request' });
     await db.query(`INSERT INTO settings (key, value) VALUES ('sla', $1) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()`, [JSON.stringify(b.data)]);
     await audit(db, { actorId: req.user!.id, action: 'settings.sla', ip: req.ip, meta: b.data });
+    return b.data;
+  });
+
+  app.get('/settings/automations', { preHandler: view }, async () => loadAutomations(db));
+  // what every agent needs when closing a conversation: whether to offer the closing message and its text
+  app.get('/automations/closing', { preHandler: requireAuth(db) }, async () => (await loadAutomations(db)).closing);
+  app.put('/settings/automations', { preHandler: manage }, async (req, reply) => {
+    const b = automationsSchema.safeParse(req.body);
+    if (!b.success) return reply.code(400).send({ error: 'bad_request' });
+    if (b.data.idle.enabled && b.data.idle.reminderAfter > 0 && !b.data.idle.reminderText) return reply.code(400).send({ error: 'automation_text_required' });
+    await db.query(`INSERT INTO settings (key, value) VALUES ('automations', $1) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()`, [JSON.stringify(b.data)]);
+    await audit(db, { actorId: req.user!.id, action: 'settings.automations', ip: req.ip, meta: { idle: b.data.idle.enabled, holding: b.data.holding.enabled } });
     return b.data;
   });
 

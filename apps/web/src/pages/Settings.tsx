@@ -8,6 +8,7 @@ import { LegalDocs } from '../components/LegalDocs';
 import { ContactsCsv } from '../components/ContactsCsv';
 import { ForwardRules } from '../components/ForwardRules';
 import { ConfirmDialog } from '../components/ConfirmDialog';
+import { AutomationsCard } from '../components/AutomationsCard';
 import { usePoll } from '../hooks';
 import { errText } from '../strings';
 
@@ -67,6 +68,7 @@ export function Settings({ me }: { me: Me }) {
       {canView && !canEdit && <p className="banner" role="note">צפייה בלבד. אין לכם הרשאה לשנות הגדרות.</p>}
       {canView && h && (
       <fieldset disabled={!canEdit} style={{ border: 0, padding: 0, margin: 0 }}>
+      {canView && <AutomationsCard canEdit={canEdit} />}
       {sla && (
         <form className="card" onSubmit={saveSla} aria-labelledby="sla-h">
           <h2 id="sla-h">יעד זמן מענה (SLA)</h2>

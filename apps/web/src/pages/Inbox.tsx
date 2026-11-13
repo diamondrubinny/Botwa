@@ -87,6 +87,9 @@ export function Inbox({ me }: { me: Me }) {
   const brand = useBrand();
   const [commentReply, setCommentReply] = useState<'public' | 'private' | null>(null);
   const [hideOpen, setHideOpen] = useState(false);
+  const [closing, setClosing] = useState<{ defaultOn: boolean; text: string } | null>(null);
+  const [closeAsk, setCloseAsk] = useState<{ send: boolean } | null>(null);
+  useEffect(() => { void api<{ defaultOn: boolean; text: string }>('GET', '/automations/closing').then(setClosing).catch(() => undefined); }, []);
   const [pinned, setPinned] = useState<Conversation | null>(null);
   const [sugg, setSugg] = useState<{ sourceId: string; title: string; url: string | null; score: number; text: string }[]>([]);
   const [safety, setSafety] = useState<{ topics: string[]; hits: { topic: string; sourceId: string; title: string; reference: string | null; url: string | null; excerpt: string; instrument: string }[] }>({ topics: [], hits: [] });
@@ -120,7 +123,7 @@ export function Inbox({ me }: { me: Me }) {
   const sel = convs.find((c) => c.id === selId) ?? (pinned && pinned.id === selId ? pinned : null);
   /** a public comment thread (Facebook / Instagram post comments): the reply is public or private, chosen each time */
   const isComment = !!sel && /@(fb|ig)comment$/.test(sel.contactId);
-  useEffect(() => { setCommentReply(null); }, [selId]);
+  useEffect(() => { setCommentReply(null); setCloseAsk(null); }, [selId]);
   // lets the shell hide floating widgets while a conversation fills the phone screen
   useEffect(() => { document.body.classList.toggle('chat-open', !!sel); return () => document.body.classList.remove('chat-open'); }, [sel]);
 
@@ -414,11 +417,25 @@ export function Inbox({ me }: { me: Me }) {
                 {targets.length > 0 && <button type="button" aria-expanded={!!fwd} onClick={() => setFwd(fwd ? null : { rule: targets[0]!.id, note: '', msg: '' })}>העברה לקבוצה</button>}
                 {isComment && <button type="button" className="danger" onClick={() => setHideOpen(true)}>הסתרת התגובה מהציבור</button>}
                 <button onClick={() => act(async () => { await api('POST', `/conversations/${sel.id}/unread`); setSelId(null); })}>סימון כלא נקראה</button>
-                <button onClick={() => act(() => api('POST', `/conversations/${sel.id}/status`, { status: sel.status === 'open' ? 'closed' : 'open' }))}>
+                <button aria-expanded={sel.status === 'open' && closing?.text && !isComment ? !!closeAsk : undefined} onClick={() => {
+                  if (sel.status === 'open' && closing?.text && !isComment) { setCloseAsk(closeAsk ? null : { send: closing.defaultOn }); return; }
+                  void act(() => api('POST', `/conversations/${sel.id}/status`, { status: sel.status === 'open' ? 'closed' : 'open' }));
+                }}>
                   {sel.status === 'open' ? 'סגירת שיחה' : 'פתיחה מחדש'}
                 </button>
               </div>
 
+              {closeAsk && sel && closing && (
+                <form className="card close-ask" style={{ margin: '.6rem .9rem 0' }} aria-label="סגירת שיחה" onSubmit={(e) => {
+                  e.preventDefault();
+                  const send = closeAsk.send; setCloseAsk(null);
+                  void act(() => api('POST', `/conversations/${sel.id}/status`, { status: 'closed', closingMessage: send }));
+                }}>
+                  <label><input type="checkbox" checked={closeAsk.send} onChange={(e) => setCloseAsk({ send: e.target.checked })} /> לשלוח ללקוח הודעת סיום</label>
+                  {closeAsk.send && <p className="hint close-preview" dir="auto">{closing.text}</p>}
+                  <div className="row"><button className="primary" type="submit">סגירת השיחה</button><button type="button" onClick={() => setCloseAsk(null)}>ביטול</button></div>
+                </form>
+              )}
               {tp && sel && (() => {
                 const t = tpls.find((x) => `${x.name}|${x.language}` === tp.key) ?? tpls[0]!;
                 const preview = t.body.replace(/\{\{(\d+)\}\}/g, (_m, n: string) => tp.values[Number(n) - 1] || `{{${n}}}`);

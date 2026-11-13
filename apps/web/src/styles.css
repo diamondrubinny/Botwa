@@ -774,3 +774,5 @@ button.linkish { min-height: 36px; padding: 0 .2rem; border: 0; background: none
 .reply-warn { margin: .2rem 0 0; padding: .45rem .6rem; border-radius: 10px; border: 1px solid color-mix(in srgb, var(--warn) 40%, var(--border)); background: color-mix(in srgb, var(--warn) 9%, var(--surface)); color: var(--text); font-size: .92rem; }
 .mchip.comment { background: color-mix(in srgb, var(--warn) 12%, var(--surface)); }
 .msg .mchip.reply-public, .msg .mchip.reply-private { display: inline-block; margin-bottom: .2rem; font-size: .78rem; }
+.close-ask label { display: flex; gap: .5rem; align-items: center; min-height: 40px; }
+.close-preview { margin: .2rem 0 .5rem; padding: .5rem .7rem; border-radius: 10px; background: var(--surface-2); white-space: pre-wrap; }
