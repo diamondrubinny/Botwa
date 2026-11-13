@@ -12,7 +12,7 @@ const MAX_GROUP = 20;
 const VISIBLE = (t: string) => `($2::boolean OR ${t}.assigned_to IS NULL OR ${t}.assigned_to = $3)`;
 
 const ROW = `c.id, c.status, c.last_message_at AS "lastMessageAt", ch.label AS "channelLabel", ch.type AS "channelType",
-  ct.id AS "contactRowId", ct.display_name AS "contactName", au.name AS "assignedName",
+  ct.id AS "contactRowId", ct.display_name AS "contactName", COALESCE(au.name_he, au.name) AS "assignedName",
   (SELECT COALESCE(NULLIF(m.body, ''), '[קובץ מצורף]') FROM messages m WHERE m.conversation_id = c.id ORDER BY m.created_at DESC LIMIT 1) AS "lastMessage"`;
 const JOINS = `JOIN contacts ct ON ct.id = c.contact_id JOIN channels ch ON ch.id = c.channel_id LEFT JOIN users au ON au.id = c.assigned_to`;
 
@@ -68,7 +68,7 @@ export function peopleRoutes(app: FastifyInstance, db: Db) {
                  OR (me.external_id LIKE '%@s.whatsapp.net' AND ct.external_id LIKE '%@s.whatsapp.net' AND split_part(ct.external_id, '@', 1) = split_part(me.external_id, '@', 1)))
             AND ${VISIBLE('c')})
        SELECT k.id, k.number, k.conversation_id AS "conversationId", k.opened_at AS "openedAt", k.closed_at AS "closedAt", k.close_kind AS "closeKind",
-              k.first_message AS "firstMessage", k.rating, cb.name AS "closedByName", au.name AS "assignedName", ch.label AS "channelLabel", ch.type AS "channelType",
+              k.first_message AS "firstMessage", k.rating, COALESCE(cb.name_he, cb.name) AS "closedByName", COALESCE(au.name_he, au.name) AS "assignedName", ch.label AS "channelLabel", ch.type AS "channelType",
               (SELECT count(*)::int FROM messages m WHERE m.conversation_id = k.conversation_id AND m.created_at >= k.opened_at - interval '1 second' AND (k.closed_at IS NULL OR m.created_at <= k.closed_at)) AS messages
          FROM cases k JOIN convs ON convs.id = k.conversation_id JOIN conversations c ON c.id = k.conversation_id JOIN channels ch ON ch.id = c.channel_id
          LEFT JOIN users cb ON cb.id = k.closed_by LEFT JOIN users au ON au.id = COALESCE(k.assigned_to, CASE WHEN k.closed_at IS NULL THEN c.assigned_to END)
@@ -85,7 +85,7 @@ export function peopleRoutes(app: FastifyInstance, db: Db) {
     const k = (await db.query('SELECT conversation_id, opened_at, closed_at FROM cases WHERE id = $1', [p.data.id])).rows[0];
     if (!k || !(await loadAccessible(db, req.user!, k.conversation_id))) return reply.code(404).send({ error: 'not_found' });
     const { rows } = await db.query(
-      `SELECT m.id, m.direction, m.body, m.created_at AS "createdAt", m.auto, u.name AS "senderName"
+      `SELECT m.id, m.direction, m.body, m.created_at AS "createdAt", m.auto, COALESCE(u.name_he, u.name) AS "senderName"
          FROM messages m LEFT JOIN users u ON u.id = m.sender_user_id
         WHERE m.conversation_id = $1 AND m.created_at >= $2::timestamptz - interval '1 second' AND ($3::timestamptz IS NULL OR m.created_at <= $3::timestamptz + interval '1 second')
         ORDER BY m.created_at LIMIT 500`,

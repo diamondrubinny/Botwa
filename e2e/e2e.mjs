@@ -54,11 +54,14 @@ check('sign-out button is inside the visible window', !!outBox && outBox.y >= 0 
 await page.setViewportSize({ width: 1280, height: 720 });
 check('account page offers sign-out and sign-out everywhere', await page.isVisible('main button:text-is("התנתקות")') && await page.isVisible('main button:has-text("התנתקות מכל המכשירים")'));
 // how I am introduced to customers when I take an inquiry: role and an optional work phone, with a live preview
+await page.fill('#intro-he', 'Admin');
+check('intro: a Hebrew name must contain Hebrew letters', (await page.getAttribute('#intro-he', 'aria-invalid')) === 'true');
+await page.fill('#intro-he', 'מנהלת המערכת');
 await page.fill('#intro-title', 'ממונת בטיחות, הפקולטה לכימיה');
 await page.fill('#intro-phone', 'not a phone');
 check('intro: a wrong phone is flagged and cannot be saved', await page.isDisabled('section[aria-labelledby="intro-h"] button[type=submit]') && (await page.getAttribute('#intro-phone', 'aria-invalid')) === 'true');
 await page.fill('#intro-phone', '04-8291234');
-check('intro: the preview shows the name and the role', (await page.textContent('.intro-preview')).includes('ממונת בטיחות, הפקולטה לכימיה. אני אטפל בפנייתך'));
+check('intro: the preview shows the Hebrew name and the role', (await page.textContent('.intro-preview')).includes('כאן מנהלת המערכת, ממונת בטיחות, הפקולטה לכימיה. אני אטפל בפנייתך'));
 await axe('account: how I am introduced');
 await page.click('section[aria-labelledby="intro-h"] button[type=submit]');
 await page.waitForSelector('section[aria-labelledby="intro-h"] [role=status].ok');

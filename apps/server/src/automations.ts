@@ -79,7 +79,7 @@ export interface AutoSender {
 
 type ConvRow = AccessibleConversation & { contact_name: string | null; channel_label: string; agent_name: string | null; agent_title: string | null; agent_phone: string | null };
 const CONV = `SELECT c.id, c.channel_id, c.assigned_to, c.status, ct.external_id, ct.blocked, ct.opted_out, ch.type AS channel_type,
-                     ct.display_name AS contact_name, ch.label AS channel_label, u.name AS agent_name, u.job_title AS agent_title, u.intro_phone AS agent_phone
+                     ct.display_name AS contact_name, ch.label AS channel_label, COALESCE(u.name_he, u.name) AS agent_name, u.job_title AS agent_title, u.intro_phone AS agent_phone
                 FROM conversations c JOIN contacts ct ON ct.id = c.contact_id JOIN channels ch ON ch.id = c.channel_id LEFT JOIN users u ON u.id = c.assigned_to`;
 /** comment threads (public posts) never get automatic messages */
 const NOT_COMMENT = `ct.external_id !~ '@(fb|ig)comment$'`;

@@ -18,13 +18,13 @@ export async function api<T = unknown>(method: string, url: string, body?: unkno
 
 export type Role = string; // role key: admin | supervisor | agent | custom (r_xxxx)
 export interface Me {
-  available?: boolean; id: string; email: string; username?: string; jobTitle?: string | null; introPhone?: string | null; avatarV?: number | null; name: string; role: Role; roleName: string; permissions: string[]; passkeys: number;
+  available?: boolean; id: string; email: string; username?: string; nameHe?: string | null; jobTitle?: string | null; introPhone?: string | null; avatarV?: number | null; name: string; role: Role; roleName: string; permissions: string[]; passkeys: number;
   mfaEnabled: boolean; mfaEnrollmentRequired: boolean; passwordChangeRequired?: boolean;
 }
 export const can = (me: Pick<Me, 'permissions'>, p: string) => me.permissions.includes(p);
 export interface RoleRow { key: string; name: string; permissions: string[]; builtin: boolean; mfaRequired: boolean; userCount: number }
 export interface PasskeyRow { id: string; name: string; deviceType: string | null; backedUp: boolean; createdAt: string; lastUsedAt: string | null }
-export interface UserRow { available?: boolean; id: string; email: string; username?: string; jobTitle?: string | null; avatarV?: number | null; name: string; role: Role; active: boolean; mfaEnabled: boolean }
+export interface UserRow { available?: boolean; id: string; email: string; username?: string; nameHe?: string | null; jobTitle?: string | null; avatarV?: number | null; name: string; role: Role; active: boolean; mfaEnabled: boolean }
 export type ChannelKind = 'whatsapp' | 'whatsapp_cloud' | 'telegram' | 'webchat' | 'messenger' | 'instagram' | 'email';
 export const CHANNEL_NAMES: Record<ChannelKind, string> = { whatsapp: 'ווצאפ', whatsapp_cloud: 'ווצאפ רשמי (Cloud API)', telegram: 'טלגרם', webchat: 'צ׳אט באתר', messenger: 'Messenger (פייסבוק)', instagram: 'Instagram', email: 'אימייל' };
 export interface Channel { id: string; type: ChannelKind; label: string; status: string }

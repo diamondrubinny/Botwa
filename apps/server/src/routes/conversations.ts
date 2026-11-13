@@ -43,7 +43,7 @@ export function conversationRoutes(app: FastifyInstance, db: Db, mgr: ChannelMan
               EXISTS (SELECT 1 FROM conversation_stars cs WHERE cs.conversation_id = c.id AND cs.user_id = $3) AS "starred",
               (SELECT CASE WHEN lm.direction = 'in' AND c.status = 'open' AND c.bot_state IS DISTINCT FROM 'menu' THEN lm.created_at END
                  FROM messages lm WHERE lm.conversation_id = c.id AND NOT lm.auto ORDER BY lm.created_at DESC LIMIT 1) AS "waitingSince",
-              COALESCE((SELECT json_agg(json_build_object('id', t.id, 'name', t.name) ORDER BY lower(t.name)) FROM conversation_tags ctg JOIN tags t ON t.id = ctg.tag_id WHERE ctg.conversation_id = c.id), '[]'::json) AS tags, ch.type AS "channelType", au.name AS "assignedName",
+              COALESCE((SELECT json_agg(json_build_object('id', t.id, 'name', t.name) ORDER BY lower(t.name)) FROM conversation_tags ctg JOIN tags t ON t.id = ctg.tag_id WHERE ctg.conversation_id = c.id), '[]'::json) AS tags, ch.type AS "channelType", COALESCE(au.name_he, au.name) AS "assignedName",
               (SELECT COALESCE(NULLIF(m.body, ''), '[קובץ מצורף]') FROM messages m WHERE m.conversation_id = c.id ORDER BY created_at DESC LIMIT 1) AS "lastMessage"
          FROM conversations c JOIN contacts ct ON ct.id = c.contact_id
               JOIN channels ch ON ch.id = c.channel_id LEFT JOIN users au ON au.id = c.assigned_to
@@ -83,8 +83,8 @@ export function conversationRoutes(app: FastifyInstance, db: Db, mgr: ChannelMan
     if (!p.success || !q.success) return reply.code(400).send({ error: 'bad_request' });
     if (!(await loadAccessible(db, req.user!, p.data.id))) return reply.code(404).send({ error: 'not_found' });
     const { rows } = await db.query(
-      `SELECT m.id, m.direction, m.body, m.sender_user_id AS "senderUserId", u.name AS "senderName", m.created_at AS "createdAt", m.auto, m.reply_mode AS "replyMode",
-              m.our_reaction AS "ourReaction", CASE WHEN m.our_reaction IS NULL THEN NULL ELSE COALESCE(ru.name, 'אוטומטית') END AS "ourReactionBy",
+      `SELECT m.id, m.direction, m.body, m.sender_user_id AS "senderUserId", COALESCE(u.name_he, u.name) AS "senderName", m.created_at AS "createdAt", m.auto, m.reply_mode AS "replyMode",
+              m.our_reaction AS "ourReaction", CASE WHEN m.our_reaction IS NULL THEN NULL ELSE COALESCE(ru.name_he, ru.name, 'אוטומטית') END AS "ourReactionBy",
               CASE WHEN a.id IS NULL THEN NULL ELSE json_build_object('id', a.id, 'kind', a.kind, 'mime', a.mime, 'size', a.size,
                 'fileName', a.file_name, 'status', a.status, 'detail', a.detail) END AS attachment
          FROM messages m LEFT JOIN users u ON u.id = m.sender_user_id LEFT JOIN users ru ON ru.id = m.our_reaction_by LEFT JOIN attachments a ON a.message_id = m.id
@@ -346,8 +346,8 @@ export function conversationRoutes(app: FastifyInstance, db: Db, mgr: ChannelMan
     const c = (await db.query('SELECT body FROM canned_replies WHERE id = $1', [p.data.id])).rows[0];
     if (!c) return reply.code(404).send({ error: 'not_found' });
     const info = (await db.query(`SELECT ct.display_name AS name, ch.label FROM conversations v JOIN contacts ct ON ct.id = v.contact_id JOIN channels ch ON ch.id = v.channel_id WHERE v.id = $1`, [conv.id])).rows[0];
-    const me = (await db.query('SELECT job_title, intro_phone FROM users WHERE id = $1', [req.user!.id])).rows[0];
-    return { text: renderCanned(c.body, { customerName: info?.name, agentName: req.user!.name, agentTitle: me?.job_title, agentPhone: me?.intro_phone, hours: await loadBusinessHours(db), channelLabel: info?.label }) };
+    const me = (await db.query('SELECT job_title, intro_phone, name_he FROM users WHERE id = $1', [req.user!.id])).rows[0];
+    return { text: renderCanned(c.body, { customerName: info?.name, agentName: me?.name_he || req.user!.name, agentTitle: me?.job_title, agentPhone: me?.intro_phone, hours: await loadBusinessHours(db), channelLabel: info?.label }) };
   });
 
   // Privacy: data-subject export / erasure for one contact (admin only, audited).

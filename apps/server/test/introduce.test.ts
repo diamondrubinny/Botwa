@@ -38,7 +38,7 @@ beforeAll(async () => {
   const factory: AdapterFactory = (_t, c) => new Fake(c);
   mgr = new ChannelManager(db, cfg, factory);
   app = await buildApp(cfg, db, mgr);
-  for (const [e, name, role] of [['admin@t.io', 'מנהלת', 'admin'], ['dana@t.io', 'דנה כהן', 'agent'], ['avi@t.io', 'אבי לוי', 'agent']] as const) {
+  for (const [e, name, role] of [['admin@t.io', 'מנהלת', 'admin'], ['dana@t.io', 'דנה כהן', 'agent'], ['avi@t.io', 'Avi Levi', 'agent']] as const) {
     ids[e] = (await db.query('INSERT INTO users (email,name,role,password_hash) VALUES ($1,$2,$3,$4) RETURNING id', [e, name, role, await hashPassword(PW)])).rows[0].id;
     cookies[e] = `botwa_sid=${(await app.inject({ method: 'POST', url: '/auth/login', payload: { email: e, password: PW }, remoteAddress: `10.77.9.${++ip}`, headers: { origin: ORIGIN } })).cookies[0]!.value}`;
   }
@@ -55,6 +55,12 @@ describe('the handler introduces themselves to the customer', () => {
     expect((await call('dana@t.io', 'PUT', '/auth/me/intro', { jobTitle: 'x', introPhone: 'call me' })).statusCode).toBe(400);
     expect((await call('dana@t.io', 'PUT', '/auth/me/intro', { jobTitle: 'x'.repeat(81), introPhone: null })).statusCode).toBe(400);
     expect((await call('admin@t.io', 'PATCH', `/users/${ids['avi@t.io']}`, { jobTitle: 'נציג שירות' })).json().jobTitle).toBe('נציג שירות');
+    // a Hebrew display name for an account whose name is in English: set by the person or by an admin, must contain Hebrew
+    expect((await call('avi@t.io', 'PUT', '/auth/me/intro', { nameHe: 'Avi', jobTitle: 'נציג שירות', introPhone: null })).statusCode).toBe(400);
+    expect((await call('avi@t.io', 'PUT', '/auth/me/intro', { nameHe: 'אבי לוי', jobTitle: 'נציג שירות', introPhone: null })).json().nameHe).toBe('אבי לוי');
+    expect((await call('avi@t.io', 'PUT', '/auth/me/intro', { jobTitle: 'נציג שירות', introPhone: null })).json().nameHe).toBe('אבי לוי');   // omitted: kept
+    expect((await call('admin@t.io', 'PATCH', `/users/${ids['avi@t.io']}`, { nameHe: 'abc' })).statusCode).toBe(400);
+    expect((await call('admin@t.io', 'PATCH', `/users/${ids['avi@t.io']}`, { nameHe: 'אבי לוי' })).json().nameHe).toBe('אבי לוי');
     expect((await call('avi@t.io', 'PATCH', `/users/${ids['avi@t.io']}`, { jobTitle: 'מנכ״ל' })).statusCode).toBe(403);
   });
 
@@ -69,7 +75,11 @@ describe('the handler introduces themselves to the customer', () => {
     expect(await intros(conv)).toHaveLength(1);
     // hand-over to a colleague: they introduce themselves
     expect((await call('dana@t.io', 'POST', `/conversations/${conv}/assign`, { userId: ids['avi@t.io'], note: 'לטיפולך, שאלה על עבודה בגובה' })).statusCode).toBe(200);
-    expect((await intros(conv))[1]).toBe('שלום יוסי, כאן אבי לוי, נציג שירות. אני אטפל בפנייתך מעכשיו ואחזור אליך בהקדם.');
+    expect((await intros(conv))[1]).toBe('שלום יוסי, כאן אבי לוי, נציג שירות. אני אטפל בפנייתך מעכשיו ואחזור אליך בהקדם.');   // the Hebrew name, not "Avi Levi"
+    const row = ((await call('admin@t.io', 'GET', '/conversations?status=open')).json() as { id: string; assignedName: string }[]).find((c) => c.id === conv)!;
+    expect(row.assignedName).toBe('אבי לוי');                                                   // the inbox shows the handler in Hebrew too
+    const hist = (await call('admin@t.io', 'GET', `/conversations/${conv}/cases`)).json();
+    expect(hist[0].assignedName).toBe('אבי לוי');
     // closed; the customer opens a new inquiry that stays with the same person: introduced again, once
     await call('admin@t.io', 'POST', `/conversations/${conv}/status`, { status: 'closed' });
     await say('972500000201', 'עוד שאלה');

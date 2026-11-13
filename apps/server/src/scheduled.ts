@@ -28,7 +28,7 @@ export async function sendDueScheduled(db: Db, mgr: ChannelManager): Promise<num
   const sending = await loadSending(db);
   for (const { id } of due) {
     const r = (await db.query(
-      `SELECT s.id, s.body, s.send_at, s.created_by, u.name AS "agentName", c.id AS conv_id, c.channel_id, ct.external_id, ct.display_name, ct.blocked, ct.opted_out, ch.type AS channel_type, ch.label AS channel_label, c.assigned_to
+      `SELECT s.id, s.body, s.send_at, s.created_by, COALESCE(u.name_he, u.name) AS "agentName", c.id AS conv_id, c.channel_id, ct.external_id, ct.display_name, ct.blocked, ct.opted_out, ch.type AS channel_type, ch.label AS channel_label, c.assigned_to
          FROM scheduled_messages s JOIN conversations c ON c.id = s.conversation_id JOIN contacts ct ON ct.id = c.contact_id JOIN channels ch ON ch.id = c.channel_id
          LEFT JOIN users u ON u.id = s.created_by WHERE s.id = $1 AND s.status = 'pending'`, [id])).rows[0];
     if (!r) continue;

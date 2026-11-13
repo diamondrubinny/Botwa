@@ -211,7 +211,7 @@ export function widgetRoutes(app: FastifyInstance, db: Db, mgr: ChannelManager, 
       const convId = await conversationOf(v.channel_id, v);
       if (!convId) return { convId: undefined, rows: [] as Record<string, unknown>[], reactions: {} as Record<string, string> };
       const { rows } = await db.query(
-        `SELECT m.seq, m.direction, m.body AS text, m.created_at AS "createdAt", m.auto, CASE WHEN m.direction = 'out' AND NOT m.auto THEN split_part(u.name, ' ', 1) END AS sender
+        `SELECT m.seq, m.direction, m.body AS text, m.created_at AS "createdAt", m.auto, CASE WHEN m.direction = 'out' AND NOT m.auto THEN split_part(COALESCE(u.name_he, u.name), ' ', 1) END AS sender
            FROM messages m LEFT JOIN users u ON u.id = m.sender_user_id WHERE m.conversation_id = $1 AND m.seq > $2 ORDER BY m.seq LIMIT 100`, [convId, q.data.after]);
       // our emoji on the visitor's own recent messages (a heart on "תודה"), sent in full every time so a removal shows too
       const rx = await db.query(`SELECT seq, our_reaction AS emoji FROM messages WHERE conversation_id = $1 AND direction = 'in' AND our_reaction IS NOT NULL ORDER BY seq DESC LIMIT 100`, [convId]);
