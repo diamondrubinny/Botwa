@@ -1,5 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
+import { imageSize, stripImageMetadata } from '../avatars.js';
 import { audit } from '../audit.js';
 import { loadSession, requireAuth } from '../auth.js';
 import { can } from '../permissions.js';
@@ -267,6 +268,30 @@ export function channelRoutes(app: FastifyInstance, db: Db, mgr: ChannelManager,
     await audit(db, { actorId: req.user!.id, action: 'channel.email_settings', target: p.data.id, ip: req.ip, meta: { imapHost: b.data.imapHost, smtpHost: b.data.smtpHost } });
     const status = mgr.snapshot(p.data.id).status;
     return { ok: true, status, ...(status === 'connected' ? {} : { error: mgr.cloudLastError(p.data.id) ?? 'mail_check_failed' }) };
+  });
+
+  // The WhatsApp profile picture: PNG/JPEG by content, metadata removed, scanned, at least 192x192 and at most 5 MB. Admin, audited.
+  app.post('/channels/:id/profile-photo', { preHandler: adminOnly, bodyLimit: 5 * 1024 * 1024 + 64 * 1024, config: { rateLimit: { max: 5, timeWindow: '10 minutes' } } }, async (req, reply) => {
+    const p = idParam.safeParse(req.params);
+    if (!p.success) return reply.code(400).send({ error: 'bad_request' });
+    const ch = (await db.query(`SELECT type FROM channels WHERE id = $1`, [p.data.id])).rows[0];
+    if (!ch) return reply.code(404).send({ error: 'not_found' });
+    if (ch.type !== 'whatsapp' && ch.type !== 'whatsapp_cloud') return reply.code(400).send({ error: 'profile_photo_unsupported' });
+    const file = await req.file({ limits: { fileSize: 5 * 1024 * 1024, files: 1 } });
+    if (!file) return reply.code(400).send({ error: 'bad_request' });
+    let buf: Buffer;
+    try { buf = await file.toBuffer(); } catch { return reply.code(413).send({ error: 'file_too_large' }); }
+    if (file.file.truncated) return reply.code(413).send({ error: 'file_too_large' });
+    const img = stripImageMetadata(buf);
+    if (!img) return reply.code(415).send({ error: 'unsupported_image' });
+    const size = imageSize(img.data);
+    if (!size || size.width < 192 || size.height < 192) return reply.code(400).send({ error: 'profile_photo_too_small' });
+    const scan = await mgr.scanFile(img.data);
+    if (scan.status === 'infected') return reply.code(422).send({ error: 'file_infected' });
+    if (scan.status !== 'clean') return reply.code(503).send({ error: 'scanner_unavailable' });
+    const result = await mgr.setProfilePhoto(p.data.id, img.data, img.mime);
+    await audit(db, { actorId: req.user!.id, action: 'channel.profile_photo', target: p.data.id, ip: req.ip, meta: { result, bytes: img.data.length } });
+    return { result };
   });
 
   // Telegram two-step verification password during QR login. Not persisted, not logged.

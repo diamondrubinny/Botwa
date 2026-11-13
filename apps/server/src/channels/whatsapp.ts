@@ -234,6 +234,15 @@ export class WhatsAppAdapter implements ChannelAdapter {
     return { externalMessageId: res?.key.id ?? undefined };
   }
 
+  async setProfilePhoto(image: Buffer): Promise<string> {
+    const me = this.sock?.user?.id;
+    if (!this.sock || !me) return 'channel_not_connected';
+    try {
+      await this.sock.updateProfilePicture(`${me.split(':')[0]!.split('@')[0]}@s.whatsapp.net`, image);
+      return 'ok';
+    } catch { return 'profile_photo_failed'; }
+  }
+
   async typing(externalContactId: string, ms: number): Promise<void> {
     if (!this.sock) return;
     await this.sock.sendPresenceUpdate('composing', externalContactId);

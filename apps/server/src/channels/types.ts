@@ -68,6 +68,8 @@ export interface ChannelAdapter {
   /** WhatsApp groups this number is a member of (id like 1203630...@g.us). */
   listGroups?(): Promise<{ id: string; name: string; size: number }[]>;
   sendMedia?(externalContactId: string, media: OutboundMedia): Promise<{ externalMessageId?: string }>;
+  /** Change the account's profile picture (WhatsApp). Resolves 'ok' or a reason code the panel explains. */
+  setProfilePhoto?(image: Buffer, mime: 'image/png' | 'image/jpeg'): Promise<string>;
 }
 
 export interface AdapterContext {

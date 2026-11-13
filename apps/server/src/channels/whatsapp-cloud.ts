@@ -196,6 +196,32 @@ export class WhatsAppCloudAdapter implements ChannelAdapter {
     return metaCheckError(res.status, j.error?.code);
   }
 
+  /**
+   * The business profile picture: the image goes up through Meta's Resumable Upload API (POST /{app-id}/uploads, then the bytes
+   * to the upload session, which returns a handle), and the handle is set on the number's business profile
+   * (POST /{phone-number-id}/whatsapp_business_profile). Per Meta's docs; verify against the official reference.
+   */
+  async setProfilePhoto(image: Buffer, mime: 'image/png' | 'image/jpeg'): Promise<string> {
+    if (!this.creds || !this.active) return 'channel_not_connected';
+    const t = await this.appToken();
+    if (!t) return 'meta_app_unknown';
+    try {
+      const q = new URLSearchParams({ file_name: mime === 'image/png' ? 'profile.png' : 'profile.jpg', file_length: String(image.length), file_type: mime });
+      const s1 = await this.fetchImpl(this.url(`${t.appId}/uploads?${q}`), { method: 'POST', headers: this.auth(), signal: AbortSignal.timeout(15_000) });
+      const j1 = (await s1.json().catch(() => ({}))) as { id?: string; error?: { code?: number } };
+      if (!s1.ok || !j1.id || !/^upload:[\w=+/-]{4,400}$/.test(j1.id)) return metaCheckError(s1.status, j1.error?.code);
+      const s2 = await this.fetchImpl(this.url(j1.id), { method: 'POST', headers: { authorization: `OAuth ${this.creds.accessToken}`, file_offset: '0', 'content-type': mime }, body: new Uint8Array(image), signal: AbortSignal.timeout(60_000) });
+      const j2 = (await s2.json().catch(() => ({}))) as { h?: string; error?: { code?: number } };
+      if (!s2.ok || !j2.h) return metaCheckError(s2.status, j2.error?.code);
+      const s3 = await this.fetchImpl(this.url(`${this.creds.phoneNumberId}/whatsapp_business_profile`), {
+        method: 'POST', headers: { ...this.auth(), 'content-type': 'application/json' },
+        body: JSON.stringify({ messaging_product: 'whatsapp', profile_picture_handle: j2.h }), signal: AbortSignal.timeout(20_000),
+      });
+      const j3 = (await s3.json().catch(() => ({}))) as { success?: boolean; error?: { code?: number } };
+      return s3.ok && j3.success !== false ? 'ok' : metaCheckError(s3.status, j3.error?.code);
+    } catch { return 'meta_unreachable'; }
+  }
+
   /** Is any app subscribed to the business account? null when it cannot be told (no account id, or Meta did not answer). */
   async subscribedApps(): Promise<boolean | null> {
     if (!this.creds?.wabaId) return null;

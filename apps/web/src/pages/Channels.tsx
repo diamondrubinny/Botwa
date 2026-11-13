@@ -28,6 +28,7 @@ export function Channels({ me }: { me: Me }) {
   const [type, setType] = useState<ChannelKind>('whatsapp');
   const [metaFor, setMetaFor] = useState<string | null>(null);
   const [mailFor, setMailFor] = useState<string | null>(null);
+  const [photoFor, setPhotoFor] = useState<string | null>(null);
   const [msg, setMsg] = useState('');
   const [linking, setLinking] = useState<string | null>(null);
   const [pending, setPending] = useState<Pending>(null);
@@ -134,6 +135,9 @@ export function Channels({ me }: { me: Me }) {
                 {ch.type === 'whatsapp' && (
                   <button onClick={() => { setPairFor(pairFor === ch.id ? null : ch.id); setPhone(''); }} aria-expanded={pairFor === ch.id}>קישור עם מספר טלפון (בלי QR)</button>
                 )}
+                {(ch.type === 'whatsapp' || ch.type === 'whatsapp_cloud') && (
+                  <button onClick={() => setPhotoFor(photoFor === ch.id ? null : ch.id)} aria-expanded={photoFor === ch.id}>תמונת פרופיל</button>
+                )}
                 <button onClick={() => run(() => api('POST', `/channels/${ch.id}/stop`))}>עצירה</button>
                 <button className="danger" onClick={() => setPending({ kind: 'logout', ch })}>ניתוק החשבון</button>
                 <button className="danger" onClick={() => setPending({ kind: 'delete', ch })}>מחיקת ערוץ</button>
@@ -150,6 +154,7 @@ export function Channels({ me }: { me: Me }) {
               </form>
             )}
             {webFor === ch.id && <WebChatPanel channel={ch} onSaved={() => void reload()} />}
+            {photoFor === ch.id && <ProfilePhotoPanel channel={ch} />}
             {mailFor === ch.id && <EmailPanel channel={ch} onSaved={() => void reload()} />}
             {metaFor === ch.id && <MetaPanel channel={ch} onSaved={() => void reload()} />}
             {cloudFor === ch.id && <CloudPanel channel={ch} onSaved={() => { setCloudFor(null); void reload(); }} />}
@@ -350,6 +355,61 @@ function CloudPanel({ channel, onSaved }: { channel: Channel; onSaved: () => voi
       {info?.configured && <WebhookCheck channelId={channel.id} connected={channel.status === 'connected'} lastWebhookAt={info.lastWebhookAt ?? null} lastAttempt={info.lastAttempt} />}
       {info?.configured && <TemplatesPanel channelId={channel.id} hasWaba={!!info.wabaId} />}
     </div>
+  );
+}
+
+/** The WhatsApp profile picture customers see. Checked here for a quick answer; the server checks again (type, size, malware). */
+function ProfilePhotoPanel({ channel }: { channel: Channel }) {
+  const [file, setFile] = useState<File | null>(null);
+  const [preview, setPreview] = useState<string | null>(null);
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const [busy, setBusy] = useState(false);
+  const input = useRef<HTMLInputElement>(null);
+  const connected = channel.status === 'connected';
+  function pick(f: File | undefined) {
+    setMsg(null); setFile(null); setPreview(null);
+    if (!f) return;
+    if (!/^image\/(png|jpeg)$/.test(f.type)) return setMsg({ ok: false, text: errText('unsupported_image') });
+    if (f.size > 5 * 1024 * 1024) return setMsg({ ok: false, text: errText('file_too_large') });
+    const r = new FileReader();
+    r.onload = () => {
+      const url = String(r.result);
+      const img = new Image();
+      img.onload = () => {
+        if (img.naturalWidth < 192 || img.naturalHeight < 192) return setMsg({ ok: false, text: errText('profile_photo_too_small') });
+        setFile(f); setPreview(url);
+      };
+      img.onerror = () => setMsg({ ok: false, text: errText('unsupported_image') });
+      img.src = url;
+    };
+    r.readAsDataURL(f);
+  }
+  async function upload() {
+    if (!file) return;
+    setBusy(true); setMsg(null);
+    try {
+      const fd = new FormData(); fd.append('file', file);
+      const res = await fetch(`/channels/${channel.id}/profile-photo`, { method: 'POST', credentials: 'same-origin', body: fd });
+      const j = (await res.json().catch(() => ({}))) as { result?: string; error?: string };
+      if (!res.ok) throw new ApiError(res.status, j.error ?? 'error');
+      setMsg(j.result === 'ok' ? { ok: true, text: 'התמונה עודכנה. ייתכן שיעברו כמה דקות עד שלקוחות יראו אותה.' } : { ok: false, text: errText(j.result ?? 'profile_photo_failed') });
+      if (j.result === 'ok') { setFile(null); if (input.current) input.current.value = ''; }
+    } catch (e) { setMsg({ ok: false, text: errText(e instanceof ApiError ? e.code : 'generic') }); }
+    setBusy(false);
+  }
+  return (
+    <section className="card" aria-labelledby={`pp-h-${channel.id}`}>
+      <h3 id={`pp-h-${channel.id}`}>תמונת הפרופיל בווצאפ</h3>
+      <p className="hint">התמונה שלקוחות רואים ליד שם העסק. PNG או JPEG, לפחות 192×192 פיקסלים (מומלץ 640×640, ריבועית), עד 5MB. ווצאפ חותך אותה לעיגול. {channel.type === 'whatsapp_cloud' ? 'בערוץ הרשמי היא נשמרת בפרופיל העסקי אצל Meta.' : ''}</p>
+      {!connected && <p className="error">הערוץ צריך להיות מחובר כדי לעדכן תמונה.</p>}
+      <div className="row" style={{ alignItems: 'center' }}>
+        <button type="button" onClick={() => input.current?.click()} disabled={!connected}>בחירת תמונה</button>
+        <input ref={input} type="file" accept="image/png,image/jpeg" hidden aria-hidden="true" tabIndex={-1} onChange={(e) => pick(e.target.files?.[0])} />
+        {preview && <img src={preview} alt="תצוגה מקדימה של תמונת הפרופיל" width={72} height={72} style={{ borderRadius: '50%', objectFit: 'cover' }} />}
+        {file && <button type="button" className="primary" disabled={busy || !connected} onClick={() => void upload()}>{busy ? 'מעדכן…' : 'עדכון התמונה בווצאפ'}</button>}
+      </div>
+      <p role="status" className={msg ? (msg.ok ? 'ok' : 'error') : undefined}>{msg?.text}</p>
+    </section>
   );
 }
 

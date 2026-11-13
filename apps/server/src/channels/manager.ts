@@ -524,6 +524,17 @@ export class ChannelManager {
     await this.start(channelId);
   }
 
+  /** Antivirus check for files staff hand to a channel (e.g. a profile picture). */
+  scanFile(buf: Buffer) { return this.media.scanBuffer(buf); }
+
+  /** Change the profile picture of a connected WhatsApp channel (QR or official). */
+  async setProfilePhoto(channelId: string, image: Buffer, mime: 'image/png' | 'image/jpeg'): Promise<string> {
+    const a = this.adapters.get(channelId);
+    if (!a || this.statuses.get(channelId) !== 'connected') return 'channel_not_connected';
+    if (!a.setProfilePhoto) return 'profile_photo_unsupported';
+    return a.setProfilePhoto(image, mime);
+  }
+
   // ---- Messenger / Instagram (Meta Messenger Platform) -----------------------------------------------------------------
   metaAdapter(channelId: string): MetaMessagingAdapter | null {
     const a = this.adapters.get(channelId);

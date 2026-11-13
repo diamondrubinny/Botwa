@@ -43,3 +43,19 @@ export function stripImageMetadata(buf: Buffer): { mime: 'image/png' | 'image/jp
   }
   return null;
 }
+
+/** Width and height of a PNG (IHDR) or JPEG (first SOF marker), or null when they cannot be read. */
+export function imageSize(buf: Buffer): { width: number; height: number } | null {
+  if (buf.length > 24 && buf.subarray(1, 4).toString('latin1') === 'PNG' && buf.subarray(12, 16).toString('latin1') === 'IHDR') return { width: buf.readUInt32BE(16), height: buf.readUInt32BE(20) };
+  if (buf[0] === 0xff && buf[1] === 0xd8) {
+    let p = 2;
+    while (p + 9 < buf.length) {
+      if (buf[p] !== 0xff) return null;
+      const m = buf[p + 1]!;
+      if (m >= 0xc0 && m <= 0xcf && m !== 0xc4 && m !== 0xc8 && m !== 0xcc) return { height: buf.readUInt16BE(p + 5), width: buf.readUInt16BE(p + 7) };
+      if (m === 0xd8 || (m >= 0xd0 && m <= 0xd7) || m === 0x01) { p += 2; continue; }
+      p += 2 + buf.readUInt16BE(p + 2);
+    }
+  }
+  return null;
+}

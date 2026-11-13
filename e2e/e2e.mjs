@@ -112,6 +112,11 @@ await axe('channels');
 await page.click('text=קישור עם מספר טלפון (בלי QR)');
 await page.waitForSelector('input[placeholder="972501234567"]');
 await axe('phone-number pairing form');
+await page.click('button:has-text("תמונת פרופיל")');
+await page.waitForSelector('section:has(h3:has-text("תמונת הפרופיל בווצאפ"))');
+check('WhatsApp profile picture panel: explains the rules and waits for a connected channel', await page.isVisible('text=לפחות 192×192 פיקסלים') && await page.isDisabled('button:has-text("בחירת תמונה")'));
+await axe('channels: WhatsApp profile picture');
+await page.click('button:has-text("תמונת פרופיל")');
 await page.click('text=קישור עם מספר טלפון (בלי QR)');
 await page.click('text=קישור / הפעלה');
 // no phone: expect connecting/qr status, never a crash. Real WhatsApp servers unreachable in sandbox.

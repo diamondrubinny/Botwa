@@ -12,7 +12,7 @@ const ORIGIN = 'https://panel.test';
 const PW = 'correct-horse-battery';
 const DB_URL = process.env.TEST_DATABASE_URL ?? 'postgres://postgres@localhost:5432/botwa_test';
 const db = createDb(DB_URL);
-const cfg = loadConfig({ NODE_ENV: 'test', DATABASE_URL: DB_URL, ENCRYPTION_KEY: randomBytes(32).toString('base64'), APP_ORIGIN: ORIGIN, COOKIE_SECURE: 'false' });
+const cfg = loadConfig({ NODE_ENV: 'test', DATABASE_URL: DB_URL, ENCRYPTION_KEY: randomBytes(32).toString('base64'), APP_ORIGIN: ORIGIN, COOKIE_SECURE: 'false', MEDIA_ALLOW_UNSCANNED: 'true' });
 const SECRET = 'app-secret-0123456789abcdef';
 const TOKEN = 'EAAG' + 'x'.repeat(40);
 
@@ -46,8 +46,11 @@ describe('official WhatsApp channel', () => {
     calls.push({ url, init });
     if (init?.method === 'POST' && url.endsWith('/messages')) return sendResponse();
     if (url.includes('/app?fields=id')) return Response.json({ id: '5550001112' });
+    if (init?.method === 'POST' && url.includes('/5550001112/uploads?')) return Response.json({ id: 'upload:MTIzNDU2' });
+    if (init?.method === 'POST' && url.endsWith('/upload:MTIzNDU2')) return Response.json({ h: 'HANDLE_1' });
+    if (init?.method === 'POST' && url.endsWith('/1234567890/whatsapp_business_profile')) return Response.json({ success: true });
     if (url.includes('/5550001112/subscriptions')) {
-      if (init?.method === 'POST') { appSubPosts.push({ body: String(init.body), auth: (init.headers as Record<string, string>).authorization }); appSubs = [{ object: 'whatsapp_business_account', callback_url: `${ORIGIN}/webhooks/whatsapp/${channelId}`, active: true, fields: [{ name: 'messages' }] }]; return Response.json({ success: true }); }
+      if (init?.method === 'POST') { appSubPosts.push({ body: String(init.body), auth: (init.headers as Record<string, string>).authorization ?? '' }); appSubs = [{ object: 'whatsapp_business_account', callback_url: `${ORIGIN}/webhooks/whatsapp/${channelId}`, active: true, fields: [{ name: 'messages' }] }]; return Response.json({ success: true }); }
       return Response.json({ data: appSubs });
     }
     if (url.includes('fields=webhook_configuration')) return Response.json({ webhook_configuration: webhookConf, id: '1234567890' });
@@ -243,5 +246,30 @@ describe('official WhatsApp channel', () => {
     expect(r.statusCode).toBe(409);
     expect(r.json()).toEqual({ error: 'outside_reply_window' });
     expect(calls.filter((c) => c.init?.method === 'POST')).toHaveLength(0); // nothing reached Meta
+  });
+
+  it('changes the business profile picture: upload session, the bytes, then the profile; small or fake images refused', async () => {
+    const PNG200 = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAMgAAADICAIAAAAiOjnJAAABdklEQVR42u3SMREAMAgAsVJfGEI5MjDBwJBI+Puo7AfbvgQYC2NhLDAWxsJYYCyMhbHAWBgLY4GxMBbGAmNhLIwFxsJYGAuMhbEwFhgLY2EsMBbGwlhgLIyFscBYGAtjgbEwFsYCY2EsjAXGwlgYC4yFsTAWGAtjYSwwFsbCWGAsjIWxwFgYC2OBsTAWxgJjYSyMBcbCWBgLjIWxMBYYC2NhLDAWxsJYYCyMhbHAWBgLY4GxMBbGwlhgLIyFscBYGAtjgbEwFsYCY2EsjAXGwlgYC4yFsTAWGAtjYSwwFsbCWGAsjIWxwFgYC2OBsTAWxgJjYSyMBcbCWBgLjIWxMBYYC2NhLDAWxsJYYCyMhbHAWBgLY4GxMBbGAmNhLIwFxsJYGAuMhbEwFhgLY2EsMBbGwlhgLIyFscBYGAtjgbEwFsYCY2EsjIWxwFgYC2OBsTAWxgJjYSyMBcbCWBgLjIWxMBYYC2NhLDAWxsJYYCyMhbHAWFwzs5gDH6D8pLsAAAAASUVORK5CYII=', 'base64');
+    const send = (who: string, bytes: Buffer, type = 'image/png') => {
+      const b = '----pp';
+      const body = Buffer.concat([Buffer.from(`--${b}\r\nContent-Disposition: form-data; name="file"; filename="p.png"\r\nContent-Type: ${type}\r\n\r\n`), bytes, Buffer.from(`\r\n--${b}--\r\n`)]);
+      return app.inject({ method: 'POST', url: `/channels/${channelId}/profile-photo`, payload: body, remoteAddress: `10.90.9.${++ip % 250}`, headers: { origin: ORIGIN, cookie: cookies[who]!, 'content-type': `multipart/form-data; boundary=${b}` } });
+    };
+    await call('PUT', `/channels/${channelId}/cloud`, 'adm@t.io', { phoneNumberId: '1234567890', accessToken: TOKEN, appSecret: SECRET });
+    expect((await send('ag@t.io', PNG200)).statusCode).toBe(403);
+    expect((await send('adm@t.io', Buffer.from('GIF89a not a picture'))).json()).toEqual({ error: 'unsupported_image' });
+    const tiny = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==', 'base64');
+    expect((await send('adm@t.io', tiny)).json()).toEqual({ error: 'profile_photo_too_small' });
+    calls.length = 0;
+    expect((await send('adm@t.io', PNG200)).json()).toEqual({ result: 'ok' });
+    const up = calls.find((c) => c.url.includes('/uploads?'))!;
+    expect(up.url).toContain(`file_length=${PNG200.length}`);
+    expect(up.url).toContain('file_type=image%2Fpng');
+    const bytes = calls.find((c) => c.url.endsWith('/upload:MTIzNDU2'))!;
+    expect((bytes.init!.headers as Record<string, string>).authorization).toBe(`OAuth ${TOKEN}`);
+    expect((bytes.init!.headers as Record<string, string>).file_offset).toBe('0');
+    const prof = calls.find((c) => c.url.endsWith('/whatsapp_business_profile'))!;
+    expect(JSON.parse(prof.init!.body as string)).toEqual({ messaging_product: 'whatsapp', profile_picture_handle: 'HANDLE_1' });
+    expect((await db.query(`SELECT count(*)::int AS n FROM audit_log WHERE action = 'channel.profile_photo'`)).rows[0].n).toBe(1);
   });
 });
