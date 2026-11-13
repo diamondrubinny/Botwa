@@ -7,6 +7,7 @@ interface Automations {
   idle: { enabled: boolean; reminderAfter: number; reminderText: string; closeAfter: number; closeText: string };
   holding: { enabled: boolean; after: number; text: string };
   closing: { defaultOn: boolean; text: string };
+  feedback: { enabled: boolean; question: string; thanks: string; afterAuto: boolean };
 }
 
 /** A text box with "choose a ready phrasing" for its situation. */
@@ -23,6 +24,13 @@ function PhraseField({ id, label, value, onChange, situation, disabled, required
     </div>
   );
 }
+
+const FEEDBACK_Q = [
+  'נשמח לשמוע איך היה השירות: השיבו במספר מ-1 עד 5 (5 = מצוין).',
+  'עזרנו לך היום? דרגו את השירות מ-1 (לא טוב) עד 5 (מצוין). התשובה עוזרת לנו להשתפר.',
+  'תודה שפנית אלינו, {שם}! כמה היית ממליץ/ה על השירות שלנו, מ-1 עד 5?',
+  'לסיום, נשמח לדירוג קצר: 1 עד 5 ⭐',
+];
 
 const minsLabel = (m: number) => (m % 1440 === 0 ? `${m / 1440} ימים` : m % 60 === 0 ? `${m / 60} שעות` : `${m} דקות`);
 
@@ -71,6 +79,20 @@ export function AutomationsCard({ canEdit }: { canEdit: boolean }) {
         <label><input type="checkbox" role="switch" checked={a.closing.defaultOn} disabled={off} onChange={(e) => set('closing', { defaultOn: e.target.checked })} /> לסמן כברירת מחדל "לשלוח הודעת סיום" בסגירת שיחה</label>
         <p className="hint">הנציג רואה את ההודעה ויכול לבטל את השליחה בכל סגירה.</p>
         <PhraseField id="au-cl" label="נוסח הודעת הסיום (ריק = בלי אפשרות לשלוח)" situation="closing" value={a.closing.text} disabled={off} onChange={(v) => set('closing', { text: v })} />
+      </fieldset>
+
+      <fieldset>
+        <legend>משוב מהלקוח אחרי סגירה</legend>
+        <label><input type="checkbox" role="switch" checked={a.feedback.enabled} disabled={off} onChange={(e) => set('feedback', { enabled: e.target.checked })} /> לבקש מהלקוח לדרג את השירות (1 עד 5) אחרי שהשיחה נסגרת</label>
+        <p className="hint">תשובה של ספרה (או כוכבים) נשמרת על הפנייה, מוצגת בהיסטוריה ובדוחות, ולא פותחת את השיחה מחדש. כל תשובה אחרת נחשבת לפנייה חדשה. שואלים פעם אחת לכל פנייה.</p>
+        <label><input type="checkbox" checked={a.feedback.afterAuto} disabled={off || !a.feedback.enabled} onChange={(e) => set('feedback', { afterAuto: e.target.checked })} /> לשאול גם כשהשיחה נסגרה אוטומטית (הלקוח לא הגיב)</label>
+        <div className="field"><label htmlFor="au-fq">שאלת המשוב</label>
+          <select aria-label="ניסוח מוכן: שאלת משוב" value="" disabled={off} onChange={(e) => { const v = FEEDBACK_Q[Number(e.target.value)]; if (v) set('feedback', { question: v }); }} style={{ marginBottom: '.35rem' }}>
+            <option value="">בחירת ניסוח מוכן…</option>
+            {FEEDBACK_Q.map((q, i) => <option key={i} value={i}>{q}</option>)}
+          </select>
+          <textarea id="au-fq" rows={2} maxLength={1000} value={a.feedback.question} disabled={off} required onChange={(e) => set('feedback', { question: e.target.value })} /></div>
+        <div className="field"><label htmlFor="au-ft">תודה על המשוב</label><input id="au-ft" maxLength={300} value={a.feedback.thanks} disabled={off} onChange={(e) => set('feedback', { thanks: e.target.value })} /></div>
       </fieldset>
 
       {canEdit && <button className="primary" type="submit">שמירת האוטומציות</button>}

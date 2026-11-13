@@ -8,6 +8,7 @@ type Bucket = 'day' | 'week' | 'month';
 interface Summary {
   days: number; timezone: string; bucket: Bucket;
   sla: { enabled: boolean; targetMinutes: number; withinTarget: number; breached: number; compliancePercent: number | null };
+  cases?: { closed: number; rated: number; avgRating: number | null; closedAuto: number; distribution: number[] };
   previous: { newConversations: number; inbound: number; outbound: number };
   totals: { newConversations: number; inbound: number; outbound: number; openNow: number; unassignedNow: number };
   responseTime: { answered: number; unanswered: number; avgSeconds: number | null; medianSeconds: number | null };
@@ -111,6 +112,7 @@ export function Reports() {
                 ['שיחות פתוחות כרגע', data.totals.openNow], ['פתוחות ולא משויכות', data.totals.unassignedNow],
                 ['זמן תגובה ממוצע', fmtDuration(data.responseTime.avgSeconds)], ['זמן תגובה חציוני', fmtDuration(data.responseTime.medianSeconds)],
                 ['פניות שלא נענו', data.responseTime.unanswered],
+                ...(data.cases ? [['פניות שנסגרו', data.cases.closed], ['מתוכן נסגרו אוטומטית', data.cases.closedAuto], ['דירוג ממוצע מהלקוחות', data.cases.avgRating == null ? '—' : `${data.cases.avgRating} / 5 (${data.cases.rated})`]] as [string, string | number][] : []),
                 ...(data.sla.enabled ? [[`עמידה ביעד (${data.sla.targetMinutes} דק')`, data.sla.compliancePercent == null ? '—' : `${data.sla.compliancePercent}%`], ['חריגות מהיעד', data.sla.breached]] as [string, string | number][] : []),
               ] as [string, string | number][]).map(([k, v]) => (
                 <div key={k} className="kpi"><dt className="hint">{k}</dt><dd className="kpi-v">{v}</dd>

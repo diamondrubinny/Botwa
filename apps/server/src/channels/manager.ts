@@ -31,6 +31,7 @@ import type { AdapterFactory, ChannelAdapter, ChannelStatus, ChannelType, Outbou
 import { TelegramAdapter } from './telegram.js';
 import { CLOUD_CREDS_KEY, newVerifyToken, WhatsAppCloudAdapter, type CloudCreds } from './whatsapp-cloud.js';
 import { EMAIL_CREDS_KEY, EmailAdapter, type EmailCreds } from './email.js';
+import { thankForFeedback } from '../automations.js';
 import { isCommentContact, META_CREDS_KEY, MetaMessagingAdapter, type CommentReplyMode, type MetaCreds } from './meta-messaging.js';
 import { WebChatAdapter } from './webchat.js';
 import { WhatsAppAdapter } from './whatsapp.js';
@@ -320,6 +321,11 @@ export class ChannelManager {
             void sendAlert(this.cfg, `🚫 לקוח נחסם אוטומטית עקב הצפת הודעות (יותר מ-${this.cfg.FLOOD_LIMIT} ב-2 דקות).`, { contactId: r.contactId });
           }
           if (r.blocked) return; // blocked contact: stored as evidence, nothing else happens (no files, bot, away reply, routing, notification)
+          if (r.rated) {   // a rating for the feedback question: thank them; no bot, no routing, the conversation stays closed
+            await thankForFeedback(this.db, this, r.conversationId).catch(() => undefined);
+            if (r.messageId) this.emit({ channelId, type: 'message', conversationId: r.conversationId, messageId: r.messageId });
+            return;
+          }
           if (r.messageId && m.media) await this.media.ingestInbound(r.messageId, m.media);
           const stop = !!r.messageId && !m.media && isStopMessage(m.text);
           if (stop) {

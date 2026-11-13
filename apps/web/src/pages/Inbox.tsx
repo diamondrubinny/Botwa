@@ -5,6 +5,7 @@ import { api, ApiError, can, personLabel, upload, type Attachment, type Canned, 
 import { EmojiPicker, GifPicker, motionOff, type GifItem } from '../components/Pickers';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { PersonPanel } from '../components/PersonPanel';
+import { CaseHistory } from '../components/CaseHistory';
 import { botAvatarSrc, botLabel, useBrand } from '../brand';
 import { Icon } from '../components/Icon';
 import { usePoll } from '../hooks';
@@ -529,6 +530,8 @@ export function Inbox({ me }: { me: Me }) {
                       <button type="submit" disabled={!noteText.trim()} style={{ marginTop: '.4rem' }}>הוספת הערה</button>
                     </form>
                   </section>
+
+                  <CaseHistory convId={sel.id} refresh={bump} />
 
                   <PersonPanel convId={sel.id} contactRowId={sel.contactRowId} related={related} onOpen={(id) => void openRelated(id)}
                     onChanged={() => void api<RelatedConv[]>('GET', `/conversations/${sel.id}/related`).then(setRelated).catch(() => undefined)} />

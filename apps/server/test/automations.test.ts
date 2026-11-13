@@ -1,6 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { buildApp } from '../src/app.js';
+import { parseRating } from '../src/automations.js';
 import { ChannelManager } from '../src/channels/manager.js';
 import type { ChannelAdapter, AdapterContext } from '../src/channels/types.js';
 import { hashPassword } from '../src/password.js';
@@ -142,5 +143,67 @@ describe('conversation automations', () => {
     expect((await call(`/conversations/${a2.id}/status`, { status: 'closed' })).json()).toEqual({ ok: true });
     expect(texts).toHaveLength(1);
     expect(await status(a2.id)).toBe('closed');
+  });
+
+  it('every inquiry is a case: opened by the customer, closed by a person or an automation, reopened as a new case', async () => {
+    await db.query('DELETE FROM conversations');
+    await setA({ ...DEFAULT_AUTOMATIONS, idle: { ...DEFAULT_AUTOMATIONS.idle, enabled: true, reminderAfter: 0, closeAfter: 30, closeText: '' } });
+    const c = await conv('יעל', { inAgo: 100, outAgo: 60 });
+    let cases = (await db.query('SELECT * FROM cases WHERE conversation_id = $1 ORDER BY opened_at', [c.id])).rows;
+    expect(cases).toHaveLength(1);
+    expect(cases[0]).toMatchObject({ closed_at: null, first_message: 'שאלה' });
+    await runAutomations(db, out);                                   // closed by the automation
+    cases = (await db.query('SELECT * FROM cases WHERE conversation_id = $1 ORDER BY opened_at', [c.id])).rows;
+    expect(cases[0]).toMatchObject({ close_kind: 'auto' });
+    expect(cases[0].closed_at).not.toBeNull();
+    await ingestInbound(db, ch, { externalContactId: c.ext, contactName: 'יעל', externalMessageId: 'again-1', text: 'יש לי שאלה חדשה על לייזר', timestamp: new Date() });
+    cases = (await db.query('SELECT * FROM cases WHERE conversation_id = $1 ORDER BY opened_at', [c.id])).rows;
+    expect(cases).toHaveLength(2);
+    expect(cases[1]).toMatchObject({ closed_at: null, first_message: 'יש לי שאלה חדשה על לייזר' });
+    expect(Number(cases[1].number)).toBeGreaterThan(Number(cases[0].number));
+    await setA(DEFAULT_AUTOMATIONS);
+  });
+
+  it('reads a rating from a digit or stars only', () => {
+    expect(parseRating('5')).toBe(5);
+    expect(parseRating(' 3 ')).toBe(3);
+    expect(parseRating('⭐⭐⭐⭐')).toBe(4);
+    expect(parseRating('6')).toBeNull();
+    expect(parseRating('5 שעות')).toBeNull();
+    expect(parseRating('תודה')).toBeNull();
+  });
+
+  it('feedback after a person closes: the question goes out, a digit is stored on that case and does not reopen; anything else does', async () => {
+    await setA({ ...DEFAULT_AUTOMATIONS, feedback: { enabled: true, question: 'איך היה? 1-5', thanks: 'תודה!', afterAuto: false } });
+    const texts: string[] = [];
+    const ck = `botwa_sid=${(await app!.inject({ method: 'POST', url: '/auth/login', payload: { email: 'ag@t.io', password: 'correct-horse-battery' }, remoteAddress: '10.99.0.3', headers: { origin: 'https://p.test' } })).cookies[0]!.value}`;
+    const call = (url: string, payload?: object) => app!.inject({ method: payload ? 'POST' : 'GET', url, payload, remoteAddress: '10.99.0.4', headers: { origin: 'https://p.test', cookie: ck } });
+    void texts;
+    const c = await conv('מיכל', { inAgo: 5 });
+    await db.query('UPDATE conversations SET assigned_to = (SELECT id FROM users WHERE email = $2) WHERE id = $1', [c.id, 'ag@t.io']);
+    await call(`/conversations/${c.id}/status`, { status: 'closed' });
+    expect(await autoKinds(c.id)).toEqual(['feedback']);
+    const kase = (await db.query('SELECT id, close_kind, closed_by FROM cases WHERE conversation_id = $1', [c.id])).rows[0];
+    expect(kase.close_kind).toBe('staff');
+    expect(kase.closed_by).not.toBeNull();
+    // the manager's own inbound path (rating -> thanks, stays closed)
+    const mgrAny = (app as unknown as { mgrForTests?: unknown });
+    void mgrAny;
+    const r = await ingestInbound(db, ch, { externalContactId: c.ext, contactName: 'מיכל', externalMessageId: 'rate-1', text: '5', timestamp: new Date() });
+    expect(r.rated).toBe(5);
+    expect(await status(c.id)).toBe('closed');
+    expect((await db.query('SELECT rating FROM cases WHERE id = $1', [kase.id])).rows[0].rating).toBe(5);
+    expect((await db.query('SELECT count(*)::int AS n FROM cases WHERE conversation_id = $1', [c.id])).rows[0].n).toBe(1);   // no new case
+    // a second "5" is an ordinary message (one answer per question): it reopens as a new inquiry
+    const r2 = await ingestInbound(db, ch, { externalContactId: c.ext, contactName: 'מיכל', externalMessageId: 'rate-2', text: '5', timestamp: new Date() });
+    expect(r2.rated).toBeNull();
+    expect(await status(c.id)).toBe('open');
+    // the history: both inquiries, newest first, with the rating
+    const hist = (await call(`/conversations/${c.id}/cases`)).json();
+    expect(hist).toHaveLength(2);
+    expect(hist[1]).toMatchObject({ rating: 5, closeKind: 'staff', closedByName: 'סיגל' });
+    const msgs = (await call(`/cases/${hist[1].id}/messages`)).json();
+    expect(msgs.map((m: { body: string }) => m.body)).toContain('שאלה');
+    await setA(DEFAULT_AUTOMATIONS);
   });
 });

@@ -32,6 +32,14 @@ export const automationsSchema = z.object({
     defaultOn: z.boolean(),
     text: text,
   }),
+  /** after a conversation closes, ask the customer to rate it 1-5 (a reply of a digit is stored and does not reopen it) */
+  feedback: z.object({
+    enabled: z.boolean(),
+    question: text.min(1),
+    thanks: text,
+    /** also after automatic closing (no answer from the customer) */
+    afterAuto: z.boolean(),
+  }).default({ enabled: false, question: 'נשמח לשמוע איך היה השירות: השיבו במספר מ-1 עד 5 (5 = מצוין).', thanks: 'תודה רבה על המשוב!', afterAuto: false }),
 }).strict();
 export type Automations = z.infer<typeof automationsSchema>;
 
@@ -43,6 +51,7 @@ export const DEFAULT_AUTOMATIONS: Automations = {
   },
   holding: { enabled: false, after: 10, text: 'קיבלנו את פנייתך, {שם}. נציג/ה יחזרו אליך בהקדם. תודה על הסבלנות!' },
   closing: { defaultOn: false, text: 'תודה שפנית אלינו, {שם}! אם יעלה משהו נוסף, אנחנו כאן.' },
+  feedback: { enabled: false, question: 'נשמח לשמוע איך היה השירות: השיבו במספר מ-1 עד 5 (5 = מצוין).', thanks: 'תודה רבה על המשוב!', afterAuto: false },
 };
 
 export async function loadAutomations(db: Db): Promise<Automations> {
@@ -67,7 +76,7 @@ const NOT_COMMENT = `ct.external_id !~ '@(fb|ig)comment$'`;
  * Send one automatic message to a conversation if the rules allow it (not blocked, not opted out, inside the platform's
  * reply window). Returns false when it was not sent; the caller decides what that means (e.g. close anyway).
  */
-export async function sendAutomatic(db: Db, out: AutoSender, conv: ConvRow, body: string, kind: 'idle_reminder' | 'idle_close' | 'holding' | 'closing'): Promise<boolean> {
+export async function sendAutomatic(db: Db, out: AutoSender, conv: ConvRow, body: string, kind: 'idle_reminder' | 'idle_close' | 'holding' | 'closing' | 'feedback' | 'feedback_thanks'): Promise<boolean> {
   if (!body.trim() || /@(fb|ig)comment$/.test(conv.external_id)) return false;
   if (await sendBlock(db, conv, (await loadSending(db)).replyWindowHours)) return false;
   const hours = await loadBusinessHours(db);
@@ -81,9 +90,37 @@ export async function sendAutomatic(db: Db, out: AutoSender, conv: ConvRow, body
   } catch { return false; }
 }
 
-async function close(db: Db, convId: string, note: string): Promise<void> {
-  await db.query(`UPDATE conversations SET status = 'closed', bot_state = NULL, flow_state = NULL, bot_invalid = 0 WHERE id = $1 AND status = 'open'`, [convId]);
+async function close(db: Db, out: AutoSender, convId: string, note: string): Promise<void> {
+  const r = await db.query(`UPDATE conversations SET status = 'closed', close_kind = 'auto', closed_by = NULL, bot_state = NULL, flow_state = NULL, bot_invalid = 0 WHERE id = $1 AND status = 'open' RETURNING id`, [convId]);
   await db.query('INSERT INTO conversation_notes (conversation_id, body) VALUES ($1, $2)', [convId, note]);
+  if (r.rowCount) await askFeedback(db, out, convId, 'auto');
+}
+
+/** Rating 1-5 from a reply: a digit, or 1-5 stars. null when the reply is something else. */
+export function parseRating(text: string): number | null {
+  const t = text.trim();
+  if (/^[1-5]$/.test(t)) return Number(t);
+  const stars = t.match(/⭐|🌟|★/g)?.length ?? 0;
+  return stars >= 1 && stars <= 5 && t.replace(/⭐|🌟|★|\s/g, '') === '' ? stars : null;
+}
+
+/** After a case closed: ask for a rating once (if switched on), and remember which case the answer belongs to. */
+export async function askFeedback(db: Db, out: AutoSender, convId: string, how: 'staff' | 'auto'): Promise<boolean> {
+  const a = (await loadAutomations(db)).feedback;
+  if (!a.enabled || (how === 'auto' && !a.afterAuto)) return false;
+  const kase = (await db.query(`SELECT id FROM cases WHERE conversation_id = $1 AND closed_at IS NOT NULL ORDER BY closed_at DESC LIMIT 1`, [convId])).rows[0];
+  const conv = (await db.query(`${CONV} WHERE c.id = $1`, [convId])).rows[0] as ConvRow | undefined;
+  if (!kase || !conv) return false;
+  if (!(await sendAutomatic(db, out, conv, a.question, 'feedback'))) return false;
+  await db.query('UPDATE conversations SET feedback_case_id = $2, feedback_asked_at = now() WHERE id = $1', [convId, kase.id]);
+  return true;
+}
+
+/** A rating arrived for a waiting feedback question: thank the customer (the conversation stays closed). */
+export async function thankForFeedback(db: Db, out: AutoSender, convId: string): Promise<void> {
+  const a = (await loadAutomations(db)).feedback;
+  const conv = (await db.query(`${CONV} WHERE c.id = $1`, [convId])).rows[0] as ConvRow | undefined;
+  if (conv && a.thanks) await sendAutomatic(db, out, conv, a.thanks, 'feedback_thanks');
 }
 
 /** One pass of the time-based automations. Returns what was done (for logs and tests). */
@@ -114,7 +151,7 @@ export async function runAutomations(db: Db, out: AutoSender, now = new Date()):
         if (since(r.last_out) >= a.idle.reminderAfter && a.idle.reminderText) {
           if (await sendAutomatic(db, out, conv, a.idle.reminderText, 'idle_reminder')) done.reminded++;
           else if (since(r.last_out) >= a.idle.reminderAfter + a.idle.closeAfter) {   // could not remind (window closed, blocked): close when the full time is up
-            await close(db, r.id, 'השיחה נסגרה אוטומטית: הלקוח לא הגיב (לא ניתן היה לשלוח תזכורת).'); done.closed++;
+            await close(db, out, r.id, 'השיחה נסגרה אוטומטית: הלקוח לא הגיב (לא ניתן היה לשלוח תזכורת).'); done.closed++;
           }
         }
         continue;
@@ -122,7 +159,7 @@ export async function runAutomations(db: Db, out: AutoSender, now = new Date()):
       const from = reminded ? r.last_reminder! : r.last_out;
       if (since(from) < a.idle.closeAfter) continue;
       const sent = a.idle.closeText ? await sendAutomatic(db, out, conv, a.idle.closeText, 'idle_close') : false;
-      await close(db, r.id, `השיחה נסגרה אוטומטית: הלקוח לא הגיב${reminded ? ' גם אחרי תזכורת' : ''}${a.idle.closeText && !sent ? ' (הודעת הסגירה לא נשלחה)' : ''}. הודעה חדשה מהלקוח תפתח אותה מחדש.`);
+      await close(db, out, r.id, `השיחה נסגרה אוטומטית: הלקוח לא הגיב${reminded ? ' גם אחרי תזכורת' : ''}${a.idle.closeText && !sent ? ' (הודעת הסגירה לא נשלחה)' : ''}. הודעה חדשה מהלקוח תפתח אותה מחדש.`);
       done.closed++;
     }
   }

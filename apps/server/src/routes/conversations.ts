@@ -11,7 +11,7 @@ import { loadSending, PolicyRejected, SendError } from '../channels/sender.js';
 import type { Db } from '../db.js';
 import { MediaService } from '../media/store.js';
 import { isCommentContact } from '../channels/meta-messaging.js';
-import { sendClosingMessage } from '../automations.js';
+import { askFeedback, sendClosingMessage } from '../automations.js';
 
 const idParam = z.object({ id: z.string().uuid() });
 export function conversationRoutes(app: FastifyInstance, db: Db, mgr: ChannelManager, media: MediaService) {
@@ -217,9 +217,11 @@ export function conversationRoutes(app: FastifyInstance, db: Db, mgr: ChannelMan
     // the closing message goes out before the status changes (a closed conversation is still the same chat for the customer)
     const closingSent = b.data.status === 'closed' && b.data.closingMessage ? await sendClosingMessage(db, mgr, p.data.id) : undefined;
     await db.query(
-      `UPDATE conversations SET status = $2, bot_state = CASE WHEN $2 = 'closed' THEN NULL ELSE bot_state END, flow_state = CASE WHEN $2 = 'closed' THEN NULL ELSE flow_state END, bot_invalid = CASE WHEN $2 = 'closed' THEN 0 ELSE bot_invalid END WHERE id = $1`,
-      [p.data.id, b.data.status],
+      `UPDATE conversations SET status = $2, close_kind = CASE WHEN $2 = 'closed' THEN 'staff' ELSE close_kind END, closed_by = CASE WHEN $2 = 'closed' THEN $3::uuid ELSE closed_by END,
+              bot_state = CASE WHEN $2 = 'closed' THEN NULL ELSE bot_state END, flow_state = CASE WHEN $2 = 'closed' THEN NULL ELSE flow_state END, bot_invalid = CASE WHEN $2 = 'closed' THEN 0 ELSE bot_invalid END WHERE id = $1`,
+      [p.data.id, b.data.status, req.user!.id],
     );
+    if (b.data.status === 'closed') await askFeedback(db, mgr, p.data.id, 'staff').catch(() => false);
     mgr.hookConversation('conversation.status_changed', p.data.id);
     return { ok: true, ...(closingSent !== undefined ? { closingSent } : {}) };
   });

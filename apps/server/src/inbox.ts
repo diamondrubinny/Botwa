@@ -1,6 +1,7 @@
 import type { Db } from './db.js';
 import type { InboundMessage } from './channels/types.js';
 import type { MediaService } from './media/store.js';
+import { parseRating } from './automations.js';
 
 /** Store an inbound message; one conversation per contact, reopened on new inbound. Idempotent on external id. */
 export async function ingestInbound(db: Db, channelId: string, m: InboundMessage, opts: { floodLimit?: number } = {}) {
@@ -36,7 +37,20 @@ export async function ingestInbound(db: Db, channelId: string, m: InboundMessage
         flooded = true;
       }
     }
-    if (ins.rowCount) {
+    // the answer to "how was the service? 1-5": stored on that case; the conversation stays closed and nothing else happens
+    let rated: number | null = null;
+    if (ins.rowCount && !blocked) {
+      const fb = (await client.query(`SELECT status, feedback_case_id, feedback_asked_at FROM conversations WHERE id = $1`, [convId])).rows[0];
+      if (fb?.feedback_case_id) {
+        const fresh = fb.feedback_asked_at && Date.now() - new Date(fb.feedback_asked_at).getTime() < 3 * 24 * 3600_000;
+        rated = fresh && fb.status === 'closed' && !m.media ? parseRating(m.text) : null;
+        if (rated) await client.query('UPDATE cases SET rating = $2, rated_at = now() WHERE id = $1 AND rating IS NULL', [fb.feedback_case_id, rated]);
+        await client.query('UPDATE conversations SET feedback_case_id = NULL, feedback_asked_at = NULL WHERE id = $1', [convId]);   // one answer only
+      }
+    }
+    if (ins.rowCount && rated) {
+      await client.query('UPDATE conversations SET last_message_at = $2 WHERE id = $1', [convId, m.timestamp]);
+    } else if (ins.rowCount) {
       if (blocked) {
         await client.query(`UPDATE conversations SET status = 'closed', unread_count = 0, bot_state = NULL, last_message_at = $2 WHERE id = $1`, [convId, m.timestamp]);
       } else {
@@ -47,7 +61,7 @@ export async function ingestInbound(db: Db, channelId: string, m: InboundMessage
       }
     }
     await client.query('COMMIT');
-    return { conversationId: convId, messageId: ins.rows[0]?.id as string | undefined, duplicate: !ins.rowCount, needsRouting, blocked, flooded, contactId: contact.rows[0].id as string, optedOut: contact.rows[0].opted_out as boolean };
+    return { conversationId: convId, messageId: ins.rows[0]?.id as string | undefined, duplicate: !ins.rowCount, needsRouting, blocked, flooded, rated, contactId: contact.rows[0].id as string, optedOut: contact.rows[0].opted_out as boolean };
   } catch (e) {
     await client.query('ROLLBACK');
     throw e;
@@ -61,6 +75,8 @@ export async function purgeOldMessages(db: Db, retentionDays: number, media?: Me
   if (retentionDays <= 0) return 0;
   await media?.purgeFiles('m.created_at < now() - make_interval(days => $1)', [retentionDays]);
   const del = await db.query(`DELETE FROM messages WHERE created_at < now() - make_interval(days => $1)`, [retentionDays]);
+  // the inquiry list keeps dates and ratings, but not the customer's words, beyond the same period
+  await db.query(`UPDATE cases SET first_message = NULL WHERE first_message IS NOT NULL AND opened_at < now() - make_interval(days => $1)`, [retentionDays]);
   // identification details kept on a contact card (name, faculty, PI, status) go too, once the person has been inactive that long
   await db.query(
     `UPDATE contacts ct SET profile = '{}'::jsonb WHERE ct.profile <> '{}'::jsonb

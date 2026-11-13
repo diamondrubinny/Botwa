@@ -688,7 +688,9 @@ function WebChatPanel({ channel, onSaved }: { channel: Channel; onSaved: () => v
   const [secret, setSecret] = useState('');
   const [preview, setPreview] = useState(0);
   const [busy, setBusy] = useState(false);
-  useEffect(() => { void api<WebCfg>('GET', `/channels/${channel.id}/webchat`).then((d) => { setC(d); setOrigins(d.allowedOrigins.join('\n')); }).catch(() => undefined); }, [channel.id]);
+  // a (late or repeated) load never overwrites what the admin already typed in the sites field
+  const originsTouched = useRef(false);
+  useEffect(() => { void api<WebCfg>('GET', `/channels/${channel.id}/webchat`).then((d) => { setC((cur) => cur ?? d); if (!originsTouched.current) setOrigins(d.allowedOrigins.join('\n')); }).catch(() => undefined); }, [channel.id]);
   if (!c) return <Loading lines={4} />;
   const d = (p: Partial<WebCfg['design']>) => setC({ ...c, design: { ...c.design, ...p } });
   const b = (p: Partial<WebCfg['behavior']>) => setC({ ...c, behavior: { ...c.behavior, ...p } });
@@ -700,7 +702,7 @@ function WebChatPanel({ channel, onSaved }: { channel: Channel; onSaved: () => v
     setBusy(true); setMsg(null);
     try {
       const r = await api<WebCfg>('PUT', `/channels/${channel.id}/webchat`, { design: c!.design, behavior: c!.behavior, allowedOrigins: origins.split('\n').map((x) => x.trim()).filter(Boolean), allowAnyOrigin: c!.allowAnyOrigin });
-      setC(r); setOrigins(r.allowedOrigins.join('\n')); setPreview((n) => n + 1); onSaved();
+      setC(r); setOrigins(r.allowedOrigins.join('\n')); originsTouched.current = false; setPreview((n) => n + 1); onSaved();
       setMsg({ ok: true, text: 'נשמר, והערוץ פעיל.' });
     } catch (er) { setMsg({ ok: false, text: er instanceof ApiError && er.code === 'bad_color' ? 'הצבע שנבחר לא מאפשר טקסט קריא (לבן או כהה). בחרו צבע כהה או בהיר יותר.' : er instanceof ApiError && er.code === 'bad_origin' ? 'כתובת אתר לא תקינה. נדרש https://example.com (או https://*.example.com), בלי נתיב.' : errText(er instanceof ApiError ? er.code : 'generic') }); }
     setBusy(false);
@@ -765,7 +767,7 @@ function WebChatPanel({ channel, onSaved }: { channel: Channel; onSaved: () => v
         <h4>3. אתרים מורשים</h4>
         <div className="field">
           <label htmlFor={id('org')}>כתובות האתרים שמותר להם להציג את הצ׳אט (שורה לכל אתר)</label>
-          <textarea id={id('org')} dir="ltr" rows={3} value={origins} onChange={(e) => setOrigins(e.target.value)} placeholder={'https://www.example.com\nhttps://*.example.co.il'} />
+          <textarea id={id('org')} dir="ltr" rows={3} value={origins} onChange={(e) => { originsTouched.current = true; setOrigins(e.target.value); }} placeholder={'https://www.example.com\nhttps://*.example.co.il'} />
           <p className="hint">הדפדפן עצמו חוסם הטמעה באתרים שאינם ברשימה, כך שאי אפשר "לגנוב" את הקוד לאתר אחר. כתובת עם תת-דומיינים: <span dir="ltr">https://*.example.com</span>.</p>
         </div>
         <div className="field"><label><input type="checkbox" style={{ width: 'auto', minHeight: 'auto' }} checked={c.allowAnyOrigin} onChange={(e) => setC({ ...c, allowAnyOrigin: e.target.checked })} /> לאפשר הטמעה בכל אתר (לא מומלץ)</label></div>
