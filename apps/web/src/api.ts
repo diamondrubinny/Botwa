@@ -5,12 +5,19 @@ export class ApiError extends Error {
 }
 
 export async function api<T = unknown>(method: string, url: string, body?: unknown): Promise<T> {
-  const res = await fetch(url, {
-    method,
-    credentials: 'same-origin',
-    headers: body !== undefined ? { 'content-type': 'application/json' } : undefined,
-    body: body !== undefined ? JSON.stringify(body) : undefined,
-  });
+  // never wait forever: a request the server or the network does not answer ends with a clear error instead of a stuck button
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      method,
+      credentials: 'same-origin',
+      headers: body !== undefined ? { 'content-type': 'application/json' } : undefined,
+      body: body !== undefined ? JSON.stringify(body) : undefined,
+      signal: AbortSignal.timeout(method === 'GET' ? 30_000 : 60_000),
+    });
+  } catch (e) {
+    throw new ApiError(0, (e as Error)?.name === 'TimeoutError' ? 'request_timeout' : 'network_error');
+  }
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new ApiError(res.status, res.status === 429 ? 'rate_limited' : ((data as { error?: string }).error ?? 'error'), (data as { problems?: string[] }).problems, typeof (data as { detail?: unknown }).detail === 'string' ? (data as { detail: string }).detail : undefined);
   return data as T;

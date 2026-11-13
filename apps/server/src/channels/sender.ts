@@ -45,6 +45,8 @@ export class PolicyRejected extends Error {
 
 interface Lane { tail: Promise<unknown>; last: number; recent: number[]; pending: number; failures: number; pausedUntil: number }
 const MAX_QUEUE = 50;
+/** the longest one platform call may take before the lane moves on (the adapters' own timeouts are shorter) */
+const SEND_TIMEOUT_MS = 45_000;
 
 /**
  * One lane per channel: sends are serialised, spaced by a random human-like delay, limited per minute and per day.
@@ -87,7 +89,9 @@ export class ChannelSender {
     if (lane.pending >= MAX_QUEUE) throw new SendError('queue_full');
     lane.pending++;
     const maxWait = opts.maxWaitMs ?? 25_000;
+    let gaveUp = false;
     const job = lane.tail.catch(() => undefined).then(async () => {
+      if (gaveUp) throw new SendError('send_throttled');   // the caller stopped waiting: do not send late
       if (this.now() < lane.pausedUntil) throw new SendError('channel_paused');
       const u = await this.usage(channelId);
       if (u.day >= warmupCap(settings, u.ageDays)) throw new SendError('daily_limit');
@@ -102,7 +106,8 @@ export class ChannelSender {
       lane.last = this.now();
       lane.recent.push(lane.last);
       try {
-        const out = await fn();
+        // a platform call that never answers must not block the channel's lane for everyone after it
+        const out = await Promise.race([fn(), new Promise<never>((_, rej) => setTimeout(() => rej(new Error('send_timeout')), SEND_TIMEOUT_MS).unref?.())]);
         lane.failures = 0;
         return out;
       } catch (e) {
@@ -118,6 +123,9 @@ export class ChannelSender {
       }
     });
     lane.tail = job;
-    try { return await job; } finally { lane.pending--; }
+    // the caller waits at most for the queue ahead (maxWait) plus one send; then it gets a clear "try again" instead of hanging
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const limit = new Promise<never>((_, rej) => { timer = setTimeout(() => { gaveUp = true; rej(new SendError('send_throttled')); }, maxWait + SEND_TIMEOUT_MS + 5_000); });
+    try { return await Promise.race([job, limit]); } finally { clearTimeout(timer); lane.pending--; }
   }
 }
