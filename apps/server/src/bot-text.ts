@@ -40,3 +40,21 @@ export function renderBotText(text: string, c: BotTextContext): string {
   const out = text.replace(/\{([^{}\n]{1,20})\}/g, (m, k: string) => { if (!Object.hasOwn(vals, k)) return m; if (!vals[k]) empty = true; return vals[k]!; });
   return empty ? out.replace(/[ \t]{2,}/g, ' ').replace(/[ \t]+([,.!?:;])/g, '$1').replace(/,([.!?:;,])/g, '$1').replace(/^[ \t]*[,.!?:;][ \t]*/gm, '').trim() : out;
 }
+
+/**
+ * "מי את?", "את בוט?", "איך קוראים לך?": the bot answers who it is, honestly (a bot, not a person) and by its persona name,
+ * and how to reach a person. Only short messages that are such a question; null otherwise (the normal flow answers).
+ */
+const WHO = /(^|\s)(מי את|מי אתה|מה שמך|מה השם שלך|איך קוראים לך|עם מי אני (מדבר|מדברת|מתכתב|מתכתבת))(\s|$)/;
+/** "את/אתה …" may ask about anything that the bot is; "זה/זאת …" only about being a machine (so "זה אמיתי ש…?" is a real question) */
+const BOT_YOU = /(^|\s)(את|אתה)\s+(בוט|רובוט|מכונה|מחשב|בינה מלאכותית|ai|צ'?אטבוט|אמיתי|אמיתית|בן אדם|בת אדם|נציג אמיתי|נציגה אמיתית)(\s|$)/i;
+const BOT_IT = /(^|\s)(זה|זאת|אני (מדבר|מדברת) עם|(מדבר|מדברת) עם)\s+(בוט|רובוט|מכונה|בינה מלאכותית|ai|צ'?אטבוט|בן אדם|נציג אמיתי)(\s|$)/i;
+const ONLY = new Set(['מי זה', 'מי זאת', 'בוט', 'רובוט']);
+export function identityReply(text: string | null | undefined, persona: { name?: string | null; role?: string | null }): string | null {
+  const t = (text ?? '').toLowerCase().replace(/[?!.,״"׳:;()\u200e\u200f]/g, ' ').replace(/\s+/g, ' ').trim();
+  if (!t || t.split(' ').length > 7 || !(ONLY.has(t) || WHO.test(t) || BOT_YOU.test(t) || BOT_IT.test(t))) return null;
+  const name = (persona.name ?? '').trim();
+  const role = (persona.role ?? '').trim();
+  const me = name ? `אני ${name}${role ? `, ${role}` : ', הבוט של השירות'}` : `אני ${role || 'הבוט של השירות'}`;
+  return `${me} 🤖 זה בוט, לא בן אדם: התשובות מגיעות מהמידע של היחידה, ופניות מועברות לצוות. כדי לדבר עם נציג, אפשר לכתוב "נציג" בכל רגע.`;
+}

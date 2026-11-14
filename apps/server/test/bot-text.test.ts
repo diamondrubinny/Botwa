@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { cleanName, firstName, renderBotText } from '../src/bot-text.js';
+import { cleanName, firstName, identityReply, renderBotText } from '../src/bot-text.js';
 import { buildSafetyFlow } from '../src/flow/safetyTemplate.js';
 import { flowSchema, validateFlow } from '../src/flow/schema.js';
 
@@ -33,5 +33,20 @@ describe('bot text variables', () => {
     expect(by.get('welcome_back')).toMatchObject({ next: 'topics' });
     expect(by.get('remember')).toMatchObject({ next: 'id_saved' });
     expect((by.get('id_intro') as { text: string }).text).toMatch(/^שלום, כאן \{בוט\} מיחידת הבטיחות/);
+  });
+});
+
+describe('the bot says who it is when asked', () => {
+  const betty = { name: 'בטי', role: 'הבוט של יחידת הבטיחות' };
+  it('answers "who are you / are you a bot" by its persona name, honestly a bot, with the way to a person', () => {
+    for (const q of ['מי את?', 'בטי, מי את', 'את בוט?', 'את בן אדם?', 'איך קוראים לך', 'אני מדבר עם בוט?', 'זה רובוט?', 'Are you AI? את ai', 'מי זה?']) {
+      const r = identityReply(q, betty);
+      expect(r, q).toContain('אני בטי, הבוט של יחידת הבטיחות');
+      expect(r, q).toContain('נציג');
+    }
+    expect(identityReply('את בוט?', {})).toContain('אני הבוט של השירות');
+  });
+  it('leaves real questions to the normal flow', () => {
+    for (const q of ['מי זה הממונה על לייזרים?', 'זה אמיתי שהמעבדה סגורה מחר?', 'איפה מוצאים את נוהל העבודה בגובה', 'שלום', 'את יכולה לעזור לי עם טופס פינוי פסולת כימית מהמעבדה בבניין 12?', '']) expect(identityReply(q, betty), q).toBeNull();
   });
 });

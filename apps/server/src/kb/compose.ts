@@ -13,7 +13,7 @@ export function quoteAnswer(bot: BotConfig, a: KbAnswer): string {
   return [bot.kb.intro, a.text, bot.kb.showSource ? sourceLine(a) : '', bot.kb.outro].filter(Boolean).join('\n\n');
 }
 
-const SYSTEM = (name: string) => `את/ה ${name}, עוזר/ת השירות של הארגון. התפקיד: לענות ללקוחות בעברית, בטון נעים, אדיב ומקצועי, בלשון פנייה ניטרלית (בלי זכר/נקבה).
+const SYSTEM = (name: string, role?: string) => `שמך ${name}${role ? ` (${role})` : ''}, ואת/ה עוזר/ת השירות של הארגון. כשמציגים את עצמך, משתמשים בשם הזה. התפקיד: לענות ללקוחות בעברית, בטון נעים, אדיב ומקצועי, בלשון פנייה ניטרלית (בלי זכר/נקבה).
 כללים מחייבים:
 1. עונים אך ורק על סמך הקטעים ממאגר הידע שבהודעה. לא מוסיפים שום מידע שאינו מופיע בהם, גם אם הוא נראה ידוע.
 2. לא ממציאים מספרי סעיפים, תקנים, תאריכים, סכומים, טלפונים או כתובות. מספרים ושמות מעתיקים בדיוק מהקטעים.
@@ -39,7 +39,7 @@ export function onlyKnownFacts(answer: string, passages: string): boolean {
  * configured, does not answer in time, says the passages do not cover it, or mentions a number/link not in the passages:
  * the caller then quotes the passage instead. Uses the Ollama chat API on this server (POST {url}/api/chat).
  */
-export async function localAnswer(llm: LlmConfig, bot: BotConfig, question: string, a: KbAnswer, botName: string, fetchImpl: FetchLike = (u, i) => fetch(u, i)): Promise<string | null> {
+export async function localAnswer(llm: LlmConfig, bot: BotConfig, question: string, a: KbAnswer, botName: string, fetchImpl: FetchLike = (u, i) => fetch(u, i), botRole?: string): Promise<string | null> {
   if (!llm.url) return null;
   const parts = [{ h: a, text: a.passage ?? a.text }, ...(a.others ?? []).slice(0, 2).map((h) => ({ h, text: h.snippet }))];
   const passages = parts.map((p, i) => `[${i + 1}] ${p.h.title}${p.h.heading ? ` › ${p.h.heading.split(' › ').pop()}` : ''}\n${p.text.slice(0, 1500)}`).join('\n\n');
@@ -48,7 +48,7 @@ export async function localAnswer(llm: LlmConfig, bot: BotConfig, question: stri
       method: 'POST', headers: { 'content-type': 'application/json' }, signal: AbortSignal.timeout(llm.timeoutMs),
       body: JSON.stringify({
         model: llm.model, stream: false, options: { temperature: 0.2, num_predict: 400 },
-        messages: [{ role: 'system', content: SYSTEM(botName) }, { role: 'user', content: `שאלת הלקוח:\n${question.slice(0, 800)}\n\nקטעים ממאגר הידע:\n${passages}` }],
+        messages: [{ role: 'system', content: SYSTEM(botName, botRole) }, { role: 'user', content: `שאלת הלקוח:\n${question.slice(0, 800)}\n\nקטעים ממאגר הידע:\n${passages}` }],
       }),
     });
     if (!res.ok) return null;
@@ -60,9 +60,9 @@ export async function localAnswer(llm: LlmConfig, bot: BotConfig, question: stri
 }
 
 /** The answer the customer gets, in the chosen mode (the local model falls back to the quote whenever it cannot be trusted). */
-export async function composeAnswer(llm: LlmConfig, bot: BotConfig, question: string, a: KbAnswer, botName: string, fetchImpl?: FetchLike): Promise<string> {
+export async function composeAnswer(llm: LlmConfig, bot: BotConfig, question: string, a: KbAnswer, botName: string, fetchImpl?: FetchLike, botRole?: string): Promise<string> {
   if (bot.kb.answerMode === 'local') {
-    const t = await localAnswer(llm, bot, question, a, botName, fetchImpl);
+    const t = await localAnswer(llm, bot, question, a, botName, fetchImpl, botRole);
     if (t) return t;
   }
   return quoteAnswer(bot, a);

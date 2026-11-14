@@ -38,7 +38,7 @@ import { loadPersona } from '../routes/branding.js';
 import { saveUsername } from './username-store.js';
 import { isSensitive, pickGif, type GifMoment } from '../bot-gifs.js';
 import { detect, sanitizeFileName } from '../media/validate.js';
-import { renderBotText, cleanName, type BotTextContext } from '../bot-text.js';
+import { renderBotText, cleanName, identityReply, type BotTextContext } from '../bot-text.js';
 import { isCommentContact, META_CREDS_KEY, MetaMessagingAdapter, type CommentReplyMode, type MetaCreds } from './meta-messaging.js';
 import { WebChatAdapter } from './webchat.js';
 import { WhatsAppAdapter } from './whatsapp.js';
@@ -785,8 +785,8 @@ export class ChannelManager {
 
   /** The knowledge-base answer in the chosen wording: the passage itself, or a local model's wording of the passages only. */
   async wordAnswer(bot: BotConfig, question: string, a: KbAnswer): Promise<string> {
-    const name = (await loadPersona(this.db).catch(() => null))?.name || 'העוזר/ת';
-    return composeAnswer({ url: this.cfg.LOCAL_LLM_URL, model: this.cfg.LOCAL_LLM_MODEL, timeoutMs: this.cfg.LOCAL_LLM_TIMEOUT_MS }, bot, question, a, name);
+    const persona = await loadPersona(this.db).catch(() => null);
+    return composeAnswer({ url: this.cfg.LOCAL_LLM_URL, model: this.cfg.LOCAL_LLM_MODEL, timeoutMs: this.cfg.LOCAL_LLM_TIMEOUT_MS }, bot, question, a, persona?.name || 'העוזר/ת', undefined, persona?.role || undefined);
   }
 
   /** Menu bot: answer, or hand over to a person (assign via routing, leave a note, away notice outside hours). */
@@ -895,6 +895,9 @@ export class ChannelManager {
       return;
     }
 
+    // "מי את?" / "את בוט?": the bot says who it is (by its persona name), honestly a bot, and how to reach a person; the flow stays where it was
+    const who = identityReply(text, (await loadPersona(this.db).catch(() => null)) ?? {});
+    if (who) { await this.botSay(channelId, convId, ext, who); return; }
     await rx.greet(text);
     if (bot.reactions.ackAll) await rx.set('working');   // "seen, working on it" for every message the bot handles
     // the moment for a GIF: a thank-you, or the start of a new inquiry (the bot's opening message)

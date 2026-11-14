@@ -118,4 +118,15 @@ describe('Betty adds a GIF at pleasant moments', () => {
     const { loadBot } = await import('../src/bot.js');
     expect((await loadBot(db)).gifs).toEqual({ enabled: true, greeting: true, thanks: true, handoff: true, close: true, cooldownMinutes: 360 });
   });
+  it('"מי את?": the bot answers who it is by its persona name, without the menu, and the conversation stays where it was', async () => {
+    await setBot({ gifs: { ...DEFAULT_BOT.gifs, enabled: false } });
+    await db.query(`INSERT INTO settings (key, value) VALUES ('bot_persona', '{"name":"בטי","role":"הבוט של יחידת הבטיחות"}') ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`);
+    await say('w1@s.whatsapp.net', 'שלום');
+    const st = (await db.query(`SELECT c.bot_state FROM conversations c JOIN contacts ct ON ct.id = c.contact_id WHERE ct.external_id = 'w1@s.whatsapp.net'`)).rows[0].bot_state;
+    const r = await say('w1@s.whatsapp.net', 'את בוט?');
+    expect(r.texts).toHaveLength(1);
+    expect(r.texts[0]).toContain('אני בטי, הבוט של יחידת הבטיחות');
+    expect(r.texts[0]).not.toContain('במה אפשר לעזור');
+    expect((await db.query(`SELECT c.bot_state FROM conversations c JOIN contacts ct ON ct.id = c.contact_id WHERE ct.external_id = 'w1@s.whatsapp.net'`)).rows[0].bot_state).toBe(st);
+  });
 });
