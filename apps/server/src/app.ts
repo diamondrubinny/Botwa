@@ -11,6 +11,7 @@ import Fastify, { type FastifyInstance } from 'fastify';
 import { authRoutes } from './routes/auth.js';
 import { formRoutes } from './routes/forms.js';
 import { smsRoutes } from './routes/sms.js';
+import { staffLinkRoutes } from './routes/staffLinks.js';
 import { userRoutes } from './routes/users.js';
 import { channelRoutes } from './routes/channels.js';
 import multipart from '@fastify/multipart';
@@ -194,6 +195,7 @@ export async function buildApp(cfg: Config, db: Db, mgr: ChannelManager, media: 
   widgetRoutes(app, db, mgr, cfg);
   formRoutes(app, db, mgr, cfg, media);
   smsRoutes(app, db, cfg);
+  staffLinkRoutes(app, db);
   const hooks = new WebhookService(db, cfg, webhookSender);
   mgr.webhooks = hooks;
   if (cfg.NODE_ENV !== 'test') hooks.start();

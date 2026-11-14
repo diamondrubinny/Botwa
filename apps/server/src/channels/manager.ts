@@ -38,6 +38,7 @@ import { loadPersona } from '../routes/branding.js';
 import { saveUsername } from './username-store.js';
 import { isSensitive, pickGif, type GifMoment } from '../bot-gifs.js';
 import { isEmergency } from '../emergency.js';
+import { staffMessage } from '../staff/assistant.js';
 import { detect, sanitizeFileName } from '../media/validate.js';
 import { renderBotText, cleanName, identityReply, smallTalkReply, withoutBotName, type BotTextContext } from '../bot-text.js';
 import { isCommentContact, META_CREDS_KEY, MetaMessagingAdapter, type CommentReplyMode, type MetaCreds } from './meta-messaging.js';
@@ -344,6 +345,11 @@ export class ChannelManager {
         },
         onReaction: (ev) => { void this.customerReaction(channelId, ev).catch(() => undefined); },
         onMessage: async (m) => {
+          // a linked manager asking Betty about the inquiries (or linking with a code): answered here, never stored as a customer conversation
+          if (['whatsapp', 'whatsapp_cloud', 'telegram'].includes(this.types.get(channelId) ?? '') && !m.flowReply) {
+            const staff = await staffMessage(this.db, channelId, m.externalContactId, m.media ? null : m.text, this.cfg.APP_ORIGIN.split(',')[0]!.trim()).catch(() => null);
+            if (staff !== null) { await this.sendText(channelId, m.externalContactId, staff, { background: true }).catch(() => undefined); return; }
+          }
           const r = await ingestInbound(this.db, channelId, m, { floodLimit: this.cfg.FLOOD_LIMIT });
           if (r.externalContactId !== m.externalContactId) m = { ...m, externalContactId: r.externalContactId };   // known by number, came by user id: answer the contact we know
           if (r.flooded) {

@@ -1,4 +1,5 @@
 import { IntroCard } from '../components/IntroCard';
+import { StaffWhatsApp } from '../components/StaffWhatsApp';
 import { PageTitle } from '../components/Illustration';
 import QRCode from 'qrcode';
 import { useState, type FormEvent } from 'react';
@@ -97,6 +98,7 @@ export function Account({ me, onChanged, onLogout }: { me: Me; onChanged: () => 
       )}
       <p>{me.name} · {me.email} · {me.roleName}{me.username ? <> · שם משתמש: <bdi dir="ltr">@{me.username}</bdi></> : null}</p>
       <IntroCard me={me} onChanged={onChanged} />
+      <StaffWhatsApp />
 
       <section className="card" aria-labelledby="av-h">
         <h2 id="av-h">תמונת פרופיל</h2>
