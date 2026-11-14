@@ -10,6 +10,10 @@ import type { Field } from './schema.js';
  *  - "SUCCESS" is a reserved screen id; DatePicker values are "YYYY-MM-DD" (Flow JSON 5.0+)
  */
 export const FLOW_JSON_VERSION = '7.3';
+/** Meta: screen ids (and, to be safe, field names) may hold only letters and underscores, no digits; "SUCCESS" is reserved. */
+export const letters = (n: number): string => { let s = ''; n += 1; while (n > 0) { const r = (n - 1) % 26; s = String.fromCharCode(97 + r) + s; n = Math.floor((n - 1) / 26); } return s; };
+const screenId = (i: number) => `SCREEN_${letters(i).toUpperCase()}`;
+export const FIRST_SCREEN = screenId(0);
 export const LABEL_MAX = 20;
 const HELPER_MAX = 80;
 const OPTIN_MAX = 120;
@@ -59,7 +63,7 @@ export function buildFlowJson(title: string, fields: Field[], labels: Record<str
   const component = (f: Field, name: string, first: boolean): Record<string, unknown> => {
     const label = shortLabel(labels[f.id] || f.label);
     const helper = f.hint ? clip(f.hint, HELPER_MAX) : (label !== f.label.trim() ? clip(f.label, HELPER_MAX) : undefined);
-    const init = f.prefill ? { 'init-value': first ? `\${data.p_${name}}` : `\${screen.S1.data.p_${name}}` } : {};
+    const init = f.prefill ? { 'init-value': first ? `\${data.p_${name}}` : `\${screen.${FIRST_SCREEN}.data.p_${name}}` } : {};
     const base = { name, label, required: f.required, ...(helper ? { 'helper-text': helper } : {}) };
     switch (f.type) {
       case 'textarea': return { type: 'TextArea', ...base, ...init };
@@ -79,15 +83,15 @@ export function buildFlowJson(title: string, fields: Field[], labels: Record<str
   let cur: Record<string, unknown>[] = [];
   let optins = 0;
   inputs.forEach((f, i) => {
-    const name = `f${i}`;
+    const name = `field_${letters(i)}`;
     names[name] = f.id;
     const isOpt = f.type === 'checkbox';
-    if (cur.length >= PER_SCREEN || (isOpt && optins >= OPTINS_PER_SCREEN)) { screens.push({ id: `S${screens.length + 1}`, items: cur }); cur = []; optins = 0; }
+    if (cur.length >= PER_SCREEN || (isOpt && optins >= OPTINS_PER_SCREEN)) { screens.push({ id: screenId(screens.length), items: cur }); cur = []; optins = 0; }
     cur.push(component(f, name, screens.length === 0));
     if (isOpt) optins++;
   });
-  if (cur.length) screens.push({ id: `S${screens.length + 1}`, items: cur });
-  const signId = `S${screens.length + 1}`;
+  if (cur.length) screens.push({ id: screenId(screens.length), items: cur });
+  const signId = screenId(screens.length);
   const all = [...screens.map((s) => s.id), signId];
   const ref = (name: string) => {
     const s = screens.find((x) => x.items.some((c) => c.name === name));
@@ -98,7 +102,7 @@ export function buildFlowJson(title: string, fields: Field[], labels: Record<str
   payload[CONSENT] = `\${form.${CONSENT}}`;
   if (sign) payload[SIGNER] = `\${form.${SIGNER}}`;
   // the initial values of the first screen's data, declared with examples (Meta validates the data model)
-  const prefillData = Object.fromEntries(Object.keys(names).filter((n) => { const f = inputs[Number(n.slice(1))]!; return !!f.prefill && f.type !== 'checkbox'; }).map((n) => [`p_${n}`, { type: 'string', __example__: '' }]));
+  const prefillData = Object.fromEntries(Object.keys(names).filter((n) => { const f = inputs.find((x) => x.id === names[n])!; return !!f.prefill && f.type !== 'checkbox'; }).map((n) => [`p_${n}`, { type: 'string', __example__: '' }]));
   const out = all.map((id, idx) => {
     const last = idx === all.length - 1;
     const children: Record<string, unknown>[] = [];

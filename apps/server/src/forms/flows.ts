@@ -1,7 +1,7 @@
 import type { Config } from '../config.js';
 import { FlowError, flowIdIn } from '../channels/whatsapp-cloud.js';
 import type { Db } from '../db.js';
-import { buildFlowJson, flowStartData, initialsOf, parseFlowReply } from './flowjson.js';
+import { FIRST_SCREEN, buildFlowJson, flowStartData, initialsOf, parseFlowReply } from './flowjson.js';
 import { byToken, createRequest, dateHe, deliverSignedCopy, event, getTemplate, sha256, submit, type CopyOut, type CopyStore, type StoredFlow, type TemplateRow } from './service.js';
 
 /**
@@ -19,7 +19,7 @@ export interface FlowApi {
   accountHealth?(): Promise<Record<string, string>>;
 }
 export interface FlowSender extends CopyOut {
-  sendFlow(channelId: string, ext: string, f: { flowId: string; token: string; body: string; cta: string; data?: Record<string, string> }): Promise<{ externalMessageId?: string }>;
+  sendFlow(channelId: string, ext: string, f: { flowId: string; token: string; body: string; cta: string; screen?: string; data?: Record<string, string> }): Promise<{ externalMessageId?: string }>;
   sendText(channelId: string, ext: string, text: string, opts?: { background?: boolean }): Promise<{ externalMessageId?: string }>;
 }
 
@@ -120,7 +120,7 @@ export async function sendFlowRequest(db: Db, cfg: Config, out: FlowSender, a: {
   const body = flowMessage(r.conv.display_name, r.title, r.expires, a.note);
   let sent: { externalMessageId?: string };
   try {
-    sent = await out.sendFlow(r.conv.channel_id, r.conv.external_id, { flowId: st.flow!.flowId, token: r.token, body, cta: 'מילוי הטופס', data: flowStartData(t.fields, st.flow!.names, r.prefill) });
+    sent = await out.sendFlow(r.conv.channel_id, r.conv.external_id, { flowId: st.flow!.flowId, token: r.token, body, cta: 'מילוי הטופס', screen: FIRST_SCREEN, data: flowStartData(t.fields, st.flow!.names, r.prefill) });
   } catch (e) {
     await db.query('DELETE FROM form_requests WHERE id = $1', [r.id]);
     throw e;

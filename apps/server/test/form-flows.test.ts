@@ -33,36 +33,43 @@ describe('a form template as a WhatsApp Flow', () => {
     expect(b.problems).toEqual([]);
     const j = b.json as { version: string; screens: { id: string; terminal?: boolean; data: Record<string, unknown>; layout: { children: Record<string, unknown>[] } }[] };
     expect(j.version).toBe('7.3');
-    expect(j.screens.map((s) => s.id)).toEqual(['S1', 'S2', 'S3']);
+    expect(j.screens.map((s) => s.id)).toEqual(['SCREEN_A', 'SCREEN_B', 'SCREEN_C']);
     expect(j.screens.some((s) => s.id === 'SUCCESS')).toBe(false);
+    // Meta: "Property 'id' should only consist of alphabets and underscores" (and the same for field names, to be safe)
+    for (const sc of j.screens) {
+      expect(sc.id).toMatch(/^[A-Za-z_]+$/);
+      for (const c of sc.layout.children) if (typeof c.name === 'string') expect(c.name).toMatch(/^[A-Za-z_]+$/);
+      for (const k of Object.keys(sc.data)) expect(k).toMatch(/^[A-Za-z_]+$/);
+    }
+    expect(Object.keys(buildFlowJson('ארוך', Array.from({ length: 40 }, (_, i) => F(`q${i}`, 'text', `שאלה ${i}`))).names).pop()).toBe('field_an');
     const inputs = (s: { layout: { children: Record<string, unknown>[] } }) => s.layout.children.filter((c) => !['TextSubheading', 'TextBody', 'Footer'].includes(c.type as string));
     expect(inputs(j.screens[0]!)).toHaveLength(8);
     expect(Object.values(b.names)).not.toContain('lk');                          // a locked system value is not asked
     expect(Object.values(b.names)).not.toContain('sig');
     const first = inputs(j.screens[0]!)[0]!;
-    expect(first).toMatchObject({ type: 'TextInput', name: 'f0', 'init-value': '${data.p_f0}' });
-    expect(j.screens[0]!.data).toEqual({ p_f0: { type: 'string', __example__: '' } });
+    expect(first).toMatchObject({ type: 'TextInput', name: 'field_a', 'init-value': '${data.p_field_a}' });
+    expect(j.screens[0]!.data).toEqual({ p_field_a: { type: 'string', __example__: '' } });
     const last = j.screens[2]!;
     expect(last.terminal).toBe(true);
     const footer = last.layout.children.find((c) => c.type === 'Footer') as { 'on-click-action': { name: string; payload: Record<string, string> } };
     expect(footer['on-click-action'].name).toBe('complete');
-    expect(footer['on-click-action'].payload).toMatchObject({ f0: '${screen.S1.form.f0}', f9: '${screen.S2.form.f9}', consent: '${form.consent}', signer_name: '${form.signer_name}' });
+    expect(footer['on-click-action'].payload).toMatchObject({ field_a: '${screen.SCREEN_A.form.field_a}', field_j: '${screen.SCREEN_B.form.field_j}', consent: '${form.consent}', signer_name: '${form.signer_name}' });
     for (const s of j.screens) for (const c of s.layout.children) if (typeof c.label === 'string' && c.type !== 'OptIn' && c.type !== 'Footer') expect((c.label as string).length, c.label as string).toBeLessThanOrEqual(20);
     const date = inputs(j.screens[1]!).find((c) => c.type === 'DatePicker');
     expect(date).toBeDefined();
-    expect(flowStartData(fields, b.names, { name: 'דנה לוי', q0: 'x' })).toEqual({ p_f0: 'דנה לוי' });
+    expect(flowStartData(fields, b.names, { name: 'דנה לוי', q0: 'x' })).toEqual({ p_field_a: 'דנה לוי' });
   });
 
   it('an ID number: text with a pattern, the helper text Meta requires with it, hidden in the signer\'s summary', () => {
     const b = buildFlowJson('טופס', [F('id', 'id_number', 'תעודת זהות'), F('n', 'text', 'שם')]);
     const s1 = (b.json as { screens: { sensitive?: string[]; layout: { children: Record<string, unknown>[] } }[] }).screens[0]!;
-    const id = s1.layout.children.find((c) => c.name === 'f0')!;
+    const id = s1.layout.children.find((c) => c.name === 'field_a')!;
     expect(id).toMatchObject({ type: 'TextInput', 'input-type': 'text', pattern: '^[0-9]{5,9}$', 'helper-text': 'ספרות בלבד (5–9)' });
-    expect(s1.sensitive).toEqual(['f0']);
+    expect(s1.sensitive).toEqual(['field_a']);
   });
 
   it('reads the reply back by field id, and makes initials', () => {
-    const r = parseFlowReply(JSON.stringify({ flow_token: 'f_x', f0: 'דנה', f1: true, consent: true, signer_name: '  דנה   לוי ', other: 'x' }), { f0: 'name', f1: 'ok' });
+    const r = parseFlowReply(JSON.stringify({ flow_token: 'f_x', field_a: 'דנה', field_b: true, consent: true, signer_name: '  דנה   לוי ', other: 'x' }), { field_a: 'name', field_b: 'ok' });
     expect(r).toEqual({ token: 'f_x', values: { name: 'דנה', ok: true }, consent: true, signer: 'דנה לוי' });
     expect(parseFlowReply('not json', {})).toBeNull();
     expect(parseFlowReply('[1]', {})).toBeNull();
@@ -161,7 +168,7 @@ describe('forms filled inside WhatsApp, end to end against a simulated Meta', ()
     expect(created).toMatchObject({ categories: ['OTHER'] });
     expect(created.publish).toBeUndefined();                                                       // a draft first, published in its own step
     expect(posts.some((p) => p.url.endsWith('/777000111/publish'))).toBe(true);
-    expect(JSON.parse(created.flow_json).screens[0].layout.children.find((c: { name?: string }) => c.name === 'f0').label).toBe('שם העובד');
+    expect(JSON.parse(created.flow_json).screens[0].layout.children.find((c: { name?: string }) => c.name === 'field_a').label).toBe('שם העובד');
   });
 
   it('sent from the conversation: a Flow message with the token and the prefilled name; the answers become the locked PDF', async () => {
@@ -171,14 +178,14 @@ describe('forms filled inside WhatsApp, end to end against a simulated Meta', ()
     expect(r.statusCode).toBe(201);
     const msg = posts.find((p) => p.url.endsWith('/1234567890/messages'))!.body as { to: string; interactive: { type: string; body: { text: string }; action: { name: string; parameters: { flow_id: string; flow_token: string; flow_cta: string; flow_action_payload: { screen: string; data: Record<string, string> } } } } };
     expect(msg.to).toBe('972501112233');
-    expect(msg.interactive).toMatchObject({ type: 'flow', action: { name: 'flow', parameters: { flow_id: '777000111', flow_cta: 'מילוי הטופס', flow_action_payload: { screen: 'S1', data: { p_f0: 'Dana Levi' } } } } });
+    expect(msg.interactive).toMatchObject({ type: 'flow', action: { name: 'flow', parameters: { flow_id: '777000111', flow_cta: 'מילוי הטופס', flow_action_payload: { screen: 'SCREEN_A', data: { p_field_a: 'Dana Levi' } } } } });
     expect(msg.interactive.body.text).toContain('לפני העבודה מחר');
     const token = msg.interactive.action.parameters.flow_token;
     expect(token).toMatch(/^f_[\w-]{20,}$/);
     expect((await db.query(`SELECT via, status FROM form_requests WHERE id = $1`, [r.json().id])).rows[0]).toEqual({ via: 'flow', status: 'sent' });
     // the customer fills it in WhatsApp
     posts.length = 0;
-    await reply('972501112233', 'wamid.IN2', { flow_token: token, f0: 'דנה לוי', f1: '2026-11-20', f2: true, consent: true, signer_name: 'דנה לוי' });
+    await reply('972501112233', 'wamid.IN2', { flow_token: token, field_a: 'דנה לוי', field_b: '2026-11-20', field_c: true, consent: true, signer_name: 'דנה לוי' });
     const req = (await db.query(`SELECT r.status, r.signer_name, s.sha256 FROM form_requests r LEFT JOIN form_submissions s ON s.request_id = r.id WHERE r.id = $1`, [r.json().id])).rows[0];
     expect(req).toMatchObject({ status: 'signed', signer_name: 'דנה לוי' });
     expect(req.sha256).toMatch(/^[0-9a-f]{64}$/);
@@ -193,7 +200,7 @@ describe('forms filled inside WhatsApp, end to end against a simulated Meta', ()
     expect(pdf.statusCode).toBe(200);
     // sent twice: nothing new, a short answer
     posts.length = 0;
-    await reply('972501112233', 'wamid.IN3', { flow_token: token, f0: 'אחר', consent: true, signer_name: 'אחר' });
+    await reply('972501112233', 'wamid.IN3', { flow_token: token, field_a: 'אחר', consent: true, signer_name: 'אחר' });
     expect((await db.query(`SELECT count(*)::int AS n FROM form_submissions WHERE request_id = $1`, [r.json().id])).rows[0].n).toBe(1);
     expect(JSON.stringify(posts)).toContain('כבר נחתם');
   });
@@ -205,16 +212,16 @@ describe('forms filled inside WhatsApp, end to end against a simulated Meta', ()
     const token = (posts.filter((p) => p.url.endsWith('/1234567890/messages')).pop()!.body as { interactive: { action: { parameters: { flow_token: string } } } }).interactive.action.parameters.flow_token;
     // the same token from someone else
     await say('972509998888', 'wamid.X1', 'היי');
-    await reply('972509998888', 'wamid.X2', { flow_token: token, f0: 'זר', f1: '2026-11-20', f2: true, consent: true, signer_name: 'זר' });
+    await reply('972509998888', 'wamid.X2', { flow_token: token, field_a: 'זר', field_b: '2026-11-20', field_c: true, consent: true, signer_name: 'זר' });
     expect((await db.query(`SELECT status FROM form_requests WHERE id = $1`, [r.id])).rows[0].status).toBe('sent');
     expect((await db.query(`SELECT body FROM conversation_notes WHERE conversation_id = $1`, [await convOf('972509998888')])).rows[0].body).toContain('אינה שייכת');
     // no statement
     posts.length = 0;
-    await reply('972501112233', 'wamid.X3', { flow_token: token, f0: 'דנה', f1: '2026-11-20', f2: true, consent: false, signer_name: 'דנה לוי' });
+    await reply('972501112233', 'wamid.X3', { flow_token: token, field_a: 'דנה', field_b: '2026-11-20', field_c: true, consent: false, signer_name: 'דנה לוי' });
     expect(JSON.stringify(posts)).toContain('לא התקבל אישור ההצהרה');
     // a bad date
     posts.length = 0;
-    await reply('972501112233', 'wamid.X4', { flow_token: token, f0: 'דנה', f1: 'מחר', f2: true, consent: true, signer_name: 'דנה לוי' });
+    await reply('972501112233', 'wamid.X4', { flow_token: token, field_a: 'דנה', field_b: 'מחר', field_c: true, consent: true, signer_name: 'דנה לוי' });
     expect(JSON.stringify(posts)).toContain('תאריך העבודה');
     expect((await db.query(`SELECT status FROM form_requests WHERE id = $1`, [r.id])).rows[0].status).toBe('sent');
   });

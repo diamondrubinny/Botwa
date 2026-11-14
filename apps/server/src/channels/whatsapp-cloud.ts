@@ -417,8 +417,8 @@ export class WhatsAppCloudAdapter implements ChannelAdapter {
   }
 
   /** A message with a button that opens the Flow (inside the 24-hour window). The token identifies the form request in the reply. */
-  async sendFlow(externalContactId: string, f: { flowId: string; token: string; body: string; cta: string; data?: Record<string, string> }): Promise<{ externalMessageId?: string }> {
-    const parameters: Record<string, unknown> = { flow_message_version: '3', flow_id: f.flowId, flow_token: f.token, flow_cta: f.cta.slice(0, 30), flow_action: 'navigate', flow_action_payload: { screen: 'S1', ...(f.data && Object.keys(f.data).length ? { data: f.data } : {}) } };
+  async sendFlow(externalContactId: string, f: { flowId: string; token: string; body: string; cta: string; screen?: string; data?: Record<string, string> }): Promise<{ externalMessageId?: string }> {
+    const parameters: Record<string, unknown> = { flow_message_version: '3', flow_id: f.flowId, flow_token: f.token, flow_cta: f.cta.slice(0, 30), flow_action: 'navigate', flow_action_payload: { screen: f.screen ?? 'SCREEN_A', ...(f.data && Object.keys(f.data).length ? { data: f.data } : {}) } };
     const out = await this.post(`${this.creds?.phoneNumberId}/messages`, { messaging_product: 'whatsapp', recipient_type: 'individual', ...recipientOf(externalContactId), type: 'interactive', interactive: { type: 'flow', body: { text: f.body.slice(0, 1024) }, action: { name: 'flow', parameters } } });
     return { externalMessageId: out.messages?.[0]?.id };
   }
