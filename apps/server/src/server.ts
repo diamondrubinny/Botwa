@@ -11,6 +11,7 @@ import { createDb } from './db.js';
 import { migrate } from './migrate.js';
 import { seedGifPresets } from './gif-presets.js';
 import { purgeSmsLog } from './sms/service.js';
+import { seedIosh } from './kb/gov/iosh.js';
 import { gifToMp4 } from './media/animation.js';
 import path from 'node:path';
 
@@ -26,6 +27,8 @@ await mgr.startAll();
 void seedGifPresets(db, (gif) => gifToMp4(gif, { ffmpegPath: cfg.FFMPEG_PATH, tmpDir: path.join(cfg.MEDIA_DIR, 'tmp') }))
   .then((n) => { if (n) app.log.info({ added: n }, 'built-in GIFs added to the gallery'); })
   .catch((err) => app.log.error({ err }, 'built-in GIFs could not be added'));
+// the directory of the Institute for Occupational Safety and Hygiene's topic pages (links only), once per version
+if (mgr.kb) void seedIosh(db, mgr.kb).then((n) => { if (n) app.log.info({ added: n }, 'IOSH directory added to the knowledge base'); }).catch((err) => app.log.error({ err }, 'IOSH directory failed'));
 // Knowledge base: resume unfinished link imports, re-read links whose refresh time has come, drop old question logs.
 void mgr.kb?.resumePending().catch((err) => app.log.error({ err }, 'kb resume failed'));
 setInterval(() => void mgr.supervise().catch((err) => app.log.error({ err }, 'channel supervision failed')), 60_000).unref();
