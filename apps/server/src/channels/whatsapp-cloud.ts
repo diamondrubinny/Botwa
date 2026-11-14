@@ -405,7 +405,7 @@ export class WhatsAppCloudAdapter implements ChannelAdapter {
       }
     };
     if (this.creds?.wabaId) await read(this.creds.wabaId, ['account_review_status', 'business_verification_status']);
-    if (this.creds) await read(this.creds.phoneNumberId, ['quality_rating', 'name_status', 'code_verification_status']);
+    if (this.creds) await read(this.creds.phoneNumberId, ['quality_rating', 'name_status', 'code_verification_status', 'messaging_limit_tier']);
     return out;
   }
 

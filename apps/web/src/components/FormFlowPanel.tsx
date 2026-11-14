@@ -9,7 +9,7 @@ interface FlowInfo {
 }
 const STATUS: Record<string, string> = { PUBLISHED: 'פורסם', DRAFT: 'טיוטה (יש שגיאות)', DEPRECATED: 'הוצא משימוש', BLOCKED: 'חסום ע"י Meta', THROTTLED: 'מוגבל ע"י Meta' };
 const LABEL_MAX = 20;
-const HEALTH: Record<string, string> = { account_review_status: 'סקירת החשבון העסקי', business_verification_status: 'אימות העסק', quality_rating: 'איכות המספר', name_status: 'אישור שם התצוגה', code_verification_status: 'אימות המספר' };
+const HEALTH: Record<string, string> = { account_review_status: 'סקירת החשבון העסקי', business_verification_status: 'אימות העסק', quality_rating: 'איכות המספר', name_status: 'אישור שם התצוגה', code_verification_status: 'אימות המספר', messaging_limit_tier: 'מגבלת הודעות' };
 
 /**
  * Filling a template inside WhatsApp (WhatsApp Flows, official channel): the switch, short labels (Meta allows 20 characters),
@@ -36,6 +36,17 @@ export function FormFlowPanel({ tpl, onClose }: { tpl: FormTemplate; onClose: ()
     try { await api('PUT', base, { enabled, labels: Object.fromEntries(Object.entries(labels).filter(([, v]) => v.trim())) }); setMsg({ ok: true, text: 'נשמר. אם שיניתם תוויות, צריך לפרסם מחדש.' }); await load(); } catch (e) { fail(e); }
     setBusy(false);
   }
+  async function probe(channelId: string) {
+    setBusy(true); setMsg(null);
+    try {
+      const r = await api<{ result: 'ok' | 'refused'; problem?: string; detail?: string; health?: Record<string, string> }>('POST', '/forms/flow/probe', { channelId });
+      setMsg(r.result === 'ok'
+        ? { ok: true, text: 'החשבון יכול לפרסם טפסים: טופס מינימלי פורסם והוסר. Meta מתנגדת לתוכן הטופס הזה, ולא לחשבון. ודאו שאין בו שדה של מספר מזהה (ת"ז, דרכון, חשבון בנק או כרטיס אשראי). המדיניות של WhatsApp אוסרת לבקש אותם.' }
+        : { ok: false, text: r.problem === 'flow_integrity' ? 'גם טופס מינימלי, בלי שדות, נחסם: החסימה היא על החשבון, לא על הטופס. צריך לפנות לתמיכה של Meta (Direct Support, נושא WhatsApp Flows) עם צילום של המסך הזה.' : `${errText(r.problem ?? 'generic')}${r.detail ? ` (${r.detail})` : ''}` });
+      setHealth(r.health ?? null);
+    } catch (e) { fail(e); }
+    setBusy(false);
+  }
   async function publish(channelId: string) {
     setBusy(true); setMsg(null);
     try {
@@ -54,7 +65,7 @@ export function FormFlowPanel({ tpl, onClose }: { tpl: FormTemplate; onClose: ()
       {!info ? <p role="status">טוען…</p> : (
         <>
           <label className="row" style={{ fontWeight: 400 }}><input type="checkbox" role="switch" style={{ width: 'auto', minHeight: 'auto' }} checked={enabled} onChange={(e) => setEnabled(e.target.checked)} /> מותר למלא את הטופס בתוך ווצאפ</label>
-          {info.problems.includes('too_many_fields') && <p className="error">יש בטופס יותר מדי שדות למילוי נוח בווצאפ. אפשר לשלוח אותו רק כקישור.</p>}
+          {info.problems.map((p) => <p key={p} className="error">{errText(p)}</p>)}
           {info.fields.length > 0 && (
             <table>
               <caption>תוויות בווצאפ (עד {LABEL_MAX} תווים; התווית המלאה מוצגת כהסבר מתחת לשדה)</caption>
@@ -82,6 +93,12 @@ export function FormFlowPanel({ tpl, onClose }: { tpl: FormTemplate; onClose: ()
                     {c.flow?.previewUrl && <a href={c.flow.previewUrl} target="_blank" rel="noopener noreferrer">תצוגה מקדימה אצל Meta<span className="sr-only"> (נפתח בלשונית חדשה)</span></a>}
                   </div>
                   {!c.connected && <p className="hint">הערוץ לא מחובר כרגע.</p>}
+                  {c.flow?.errors.some((e) => /integrity/i.test(e)) && (
+                    <div className="row" style={{ alignItems: 'center' }}>
+                      <button type="button" disabled={busy || !c.connected} onClick={() => void probe(c.id)}>בדיקת חשבון: האם Meta מאפשרת לפרסם טופס בכלל?<span className="sr-only"> ב{c.label}</span></button>
+                      <span className="hint">מפרסם טופס מינימלי (בלי שדות) ומסיר אותו מיד. כך יודעים אם החסימה בחשבון או בתוכן הטופס.</span>
+                    </div>
+                  )}
                 </li>
               ))}
             </ul>

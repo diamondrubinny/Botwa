@@ -58,6 +58,9 @@ export function buildFlowJson(title: string, fields: Field[], labels: Record<str
   const problems: string[] = [];
   const inputs = asked(fields);
   if (inputs.length + 2 > MAX_FLOW_FIELDS) problems.push('too_many_fields');
+  // WhatsApp Business Messaging Policy: "Don't share or ask people to share … personal ID card numbers, or other sensitive
+  // identifiers." Meta's integrity checks refuse such a Flow; the form goes as a link instead.
+  if (inputs.some((f) => f.type === 'id_number')) problems.push('id_number_not_allowed');
   const names: Record<string, string> = {};
   /** a system prefill (contact name, today…) becomes the initial value; the first screen reads its own data, the others the first screen's */
   const component = (f: Field, name: string, first: boolean): Record<string, unknown> => {

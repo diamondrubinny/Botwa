@@ -93,6 +93,29 @@ export async function publishFlow(db: Db, api: FlowApi, templateId: string, chan
   return f;
 }
 
+/**
+ * Can this account publish a Flow at all? Publishes a minimal Flow (a title and a "send" button, nothing asked) and removes it
+ * again: when even that is refused, the block is on the account (Meta support); when it passes, Meta objects to the form's content.
+ */
+export async function probeFlows(api: FlowApi): Promise<{ result: 'ok' | 'refused'; problem?: string; detail?: string; health?: Record<string, string> }> {
+  const json = { version: '7.3', screens: [{ id: 'SCREEN_A', title: 'בדיקה', terminal: true, success: true, data: {}, layout: { type: 'SingleColumnLayout', children: [
+    { type: 'TextBody', text: 'בדיקת מערכת. אין צורך לעשות דבר.' }, { type: 'Footer', label: 'סגירה', 'on-click-action': { name: 'complete', payload: {} } }] } }] };
+  let id: string | null = null;
+  try {
+    const c = await api.flowCreate(`Botwa check ${new Date().toISOString().slice(0, 16)}`, json);
+    id = c.id;
+    if (c.errors.length) return { result: 'refused', problem: 'flow_validation', detail: c.errors[0] };
+    await api.flowPublish(id);
+    await api.flowRetire(id, true);
+    return { result: 'ok' };
+  } catch (e) {
+    if (!(e instanceof FlowError)) throw e;
+    if (id) await api.flowRetire(id, false);
+    const health = e.key === 'flow_integrity' ? await api.accountHealth?.().catch(() => undefined) : undefined;
+    return { result: 'refused', problem: e.key, ...(e.detail ? { detail: e.detail } : {}), ...(health ? { health } : {}) };
+  }
+}
+
 /** Re-read the Flow's status from Meta (it can be blocked, throttled or deprecated there). */
 export async function refreshFlow(db: Db, api: FlowApi, t: TemplateRow, channelId: string): Promise<StoredFlow | null> {
   const f = t.flows?.[channelId];

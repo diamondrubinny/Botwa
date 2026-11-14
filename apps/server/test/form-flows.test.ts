@@ -66,6 +66,9 @@ describe('a form template as a WhatsApp Flow', () => {
     const id = s1.layout.children.find((c) => c.name === 'field_a')!;
     expect(id).toMatchObject({ type: 'TextInput', 'input-type': 'text', pattern: '^[0-9]{5,9}$', 'helper-text': 'ספרות בלבד (5–9)' });
     expect(s1.sensitive).toEqual(['field_a']);
+    // WhatsApp's policy forbids asking for ID numbers in WhatsApp: Meta's integrity checks refuse it, so the form goes as a link
+    expect(b.problems).toContain('id_number_not_allowed');
+    expect(buildFlowJson('טופס', [F('n', 'text', 'שם')]).problems).toEqual([]);
   });
 
   it('reads the reply back by field id, and makes initials', () => {
@@ -268,5 +271,19 @@ describe('forms filled inside WhatsApp, end to end against a simulated Meta', ()
     expect(again).toMatchObject({ flowId: r.flowId, status: 'PUBLISHED' });
     expect(posts.filter((p) => p.url.endsWith('/5550009999/flows'))).toHaveLength(0);
     expect(posts.some((p) => p.url.endsWith(`/${r.flowId}/publish`))).toBe(true);
+  });
+  it('the account check: a minimal Flow is published and retired when the account may publish; refused, it says the block is on the account', async () => {
+    publishResponse = () => Response.json({ error: { code: 139000, message: 'Flow publishing failed: Integrity requirements not met.' } }, { status: 400 });
+    expect((await call('ag@t.io', 'POST', '/forms/flow/probe', { channelId })).statusCode).toBe(403);
+    posts.length = 0;
+    const bad = (await call('adm@t.io', 'POST', '/forms/flow/probe', { channelId })).json();
+    expect(bad).toMatchObject({ result: 'refused', problem: 'flow_integrity', health: { quality_rating: 'GREEN' } });
+    const created = posts.find((p) => p.url.endsWith('/5550009999/flows'))!.body as { flow_json: string };
+    expect(JSON.parse(created.flow_json).screens[0].layout.children.filter((c: { type: string }) => /Input|OptIn|Picker|TextArea/.test(c.type))).toEqual([]);   // nothing asked
+    expect(posts.some((p) => /\/77700011\d+$/.test(p.url))).toBe(true);                            // the refused draft is deleted
+    publishResponse = () => Response.json({ success: true });
+    posts.length = 0;
+    expect((await call('adm@t.io', 'POST', '/forms/flow/probe', { channelId })).json()).toEqual({ result: 'ok' });
+    expect(posts.some((p) => p.url.endsWith('/deprecate'))).toBe(true);                             // published, then retired
   });
 });

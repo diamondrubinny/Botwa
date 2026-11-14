@@ -16,7 +16,7 @@ import { loadBrand } from './branding.js';
 import { AUDIENCES, fieldsSchema } from '../forms/schema.js';
 import { remindBatch, startBatch } from '../forms/batch.js';
 import { decrypt } from '../crypto.js';
-import { currentBuild, flowState, FlowProblem, publishFlow, receiveFlowReply, refreshFlow, sendFlowRequest } from '../forms/flows.js';
+import { currentBuild, flowState, FlowProblem, probeFlows, publishFlow, receiveFlowReply, refreshFlow, sendFlowRequest } from '../forms/flows.js';
 import { hasSignature, LABEL_MAX, shortLabel } from '../forms/flowjson.js';
 import { FlowError } from '../channels/whatsapp-cloud.js';
 import { sendSms, SmsError, smsReady } from '../sms/service.js';
@@ -266,6 +266,18 @@ export function formRoutes(app: FastifyInstance, db: Db, mgr: ChannelManager, cf
       const f = await publishFlow(db, api, p.data.id, b.data.channelId);
       await audit(db, { actorId: req.user!.id, action: 'forms.flow_publish', target: p.data.id, ip: req.ip, meta: { channel: b.data.channelId, flow: f.flowId, status: f.status, errors: f.errors.length, ...(f.problem ? { problem: f.problem } : {}) } });
       return f;
+    } catch (e) { return flowFail(reply, e); }
+  });
+  // is the account able to publish any Flow? (a minimal one, removed again)
+  app.post('/forms/flow/probe', { preHandler: manage, config: { rateLimit: { max: 3, timeWindow: '1 hour' } } }, async (req, reply) => {
+    const b = flowChannel.safeParse(req.body);
+    if (!b.success) return reply.code(400).send({ error: 'bad_request' });
+    const api = mgr.cloudAdapter(b.data.channelId);
+    if (!api?.isActive()) return reply.code(409).send({ error: 'channel_not_connected' });
+    try {
+      const r = await probeFlows(api);
+      await audit(db, { actorId: req.user!.id, action: 'forms.flow_probe', ip: req.ip, meta: { channel: b.data.channelId, result: r.result, problem: r.problem } });
+      return r;
     } catch (e) { return flowFail(reply, e); }
   });
   app.post('/forms/templates/:id/flow/refresh', { preHandler: any, config: { rateLimit: { max: 30, timeWindow: '1 minute' } } }, async (req, reply) => {
