@@ -53,6 +53,14 @@ describe('a form template as a WhatsApp Flow', () => {
     expect(flowStartData(fields, b.names, { name: 'דנה לוי', q0: 'x' })).toEqual({ p_f0: 'דנה לוי' });
   });
 
+  it('an ID number: text with a pattern, the helper text Meta requires with it, hidden in the signer\'s summary', () => {
+    const b = buildFlowJson('טופס', [F('id', 'id_number', 'תעודת זהות'), F('n', 'text', 'שם')]);
+    const s1 = (b.json as { screens: { sensitive?: string[]; layout: { children: Record<string, unknown>[] } }[] }).screens[0]!;
+    const id = s1.layout.children.find((c) => c.name === 'f0')!;
+    expect(id).toMatchObject({ type: 'TextInput', 'input-type': 'text', pattern: '^[0-9]{5,9}$', 'helper-text': 'ספרות בלבד (5–9)' });
+    expect(s1.sensitive).toEqual(['f0']);
+  });
+
   it('reads the reply back by field id, and makes initials', () => {
     const r = parseFlowReply(JSON.stringify({ flow_token: 'f_x', f0: 'דנה', f1: true, consent: true, signer_name: '  דנה   לוי ', other: 'x' }), { f0: 'name', f1: 'ok' });
     expect(r).toEqual({ token: 'f_x', values: { name: 'דנה', ok: true }, consent: true, signer: 'דנה לוי' });
@@ -82,10 +90,15 @@ describe('forms filled inside WhatsApp, end to end against a simulated Meta', ()
   let flowSeq = 0;
   let outSeq = 0;
   let createErrors: unknown[] = [];
+  let publishResponse: () => Response = () => Response.json({ success: true });
   const fakeFetch = async (url: string, init?: RequestInit): Promise<Response> => {
     const body = typeof init?.body === 'string' ? JSON.parse(init.body) : init?.body ? '[form]' : undefined;
     if (init?.method === 'POST' || init?.method === 'DELETE') posts.push({ url, body });
     if (init?.method === 'POST' && url.endsWith('/5550009999/flows')) return Response.json({ id: `77700011${++flowSeq}`, success: true, validation_errors: createErrors });
+    if (init?.method === 'POST' && /\/77700011\d\/publish$/.test(url)) return publishResponse();
+    if (url.includes('/5550009999?fields=account_review_status')) return Response.json({ account_review_status: 'APPROVED' });
+    if (url.includes('/5550009999?fields=business_verification_status')) return Response.json({ business_verification_status: 'not_verified' });
+    if (url.includes('/1234567890?fields=quality_rating')) return Response.json({ quality_rating: 'GREEN' });
     if (/\/77700011\d\?fields=status/.test(url)) return Response.json({ status: createErrors.length ? 'DRAFT' : 'PUBLISHED', validation_errors: createErrors, preview: { preview_url: 'https://business.facebook.com/wa/manage/flows/1/preview/?token=abc' } });
     if (init?.method === 'POST' && url.endsWith('/1234567890/media')) return Response.json({ id: 'MEDIA1' });
     if (init?.method === 'POST' && url.endsWith('/1234567890/messages')) return Response.json({ messages: [{ id: `wamid.OUT${++outSeq}` }] });
@@ -145,7 +158,9 @@ describe('forms filled inside WhatsApp, end to end against a simulated Meta', ()
     const pub = await call('adm@t.io', 'POST', `/forms/templates/${templateId}/flow/publish`, { channelId });
     expect(pub.json()).toMatchObject({ flowId: '777000111', status: 'PUBLISHED', errors: [] });
     const created = posts.find((p) => p.url.endsWith('/5550009999/flows'))!.body as { categories: string[]; publish: boolean; flow_json: string };
-    expect(created).toMatchObject({ categories: ['OTHER'], publish: true });
+    expect(created).toMatchObject({ categories: ['OTHER'] });
+    expect(created.publish).toBeUndefined();                                                       // a draft first, published in its own step
+    expect(posts.some((p) => p.url.endsWith('/777000111/publish'))).toBe(true);
     expect(JSON.parse(created.flow_json).screens[0].layout.children.find((c: { name?: string }) => c.name === 'f0').label).toBe('שם העובד');
   });
 
@@ -227,5 +242,24 @@ describe('forms filled inside WhatsApp, end to end against a simulated Meta', ()
     expect((await call('adm@t.io', 'POST', `/conversations/${conv}/forms`, { templateId, via: 'flow' })).json()).toEqual({ error: 'flow_disabled' });
     // the link is still there
     expect((await call('adm@t.io', 'POST', `/conversations/${conv}/forms`, { templateId })).statusCode).toBe(201);
+  });
+  it('Meta refuses publishing by its integrity checks: the draft is kept, the account status is shown, a retry publishes the same draft', async () => {
+    createErrors = [];
+    await call('adm@t.io', 'PUT', `/forms/templates/${templateId}/flow`, { enabled: true, labels: { name: 'שם מלא של העובד' } });
+    publishResponse = () => Response.json({ error: { code: 139000, message: 'Flow publishing failed: Integrity requirements not met. (Flow ID: 1115664627978396.)' } }, { status: 400 });
+    posts.length = 0;
+    const r = (await call('adm@t.io', 'POST', `/forms/templates/${templateId}/flow/publish`, { channelId })).json();
+    expect(r, JSON.stringify(r)).toMatchObject({ status: 'DRAFT', problem: 'flow_integrity', health: { account_review_status: 'APPROVED', business_verification_status: 'not_verified', quality_rating: 'GREEN' } });
+    expect(r.detail).toContain('Integrity requirements not met');
+    const creates = posts.filter((p) => p.url.endsWith('/5550009999/flows')).length;
+    expect(creates).toBe(1);
+    expect((await call('adm@t.io', 'GET', `/forms/templates/${templateId}/flow`)).json().channels[0].flow).toMatchObject({ flowId: r.flowId, status: 'DRAFT' });
+    // after Meta clears the account: the same draft is published, no new Flow is made
+    publishResponse = () => Response.json({ success: true });
+    posts.length = 0;
+    const again = (await call('adm@t.io', 'POST', `/forms/templates/${templateId}/flow/publish`, { channelId })).json();
+    expect(again).toMatchObject({ flowId: r.flowId, status: 'PUBLISHED' });
+    expect(posts.filter((p) => p.url.endsWith('/5550009999/flows'))).toHaveLength(0);
+    expect(posts.some((p) => p.url.endsWith(`/${r.flowId}/publish`))).toBe(true);
   });
 });

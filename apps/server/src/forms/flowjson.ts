@@ -69,7 +69,8 @@ export function buildFlowJson(title: string, fields: Field[], labels: Record<str
       case 'email': return { type: 'TextInput', 'input-type': 'email', ...base, ...init };
       case 'phone': return { type: 'TextInput', 'input-type': 'phone', ...base, ...init };
       // text with a pattern (Flow JSON 6.2+), so leading zeros stay
-      case 'id_number': return { type: 'TextInput', 'input-type': 'text', pattern: '^[0-9]{5,9}$', ...base, ...init };
+      // Meta: "when using the pattern field, helper-text is mandatory"
+      case 'id_number': return { type: 'TextInput', 'input-type': 'text', pattern: '^[0-9]{5,9}$', ...base, 'helper-text': helper ?? 'ספרות בלבד (5–9)', ...init };
       default: return { type: 'TextInput', 'input-type': 'text', ...base, ...init };
     }
   };
@@ -113,6 +114,8 @@ export function buildFlowJson(title: string, fields: Field[], labels: Record<str
     }
     return {
       id, title: clip(last ? (sign ? 'חתימה' : 'אישור ושליחה') : title, 30),
+      // ID numbers are hidden in the summary WhatsApp shows the signer after sending (Flow JSON 5.1+ "sensitive")
+      ...(!last && screens[idx]!.items.some((c) => c.pattern) ? { sensitive: screens[idx]!.items.filter((c) => c.pattern).map((c) => c.name as string) } : {}),
       ...(idx === 0 && Object.keys(prefillData).length ? { data: prefillData } : { data: {} }),
       ...(last ? { terminal: true, success: true } : {}),
       layout: { type: 'SingleColumnLayout', children },

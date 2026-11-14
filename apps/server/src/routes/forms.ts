@@ -264,7 +264,7 @@ export function formRoutes(app: FastifyInstance, db: Db, mgr: ChannelManager, cf
     if (!api?.isActive()) return reply.code(409).send({ error: 'channel_not_connected' });
     try {
       const f = await publishFlow(db, api, p.data.id, b.data.channelId);
-      await audit(db, { actorId: req.user!.id, action: 'forms.flow_publish', target: p.data.id, ip: req.ip, meta: { channel: b.data.channelId, flow: f.flowId, status: f.status, errors: f.errors.length } });
+      await audit(db, { actorId: req.user!.id, action: 'forms.flow_publish', target: p.data.id, ip: req.ip, meta: { channel: b.data.channelId, flow: f.flowId, status: f.status, errors: f.errors.length, ...(f.problem ? { problem: f.problem } : {}) } });
       return f;
     } catch (e) { return flowFail(reply, e); }
   });

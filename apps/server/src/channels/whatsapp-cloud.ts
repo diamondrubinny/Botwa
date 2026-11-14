@@ -106,6 +106,17 @@ const USERNAME_ERRORS: Record<number, string> = {
 export class UsernameError extends Error {
   constructor(readonly key: string, readonly detail?: string) { super(key); }
 }
+/** Meta's Flows management error codes (Flows error-codes reference) and its integrity refusal, as our keys. */
+export function flowErrorKey(httpStatus: number, code: number | undefined, message: string): string {
+  if (code === 139000 || /integrity/i.test(message)) return 'flow_integrity';
+  if (code === 139001 || code === 139002) return 'flow_bad_state';
+  if (code === 139004) return 'flow_published_cannot_delete';
+  if (/validation errors/i.test(message)) return 'flow_validation';
+  return metaCheckError(httpStatus, code);
+}
+/** The id of the Flow a refusal names ("… Flow ID: 1115664627978396 …"), so a draft Meta kept is not lost. */
+export const flowIdIn = (message: string | undefined) => /Flow ID:?\s*(\d{5,30})/i.exec(message ?? '')?.[1] ?? null;
+
 export class FlowError extends Error {
   constructor(readonly key: string, readonly detail?: string) { super(key); }
 }
@@ -358,15 +369,16 @@ export class WhatsAppCloudAdapter implements ChannelAdapter {
     const j = (await res.json().catch(() => ({}))) as T & { error?: { code?: number; message?: string; error_user_msg?: string } };
     if (!res.ok || j.error) {
       const e = j.error ?? {};
-      throw new FlowError(metaCheckError(res.status, e.code), String(e.error_user_msg ?? e.message ?? '').replace(/[\u0000-\u001f]/g, ' ').slice(0, 300) || undefined);
+      const said = String(e.error_user_msg ?? e.message ?? '').replace(/[\u0000-\u001f]/g, ' ').slice(0, 300);
+      throw new FlowError(flowErrorKey(res.status, e.code, said), said || undefined);
     }
     return j;
   }
 
-  /** Create a Flow from its JSON and publish it in the same request; Meta answers with validation errors if any (then it stays a draft). */
+  /** Create a Flow (a draft) from its JSON; Meta answers with validation errors if any. Publishing is a separate step (flowPublish). */
   async flowCreate(name: string, json: unknown): Promise<{ id: string; errors: string[] }> {
     const waba = this.waba();
-    const j = await this.graphJson<{ id?: string; validation_errors?: { message?: string; pointers?: { path?: string }[] }[] }>('POST', `${waba}/flows`, { name: name.slice(0, 200), categories: ['OTHER'], flow_json: JSON.stringify(json), publish: true });
+    const j = await this.graphJson<{ id?: string; validation_errors?: { message?: string; pointers?: { path?: string }[] }[] }>('POST', `${waba}/flows`, { name: name.slice(0, 200), categories: ['OTHER'], flow_json: JSON.stringify(json) });
     if (!j.id) throw new FlowError('flow_create_failed');
     return { id: j.id, errors: (j.validation_errors ?? []).map((v) => `${v.message ?? ''}${v.pointers?.[0]?.path ? ` (${v.pointers[0].path})` : ''}`.slice(0, 300)).slice(0, 20) };
   }
@@ -376,6 +388,25 @@ export class WhatsAppCloudAdapter implements ChannelAdapter {
     const j = await this.graphJson<{ status?: string; validation_errors?: { message?: string }[]; preview?: { preview_url?: string } }>('GET', `${id}?fields=status,validation_errors,preview.invalidate(false)`);
     const preview = j.preview?.preview_url && /^https:\/\/business\.facebook\.com\//.test(j.preview.preview_url) ? j.preview.preview_url : null;
     return { status: String(j.status ?? 'UNKNOWN'), errors: (j.validation_errors ?? []).map((v) => String(v.message ?? '').slice(0, 300)).slice(0, 20), previewUrl: preview };
+  }
+
+  /**
+   * What Meta says about the account and the number, for a publishing refusal by its integrity checks (best effort: fields the
+   * Graph version does not know are skipped). Field names per Meta's WhatsApp Business Account / phone number references
+   * (verify against the official reference).
+   */
+  async accountHealth(): Promise<Record<string, string>> {
+    const out: Record<string, string> = {};
+    const read = async (path: string, fields: string[]) => {
+      for (const f of fields) {
+        const j = await this.graphJson<Record<string, unknown>>('GET', `${path}?fields=${f}`).catch(() => null);
+        const v = j?.[f];
+        if (typeof v === 'string' || typeof v === 'number') out[f] = String(v).slice(0, 60);
+      }
+    };
+    if (this.creds?.wabaId) await read(this.creds.wabaId, ['account_review_status', 'business_verification_status']);
+    if (this.creds) await read(this.creds.phoneNumberId, ['quality_rating', 'name_status', 'code_verification_status']);
+    return out;
   }
 
   async flowPublish(id: string): Promise<void> { if (!/^\d{5,30}$/.test(id)) throw new FlowError('flow_not_found'); await this.graphJson('POST', `${id}/publish`); }

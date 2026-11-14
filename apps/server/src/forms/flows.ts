@@ -1,4 +1,5 @@
 import type { Config } from '../config.js';
+import { FlowError, flowIdIn } from '../channels/whatsapp-cloud.js';
 import type { Db } from '../db.js';
 import { buildFlowJson, flowStartData, initialsOf, parseFlowReply } from './flowjson.js';
 import { byToken, createRequest, dateHe, deliverSignedCopy, event, getTemplate, sha256, submit, type CopyOut, type CopyStore, type StoredFlow, type TemplateRow } from './service.js';
@@ -15,6 +16,7 @@ export interface FlowApi {
   flowGet(id: string): Promise<{ status: string; errors: string[]; previewUrl: string | null }>;
   flowPublish(id: string): Promise<void>;
   flowRetire(id: string, published: boolean): Promise<void>;
+  accountHealth?(): Promise<Record<string, string>>;
 }
 export interface FlowSender extends CopyOut {
   sendFlow(channelId: string, ext: string, f: { flowId: string; token: string; body: string; cta: string; data?: Record<string, string> }): Promise<{ externalMessageId?: string }>;
@@ -42,8 +44,15 @@ async function saveFlow(db: Db, templateId: string, channelId: string, f: Stored
   await db.query(`UPDATE form_templates SET flows = CASE WHEN $3::jsonb IS NULL THEN flows - $2 ELSE jsonb_set(flows, ARRAY[$2], $3::jsonb) END WHERE id = $1`, [templateId, channelId, f ? JSON.stringify(f) : null]);
 }
 
-/** Create and publish the template's Flow on a channel (a previous draft is removed; a previous published one keeps serving sent requests). Meta's validation errors are kept and shown. */
-export async function publishFlow(db: Db, api: FlowApi, templateId: string, channelId: string): Promise<StoredFlow> {
+export type PublishResult = StoredFlow & { problem?: string; detail?: string; health?: Record<string, string> };
+
+/**
+ * Create the template's Flow on a channel as a draft (kept at once, so nothing is lost if publishing fails), then publish it.
+ * A retry of the same version publishes the same draft again instead of making a new one. A refusal (Meta's validation, its
+ * integrity checks on the account) comes back as `problem` with Meta's words, and for integrity what Meta says about the
+ * account. A previous draft is removed; a previous published Flow keeps serving requests already sent with it.
+ */
+export async function publishFlow(db: Db, api: FlowApi, templateId: string, channelId: string): Promise<PublishResult> {
   const t = await getTemplate(db, templateId);
   if (!t || !t.active) throw new FlowProblem('template_not_found');
   if (!t.flowEnabled) throw new FlowProblem('flow_disabled');
@@ -51,13 +60,36 @@ export async function publishFlow(db: Db, api: FlowApi, templateId: string, chan
   if (b.problems.length) throw new FlowProblem(b.problems[0]!);
   if (!Object.keys(b.names).length && !t.fields.some((f) => f.type === 'signature' || f.type === 'initials')) throw new FlowProblem('template_has_no_fields');
   const prev = t.flows?.[channelId];
-  const created = await api.flowCreate(`${t.title} (${b.version.slice(0, 6)})`, b.json);
-  const info = await api.flowGet(created.id).catch(() => ({ status: created.errors.length ? 'DRAFT' : 'PUBLISHED', errors: created.errors, previewUrl: null }));
-  const f: StoredFlow = { flowId: created.id, status: info.status, version: b.version, names: b.names, errors: created.errors.length ? created.errors : info.errors, previewUrl: info.previewUrl, at: new Date().toISOString() };
+  const now = () => new Date().toISOString();
+  const refused = async (draft: StoredFlow | null, e: FlowError): Promise<PublishResult> => {
+    const health = e.key === 'flow_integrity' ? await api.accountHealth?.().catch(() => ({})) : undefined;
+    const kept = draft ?? (flowIdIn(e.detail) ? { flowId: flowIdIn(e.detail)!, status: 'DRAFT', version: b.version, names: b.names, errors: [], previewUrl: null, at: now() } : null);
+    if (!kept) throw e;
+    const next: StoredFlow = { ...kept, status: 'DRAFT', errors: [e.detail ?? e.key], at: now() };
+    await saveFlow(db, t.id, channelId, next);
+    return { ...next, problem: e.key, ...(e.detail ? { detail: e.detail } : {}), ...(health && Object.keys(health).length ? { health } : {}) };
+  };
+  let draft: StoredFlow;
+  if (prev && prev.version === b.version && prev.status === 'DRAFT' && !prev.errors.some((x) => /validation|property|invalid/i.test(x))) {
+    draft = prev;   // the same version is already a draft at Meta: publish it again
+  } else {
+    let created: { id: string; errors: string[] };
+    try { created = await api.flowCreate(`${t.title} (${b.version.slice(0, 6)})`, b.json); } catch (e) {
+      if (e instanceof FlowError) return refused(null, e);
+      throw e;
+    }
+    draft = { flowId: created.id, status: 'DRAFT', version: b.version, names: b.names, errors: created.errors, previewUrl: null, at: now() };
+    await saveFlow(db, t.id, channelId, draft);
+    if (prev && prev.flowId !== draft.flowId && prev.status !== 'PUBLISHED') await api.flowRetire(prev.flowId, false);
+    if (created.errors.length) return { ...draft, problem: 'flow_validation' };
+  }
+  try { await api.flowPublish(draft.flowId); } catch (e) {
+    if (e instanceof FlowError) return refused(draft, e);
+    throw e;
+  }
+  const info = await api.flowGet(draft.flowId).catch(() => ({ status: 'PUBLISHED', errors: [] as string[], previewUrl: null }));
+  const f: StoredFlow = { ...draft, status: info.status, errors: info.errors, previewUrl: info.previewUrl, at: now() };
   await saveFlow(db, t.id, channelId, f);
-  // a published Flow stays: requests already sent with it must still open (Meta: a deprecated Flow cannot be opened);
-  // each request keeps its own field names, so its answers are read right. Only a failed draft is removed.
-  if (prev && prev.flowId !== f.flowId && prev.status !== 'PUBLISHED') await api.flowRetire(prev.flowId, false);
   return f;
 }
 

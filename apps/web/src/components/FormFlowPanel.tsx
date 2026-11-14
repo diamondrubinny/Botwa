@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { Fragment, useEffect, useState } from 'react';
 import { api, ApiError, type FormTemplate } from '../api';
 import { errText } from '../strings';
 
@@ -9,6 +9,7 @@ interface FlowInfo {
 }
 const STATUS: Record<string, string> = { PUBLISHED: 'פורסם', DRAFT: 'טיוטה (יש שגיאות)', DEPRECATED: 'הוצא משימוש', BLOCKED: 'חסום ע"י Meta', THROTTLED: 'מוגבל ע"י Meta' };
 const LABEL_MAX = 20;
+const HEALTH: Record<string, string> = { account_review_status: 'סקירת החשבון העסקי', business_verification_status: 'אימות העסק', quality_rating: 'איכות המספר', name_status: 'אישור שם התצוגה', code_verification_status: 'אימות המספר' };
 
 /**
  * Filling a template inside WhatsApp (WhatsApp Flows, official channel): the switch, short labels (Meta allows 20 characters),
@@ -20,6 +21,7 @@ export function FormFlowPanel({ tpl, onClose }: { tpl: FormTemplate; onClose: ()
   const [enabled, setEnabled] = useState(true);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const [health, setHealth] = useState<Record<string, string> | null>(null);
   const base = `/forms/templates/${tpl.id}/flow`;
   async function load() {
     try {
@@ -37,8 +39,9 @@ export function FormFlowPanel({ tpl, onClose }: { tpl: FormTemplate; onClose: ()
   async function publish(channelId: string) {
     setBusy(true); setMsg(null);
     try {
-      const f = await api<{ status: string; errors: string[] }>('POST', `${base}/publish`, { channelId });
-      setMsg(f.status === 'PUBLISHED' ? { ok: true, text: 'הטופס פורסם בווצאפ. אפשר לשלוח אותו מהשיחות בערוץ הזה.' } : { ok: false, text: 'Meta לא אישרה את הטופס. השגיאות מופיעות למטה.' });
+      const f = await api<{ status: string; errors: string[]; problem?: string; detail?: string; health?: Record<string, string> }>('POST', `${base}/publish`, { channelId });
+      if (f.status === 'PUBLISHED') { setMsg({ ok: true, text: 'הטופס פורסם בווצאפ. אפשר לשלוח אותו מהשיחות בערוץ הזה.' }); setHealth(null); }
+      else { setMsg({ ok: false, text: errText(f.problem ?? 'flow_validation') }); setHealth(f.health ?? null); }
       await load();
     } catch (e) { fail(e); }
     setBusy(false);
@@ -87,6 +90,13 @@ export function FormFlowPanel({ tpl, onClose }: { tpl: FormTemplate; onClose: ()
         </>
       )}
       {msg && <p role="status" className={msg.ok ? 'ok' : 'error'}>{msg.text}</p>}
+      {health && (
+        <div className="card">
+          <h3>מה Meta אומרת על החשבון</h3>
+          <dl className="kv">{Object.entries(health).map(([k, v]) => <Fragment key={k}><dt>{HEALTH[k] ?? k}</dt><dd dir="ltr">{v}</dd></Fragment>)}</dl>
+          <p className="hint">ערכים כמו PENDING, REJECTED, RED או FLAGGED מסבירים את החסימה. בעסק מאומת עם איכות GREEN, ובכל זאת חסום, צריך לפנות לתמיכה של Meta.</p>
+        </div>
+      )}
     </section>
   );
 }
