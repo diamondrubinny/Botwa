@@ -93,27 +93,69 @@ export async function publishFlow(db: Db, api: FlowApi, templateId: string, chan
   return f;
 }
 
-/**
- * Can this account publish a Flow at all? Publishes a minimal Flow (a title and a "send" button, nothing asked) and removes it
- * again: when even that is refused, the block is on the account (Meta support); when it passes, Meta objects to the form's content.
- */
-export async function probeFlows(api: FlowApi): Promise<{ result: 'ok' | 'refused'; problem?: string; detail?: string; health?: Record<string, string> }> {
-  const json = { version: '7.3', screens: [{ id: 'SCREEN_A', title: 'בדיקה', terminal: true, success: true, data: {}, layout: { type: 'SingleColumnLayout', children: [
-    { type: 'TextBody', text: 'בדיקת מערכת. אין צורך לעשות דבר.' }, { type: 'Footer', label: 'סגירה', 'on-click-action': { name: 'complete', payload: {} } }] } }] };
+/** Publish a Flow JSON as a test and remove it again (retired if published, deleted if a draft). */
+async function trial(api: FlowApi, label: string, json: unknown): Promise<{ ok: true } | { ok: false; problem: string; detail?: string }> {
   let id: string | null = null;
   try {
-    const c = await api.flowCreate(`Botwa check ${new Date().toISOString().slice(0, 16)}`, json);
+    const c = await api.flowCreate(`Botwa check ${label} ${new Date().toISOString().slice(0, 16)}`, json);
     id = c.id;
-    if (c.errors.length) return { result: 'refused', problem: 'flow_validation', detail: c.errors[0] };
+    if (c.errors.length) { await api.flowRetire(id, false); return { ok: false, problem: 'flow_validation', detail: c.errors[0] }; }
     await api.flowPublish(id);
     await api.flowRetire(id, true);
-    return { result: 'ok' };
+    return { ok: true };
   } catch (e) {
     if (!(e instanceof FlowError)) throw e;
     if (id) await api.flowRetire(id, false);
-    const health = e.key === 'flow_integrity' ? await api.accountHealth?.().catch(() => undefined) : undefined;
-    return { result: 'refused', problem: e.key, ...(e.detail ? { detail: e.detail } : {}), ...(health ? { health } : {}) };
+    return { ok: false, problem: e.key, ...(e.detail ? { detail: e.detail } : {}) };
   }
+}
+
+const MINIMAL = { version: '7.3', screens: [{ id: 'SCREEN_A', title: 'בדיקה', terminal: true, success: true, data: {}, layout: { type: 'SingleColumnLayout', children: [
+  { type: 'TextBody', text: 'בדיקת מערכת. אין צורך לעשות דבר.' }, { type: 'Footer', label: 'סגירה', 'on-click-action': { name: 'complete', payload: {} } }] } }] };
+
+export interface Diagnosis {
+  /** account: even a Flow with nothing asked is refused; signature: only the signing statement and typed name; field: this field; content: the whole form only; none: everything passed */
+  verdict: 'account' | 'signature' | 'field' | 'content' | 'none' | 'other';
+  field?: { id: string; label: string; type: string };
+  problem?: string; detail?: string; health?: Record<string, string>; steps: { step: string; ok: boolean }[];
+}
+
+/**
+ * Find what Meta refuses, by publishing growing versions and stopping at the first refusal: a Flow with nothing asked (the
+ * account), the form's fields without the signing statement, then (when the fields are refused) halves of them down to one
+ * field, and finally the whole form. Every trial is removed again. Each step is one Flow at Meta, so this is rate limited.
+ */
+export async function diagnoseFlow(api: FlowApi, t?: TemplateRow | null): Promise<Diagnosis> {
+  const steps: Diagnosis['steps'] = [];
+  const health = async () => api.accountHealth?.().catch(() => undefined);
+  const first = await trial(api, 'minimal', MINIMAL);
+  steps.push({ step: 'minimal', ok: first.ok });
+  if (!first.ok) return { verdict: first.problem === 'flow_integrity' ? 'account' : 'other', problem: first.problem, detail: first.detail, health: await health(), steps };
+  if (!t) return { verdict: 'none', steps };
+  const inputs = t.fields.filter((f) => f.type !== 'signature' && f.type !== 'initials');
+  const build = (fields: typeof t.fields) => buildFlowJson(t.title, fields, t.flowLabels).json;
+  if (inputs.length) {
+    const fieldsOnly = await trial(api, 'fields', build(inputs));
+    steps.push({ step: 'fields', ok: fieldsOnly.ok });
+    if (!fieldsOnly.ok) {
+      if (fieldsOnly.problem !== 'flow_integrity') return { verdict: 'other', problem: fieldsOnly.problem, detail: fieldsOnly.detail, steps };
+      // halve until one field is left (assumes one field is the cause; at most ~log2(n) more trials)
+      let pool = inputs;
+      while (pool.length > 1) {
+        const half = pool.slice(0, Math.ceil(pool.length / 2));
+        const r = await trial(api, `part${half.length}`, build(half));
+        steps.push({ step: `part:${half.map((f) => f.id).join(',')}`, ok: r.ok });
+        pool = r.ok ? pool.slice(half.length) : half;
+      }
+      const f = pool[0]!;
+      return { verdict: 'field', field: { id: f.id, label: f.label, type: f.type }, problem: 'flow_integrity', steps };
+    }
+  }
+  const whole = await trial(api, 'full', currentBuild(t).json);
+  steps.push({ step: 'full', ok: whole.ok });
+  if (whole.ok) return { verdict: 'none', steps };
+  const signs = t.fields.some((f) => f.type === 'signature' || f.type === 'initials');
+  return { verdict: whole.problem !== 'flow_integrity' ? 'other' : signs ? 'signature' : 'content', problem: whole.problem, detail: whole.detail, steps };
 }
 
 /** Re-read the Flow's status from Meta (it can be blocked, throttled or deprecated there). */

@@ -37,12 +37,18 @@ export function FormFlowPanel({ tpl, onClose }: { tpl: FormTemplate; onClose: ()
     setBusy(false);
   }
   async function probe(channelId: string) {
-    setBusy(true); setMsg(null);
+    setBusy(true); setMsg({ ok: true, text: 'מאבחן מול Meta… זה לוקח עד דקה (כמה טפסי בדיקה נוצרים ומוסרים).' });
     try {
-      const r = await api<{ result: 'ok' | 'refused'; problem?: string; detail?: string; health?: Record<string, string> }>('POST', '/forms/flow/probe', { channelId });
-      setMsg(r.result === 'ok'
-        ? { ok: true, text: 'החשבון יכול לפרסם טפסים: טופס מינימלי פורסם והוסר. Meta מתנגדת לתוכן הטופס הזה, ולא לחשבון. ודאו שאין בו שדה של מספר מזהה (ת"ז, דרכון, חשבון בנק או כרטיס אשראי). המדיניות של WhatsApp אוסרת לבקש אותם.' }
-        : { ok: false, text: r.problem === 'flow_integrity' ? 'גם טופס מינימלי, בלי שדות, נחסם: החסימה היא על החשבון, לא על הטופס. צריך לפנות לתמיכה של Meta (Direct Support, נושא WhatsApp Flows) עם צילום של המסך הזה.' : `${errText(r.problem ?? 'generic')}${r.detail ? ` (${r.detail})` : ''}` });
+      const r = await api<{ verdict: string; field?: { label: string; type: string }; problem?: string; detail?: string; health?: Record<string, string> }>('POST', '/forms/flow/probe', { channelId, templateId: tpl.id });
+      const text: Record<string, string> = {
+        account: 'גם טופס בדיקה בלי שום שדה נחסם, כלומר החסימה היא על החשבון ולא על הטופס. צריך לפנות לתמיכה של Meta (https://business.facebook.com/direct-support/, נושא WhatsApp Business API ← Flows), עם הודעת השגיאה ועם צילום המסך הזה.',
+        field: `Meta חוסמת את השדה "${r.field?.label ?? ''}". כל שאר הטופס עובר. אפשר לשנות את הנוסח או את הסוג שלו בעורך, להסיר אותו, או לשלוח את הטופס כקישור.`,
+        signature: 'השדות עוברים. Meta חוסמת את שלב החתימה (ההצהרה על חתימה אלקטרונית והשם המוקלד). כבו את "מילוי בתוך ווצאפ" בטופס הזה ושלחו קישור, או הסירו מהטופס את שדות החתימה.',
+        content: 'כל חלק עובר בנפרד, אבל הטופס השלם נחסם. כנראה Meta מתנגדת לשילוב (למשל לכותרת הטופס). נסו לשנות את כותרת הטופס, או שלחו כקישור.',
+        none: 'כל הבדיקות עברו, כולל הטופס המלא. לחצו שוב "פרסום מחדש". אם החסימה חוזרת, ייתכן שזו בעיה זמנית אצל Meta.',
+        other: `${errText(r.problem ?? 'generic')}${r.detail ? ` (${r.detail})` : ''}`,
+      };
+      setMsg({ ok: r.verdict === 'none', text: text[r.verdict] ?? text.other! });
       setHealth(r.health ?? null);
     } catch (e) { fail(e); }
     setBusy(false);
@@ -95,8 +101,8 @@ export function FormFlowPanel({ tpl, onClose }: { tpl: FormTemplate; onClose: ()
                   {!c.connected && <p className="hint">הערוץ לא מחובר כרגע.</p>}
                   {c.flow?.errors.some((e) => /integrity/i.test(e)) && (
                     <div className="row" style={{ alignItems: 'center' }}>
-                      <button type="button" disabled={busy || !c.connected} onClick={() => void probe(c.id)}>בדיקת חשבון: האם Meta מאפשרת לפרסם טופס בכלל?<span className="sr-only"> ב{c.label}</span></button>
-                      <span className="hint">מפרסם טופס מינימלי (בלי שדות) ומסיר אותו מיד. כך יודעים אם החסימה בחשבון או בתוכן הטופס.</span>
+                      <button type="button" disabled={busy || !c.connected} onClick={() => void probe(c.id)}>אבחון: מה בדיוק Meta חוסמת?<span className="sr-only"> ב{c.label}</span></button>
+                      <span className="hint">מפרסם אצל Meta כמה טפסי בדיקה (בלי שדות, עם חלק מהשדות, עם החתימה) ומסיר כל אחד מיד. כך מגלים אם החסימה בחשבון, בשדה מסוים או בשלב החתימה.</span>
                     </div>
                   )}
                 </li>

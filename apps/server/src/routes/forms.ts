@@ -16,7 +16,7 @@ import { loadBrand } from './branding.js';
 import { AUDIENCES, fieldsSchema } from '../forms/schema.js';
 import { remindBatch, startBatch } from '../forms/batch.js';
 import { decrypt } from '../crypto.js';
-import { currentBuild, flowState, FlowProblem, probeFlows, publishFlow, receiveFlowReply, refreshFlow, sendFlowRequest } from '../forms/flows.js';
+import { currentBuild, flowState, FlowProblem, diagnoseFlow, publishFlow, receiveFlowReply, refreshFlow, sendFlowRequest } from '../forms/flows.js';
 import { hasSignature, LABEL_MAX, shortLabel } from '../forms/flowjson.js';
 import { FlowError } from '../channels/whatsapp-cloud.js';
 import { sendSms, SmsError, smsReady } from '../sms/service.js';
@@ -268,15 +268,17 @@ export function formRoutes(app: FastifyInstance, db: Db, mgr: ChannelManager, cf
       return f;
     } catch (e) { return flowFail(reply, e); }
   });
-  // is the account able to publish any Flow? (a minimal one, removed again)
+  // what does Meta refuse? growing trial Flows, each removed again (see diagnoseFlow)
   app.post('/forms/flow/probe', { preHandler: manage, config: { rateLimit: { max: 3, timeWindow: '1 hour' } } }, async (req, reply) => {
-    const b = flowChannel.safeParse(req.body);
+    const b = flowChannel.extend({ templateId: z.string().uuid().optional() }).safeParse(req.body);
     if (!b.success) return reply.code(400).send({ error: 'bad_request' });
     const api = mgr.cloudAdapter(b.data.channelId);
     if (!api?.isActive()) return reply.code(409).send({ error: 'channel_not_connected' });
+    const t = b.data.templateId ? await getTemplate(db, b.data.templateId) : null;
+    if (b.data.templateId && !t) return reply.code(404).send({ error: 'not_found' });
     try {
-      const r = await probeFlows(api);
-      await audit(db, { actorId: req.user!.id, action: 'forms.flow_probe', ip: req.ip, meta: { channel: b.data.channelId, result: r.result, problem: r.problem } });
+      const r = await diagnoseFlow(api, t);
+      await audit(db, { actorId: req.user!.id, action: 'forms.flow_probe', ip: req.ip, meta: { channel: b.data.channelId, template: t?.id, verdict: r.verdict, field: r.field?.id, steps: r.steps.length } });
       return r;
     } catch (e) { return flowFail(reply, e); }
   });

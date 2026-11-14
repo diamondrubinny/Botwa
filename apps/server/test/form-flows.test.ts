@@ -100,16 +100,17 @@ describe('forms filled inside WhatsApp, end to end against a simulated Meta', ()
   let flowSeq = 0;
   let outSeq = 0;
   let createErrors: unknown[] = [];
-  let publishResponse: () => Response = () => Response.json({ success: true });
+  let publishResponse: (flowJson: string) => Response = () => Response.json({ success: true });
+  const flowJsons = new Map<string, string>();
   const fakeFetch = async (url: string, init?: RequestInit): Promise<Response> => {
     const body = typeof init?.body === 'string' ? JSON.parse(init.body) : init?.body ? '[form]' : undefined;
     if (init?.method === 'POST' || init?.method === 'DELETE') posts.push({ url, body });
-    if (init?.method === 'POST' && url.endsWith('/5550009999/flows')) return Response.json({ id: `77700011${++flowSeq}`, success: true, validation_errors: createErrors });
-    if (init?.method === 'POST' && /\/77700011\d\/publish$/.test(url)) return publishResponse();
+    if (init?.method === 'POST' && url.endsWith('/5550009999/flows')) { const id = `77700011${++flowSeq}`; flowJsons.set(id, String((body as { flow_json?: string }).flow_json ?? '')); return Response.json({ id, success: true, validation_errors: createErrors }); }
+    if (init?.method === 'POST' && /\/77700011\d+\/publish$/.test(url)) return publishResponse(flowJsons.get(/\/(77700011\d+)\/publish$/.exec(url)![1]!) ?? '');
     if (url.includes('/5550009999?fields=account_review_status')) return Response.json({ account_review_status: 'APPROVED' });
     if (url.includes('/5550009999?fields=business_verification_status')) return Response.json({ business_verification_status: 'not_verified' });
     if (url.includes('/1234567890?fields=quality_rating')) return Response.json({ quality_rating: 'GREEN' });
-    if (/\/77700011\d\?fields=status/.test(url)) return Response.json({ status: createErrors.length ? 'DRAFT' : 'PUBLISHED', validation_errors: createErrors, preview: { preview_url: 'https://business.facebook.com/wa/manage/flows/1/preview/?token=abc' } });
+    if (/\/77700011\d+\?fields=status/.test(url)) return Response.json({ status: createErrors.length ? 'DRAFT' : 'PUBLISHED', validation_errors: createErrors, preview: { preview_url: 'https://business.facebook.com/wa/manage/flows/1/preview/?token=abc' } });
     if (init?.method === 'POST' && url.endsWith('/1234567890/media')) return Response.json({ id: 'MEDIA1' });
     if (init?.method === 'POST' && url.endsWith('/1234567890/messages')) return Response.json({ messages: [{ id: `wamid.OUT${++outSeq}` }] });
     if (url.includes('/app?fields=id')) return Response.json({ id: '5550001112' });
@@ -272,18 +273,25 @@ describe('forms filled inside WhatsApp, end to end against a simulated Meta', ()
     expect(posts.filter((p) => p.url.endsWith('/5550009999/flows'))).toHaveLength(0);
     expect(posts.some((p) => p.url.endsWith(`/${r.flowId}/publish`))).toBe(true);
   });
-  it('the account check: a minimal Flow is published and retired when the account may publish; refused, it says the block is on the account', async () => {
-    publishResponse = () => Response.json({ error: { code: 139000, message: 'Flow publishing failed: Integrity requirements not met.' } }, { status: 400 });
-    expect((await call('ag@t.io', 'POST', '/forms/flow/probe', { channelId })).statusCode).toBe(403);
+  it('the diagnosis finds what Meta refuses: the account, one field, or the signing step; every trial is removed again', async () => {
+    const integrity = () => Response.json({ error: { code: 139000, message: 'Flow publishing failed: Integrity requirements not met.' } }, { status: 400 });
+    expect((await call('ag@t.io', 'POST', '/forms/flow/probe', { channelId, templateId })).statusCode).toBe(403);
+    // the account: even a Flow with nothing asked is refused
+    publishResponse = integrity;
     posts.length = 0;
-    const bad = (await call('adm@t.io', 'POST', '/forms/flow/probe', { channelId })).json();
-    expect(bad).toMatchObject({ result: 'refused', problem: 'flow_integrity', health: { quality_rating: 'GREEN' } });
-    const created = posts.find((p) => p.url.endsWith('/5550009999/flows'))!.body as { flow_json: string };
-    expect(JSON.parse(created.flow_json).screens[0].layout.children.filter((c: { type: string }) => /Input|OptIn|Picker|TextArea/.test(c.type))).toEqual([]);   // nothing asked
-    expect(posts.some((p) => /\/77700011\d+$/.test(p.url))).toBe(true);                            // the refused draft is deleted
+    const acc = (await call('adm@t.io', 'POST', '/forms/flow/probe', { channelId, templateId })).json();
+    expect(acc).toMatchObject({ verdict: 'account', health: { quality_rating: 'GREEN' }, steps: [{ step: 'minimal', ok: false }] });
+    expect(posts.some((p) => /\/77700011\d+$/.test(p.url))).toBe(true);                          // the refused draft is deleted
+    // one field: Meta refuses any Flow that holds the date field
+    publishResponse = (json) => (json.includes('DatePicker') ? integrity() : Response.json({ success: true }));
+    posts.length = 0;
+    const fld = (await call('adm@t.io', 'POST', '/forms/flow/probe', { channelId, templateId })).json();
+    expect(fld).toMatchObject({ verdict: 'field', field: { id: 'when', type: 'date' } });
+    expect(posts.filter((p) => p.url.endsWith('/deprecate')).length).toBeGreaterThan(0);            // trials that were published are retired
+    // the signing step: fields pass, the whole form (statement + typed name) is refused
+    publishResponse = (json) => (json.includes('signer_name') ? integrity() : Response.json({ success: true }));
+    const sig = (await call('adm@t.io', 'POST', '/forms/flow/probe', { channelId, templateId })).json();
+    expect(sig).toMatchObject({ verdict: 'signature', steps: [{ step: 'minimal', ok: true }, { step: 'fields', ok: true }, { step: 'full', ok: false }] });
     publishResponse = () => Response.json({ success: true });
-    posts.length = 0;
-    expect((await call('adm@t.io', 'POST', '/forms/flow/probe', { channelId })).json()).toEqual({ result: 'ok' });
-    expect(posts.some((p) => p.url.endsWith('/deprecate'))).toBe(true);                             // published, then retired
   });
 });
