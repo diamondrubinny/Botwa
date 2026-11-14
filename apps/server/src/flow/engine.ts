@@ -260,7 +260,8 @@ export async function runFlow(flow: Flow, prev: FlowState | null, input: FlowInp
       if (sug.length) {
         return { replies: [`לא מצאתי תשובה מדויקת. האם התכוונתם לאחד מאלה?\n${sug.map((x, i) => `${LETTERS[i]}. ${x.label}`).join('\n')}\n\nכתבו את האות.`], state: { ...state, suggest: sug, suggestFor: inp.text!.slice(0, 300) }, effects };
       }
-      return { replies: ['לא מצאתי תשובה לשאלה הזו במאגר. אפשר לנסח אחרת, או לכתוב "נציג" ונציג יחזור אליכם.'], state, effects };
+      // the question it was waiting for is asked again, so the customer knows how to go on
+      return { replies: [`לא מצאתי תשובה לשאלה הזו במאגר. אפשר לנסח אחרת, או לכתוב "נציג" ונציג יחזור אליכם.\n\nנמשיך: ${w.text}`], state, effects };
     } else if (w.type === 'question') {
       if (w.optional && SKIP_WORDS.has(t)) {
         state = { ...state, invalid: 0 };

@@ -38,7 +38,7 @@ import { loadPersona } from '../routes/branding.js';
 import { saveUsername } from './username-store.js';
 import { isSensitive, pickGif, type GifMoment } from '../bot-gifs.js';
 import { detect, sanitizeFileName } from '../media/validate.js';
-import { renderBotText, cleanName, identityReply, type BotTextContext } from '../bot-text.js';
+import { renderBotText, cleanName, identityReply, smallTalkReply, withoutBotName, type BotTextContext } from '../bot-text.js';
 import { isCommentContact, META_CREDS_KEY, MetaMessagingAdapter, type CommentReplyMode, type MetaCreds } from './meta-messaging.js';
 import { WebChatAdapter } from './webchat.js';
 import { WhatsAppAdapter } from './whatsapp.js';
@@ -895,9 +895,22 @@ export class ChannelManager {
       return;
     }
 
-    // "מי את?" / "את בוט?": the bot says who it is (by its persona name), honestly a bot, and how to reach a person; the flow stays where it was
-    const who = identityReply(text, (await loadPersona(this.db).catch(() => null)) ?? {});
-    if (who) { await this.botSay(channelId, convId, ext, who); return; }
+    // the bot's own name is not part of the question ("היי בטי" is a greeting, "בטי, מה זה…" searches "מה זה…")
+    const persona = (await loadPersona(this.db).catch(() => null)) ?? { name: '', role: '' };
+    text = withoutBotName(text, persona.name);
+    rawText = withoutBotName(rawText, persona.name);
+    // "מי את?" / "את בוט?" / "מה שלומך?": the bot answers as itself, then picks up the question it was waiting for
+    const own = identityReply(text, persona) ?? smallTalkReply(text);
+    if (own) {
+      const st = c.flow_state as FlowState | null;
+      const flow = bot.mode === 'flow' ? await loadFlow(this.db) : null;
+      const node = flow && st?.node && !st.done ? flow.nodes.find((n) => n.id === st.node) : undefined;
+      const resume = node?.type === 'question' ? `\n\nנמשיך: ${node.text}` : node?.type === 'menu' ? '\n\nנמשיך: אפשר לבחור מהתפריט שלמעלה, או לכתוב "תפריט".' : '';
+      await this.botSay(channelId, convId, ext, `${own}${resume}`);
+      // a new conversation: after the answer the flow starts as usual (its opening, identification…)
+      if (flow && (!st || (st.node === null && !st.done) || st.done)) await this.runFlowStep(channelId, convId, ext, bot, flow, { text: null, media: false }, rx);
+      return;
+    }
     await rx.greet(text);
     if (bot.reactions.ackAll) await rx.set('working');   // "seen, working on it" for every message the bot handles
     // the moment for a GIF: a thank-you, or the start of a new inquiry (the bot's opening message)

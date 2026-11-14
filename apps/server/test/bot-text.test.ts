@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { cleanName, firstName, identityReply, renderBotText } from '../src/bot-text.js';
+import { cleanName, firstName, identityReply, renderBotText, smallTalkReply, withoutBotName } from '../src/bot-text.js';
+import { isGreeting } from '../src/bot.js';
 import { buildSafetyFlow } from '../src/flow/safetyTemplate.js';
 import { flowSchema, validateFlow } from '../src/flow/schema.js';
 
@@ -48,5 +49,21 @@ describe('the bot says who it is when asked', () => {
   });
   it('leaves real questions to the normal flow', () => {
     for (const q of ['מי זה הממונה על לייזרים?', 'זה אמיתי שהמעבדה סגורה מחר?', 'איפה מוצאים את נוהל העבודה בגובה', 'שלום', 'את יכולה לעזור לי עם טופס פינוי פסולת כימית מהמעבדה בבניין 12?', '']) expect(identityReply(q, betty), q).toBeNull();
+  });
+});
+
+describe('the bot\'s own name and small talk', () => {
+  it('takes the bot\'s name out of the message, whole words only', () => {
+    expect(withoutBotName('היי בטי', 'בטי')).toBe('היי');
+    expect(withoutBotName('בטי, מה זה חומ"ס?', 'בטי')).toBe('מה זה חומ"ס?');
+    expect(withoutBotName('תודה בטי!', 'בטי')).toBe('תודה !');
+    expect(withoutBotName('שאלה על בטיחות במעבדה', 'בטי')).toBe('שאלה על בטיחות במעבדה');
+    expect(withoutBotName('בטי', 'בטי')).toBe('בטי');            // only the name: kept as written
+    expect(withoutBotName('היי בטי', '')).toBe('היי בטי');
+    expect(isGreeting(withoutBotName('היי בטי', 'בטי'))).toBe(true);
+  });
+  it('answers small talk kindly; leaves real questions alone', () => {
+    for (const q of ['מה שלומך', 'מה שלומך?', 'היי, מה נשמע?', 'מה קורה איתך', 'איך את?', 'מה העניינים 😊']) expect(smallTalkReply(q), q).toContain('הכול טוב אצלי');
+    for (const q of ['מה שלומך עם הטופס ששלחתי?', 'מה קורה עם הפנייה שלי?', 'איך אני מזמין הדרכה', 'שלום']) expect(smallTalkReply(q), q).toBeNull();
   });
 });

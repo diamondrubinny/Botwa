@@ -58,3 +58,22 @@ export function identityReply(text: string | null | undefined, persona: { name?:
   const me = name ? `אני ${name}${role ? `, ${role}` : ', הבוט של השירות'}` : `אני ${role || 'הבוט של השירות'}`;
   return `${me} 🤖 זה בוט, לא בן אדם: התשובות מגיעות מהמידע של היחידה, ופניות מועברות לצוות. כדי לדבר עם נציג, אפשר לכתוב "נציג" בכל רגע.`;
 }
+
+/**
+ * The bot's own name in a message ("היי בטי", "בטי, מה זה…", "תודה בטי") is not part of what is asked: it is taken out before the
+ * greeting check and the knowledge-base search. Whole words only ("בטיחות" stays); nothing changes when only the name was written.
+ */
+export function withoutBotName(text: string | null, name: string | null | undefined): string | null {
+  const n = (name ?? '').trim();
+  if (!text || n.length < 2) return text;
+  const esc = n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const out = text.replace(new RegExp(`(^|[\\s,.!?:;״"'׳()])(?:ו|ה)?${esc}(?=$|[\\s,.!?:;״"'׳()])`, 'g'), '$1').replace(/^[\s,.:;]+/, '').replace(/\s{2,}/g, ' ').trim();
+  return out.length ? out : text;
+}
+
+/** Small talk ("מה שלומך?", "מה נשמע?", "מה קורה?"): a short friendly answer; null for anything else. */
+const HOW = /^(ו?מה שלומך|מה שלומכם|מה נשמע|מה נשמע איתך|מה קורה|מה קורה איתך|מה העניינים|מה איתך|איך את|איך אתה|איך הולך|איך היום שלך|מה המצב|מה מצבך|הכל טוב|הכול טוב|הכל בסדר|הכול בסדר)( איתך| אצלך| היום)?$/;
+export function smallTalkReply(text: string | null | undefined): string | null {
+  const t = (text ?? '').toLowerCase().replace(/[?!.,״"׳:;()\u200e\u200f\u{1F300}-\u{1FAFF}\u2600-\u27BF]/gu, ' ').replace(/^(היי|הי|שלום|אהלן|בוקר טוב|ערב טוב|צהריים טובים)\s+/, '').replace(/\s+/g, ' ').trim();
+  return t && HOW.test(t) ? 'תודה ששאלת, הכול טוב אצלי 😊 במה אפשר לעזור?' : null;
+}

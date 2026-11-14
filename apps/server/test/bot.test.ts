@@ -152,7 +152,7 @@ describe('menu bot end to end', () => {
     expect((await conv('c1')).assigned_to).toBeNull(); // not assigned while the bot handles it
 
     expect((await say('c1', '1'))[0]).toContain('9:00');
-    const retry = await say('c1', 'מה קורה?');
+    const retry = await say('c1', 'בננה סגולה');
     expect(retry[0]).toContain('לא הבנתי');
     expect(retry[0]).toContain('1. שעות פעילות');
 

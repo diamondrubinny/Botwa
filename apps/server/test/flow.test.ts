@@ -543,6 +543,15 @@ describe('safety flow live: areas, template endpoint, placeholders, profile, fil
   it('a real conversation: identification once, a hazard with a photo routed by area, a chemicals question routed to its officer, tags and the summary note', async () => {
     await call('PUT', '/settings/bot', 'admin@t.io', { ...DEFAULT_BOT, enabled: true, mode: 'flow' });
     const first = await say('wa1', 'שלום'); expect(first.join(' ')).toContain('שם מלא');
+    // small talk in the middle of the identification: a kind answer, then the same question again (nothing is stored as the name)
+    const how = await say('wa1', 'מה שלומך?');
+    expect(how).toHaveLength(1);
+    expect(how[0]).toContain('הכול טוב אצלי');
+    expect(how[0]).toContain('נמשיך: שם מלא:');
+    // a new customer who starts with small talk: the answer, then the flow opens as usual
+    const fresh = await say('wa77', 'היי, מה נשמע?');
+    expect(fresh[0]).toContain('הכול טוב אצלי');
+    expect(fresh.join(' ')).toContain('שם מלא');
     await say('wa1', 'רונית כהן'); await say('wa1', 'דלג'); await say('wa1', 'דלג'); await say('wa1', 'מדעי החיים'); await say('wa1', 'פרופ׳ לוי');
     expect(first.join(' ')).toContain('שלום, כאן הבוט מיחידת הבטיחות');                     // no persona name yet: "the bot"
     const topics = await say('wa1', '1');                                                    // status: manager
@@ -564,6 +573,10 @@ describe('safety flow live: areas, template endpoint, placeholders, profile, fil
     // the same person writes again from a new contact id? no: same contact, new topic after a person closed the case
     await db.query(`UPDATE conversations SET status = 'closed', flow_state = NULL, bot_state = NULL, assigned_to = NULL WHERE id = $1`, [c1.id]);
     await call('PUT', '/branding/bot', 'admin@t.io', { name: 'בטי', role: 'הבוט של יחידת הבטיחות' });
+    // "היי בטי" is a greeting: the conversation opens as usual, no knowledge-base search on the bot's name
+    const hi = await say('wa88', 'היי בטי');
+    expect(hi.join(' ')).toContain('שלום, כאן בטי מיחידת הבטיחות');
+    expect(hi.join(' ')).not.toContain('לא מצאתי');
     const again = await say('wa1', 'שלום שוב');
     expect(again[0]).toBe('היי רונית, טוב לראות אותך שוב! כאן בטי מיחידת הבטיחות 😊');          // remembered by first name, the bot by its name
     expect(again[1]).toContain('ברצוני לקבל מידע / לדווח על:');                                 // identification is not asked again
@@ -717,7 +730,7 @@ describe('a question typed during identification', () => {
     expect(r.state.vars.fullName).toBeUndefined();
     expect(r.state.node).toBe('n');
     expect(r.replies[0]).toContain('לא מצאתי תשובה');
-    expect(r.replies[0]).not.toContain('שם מלא:');
+    expect(r.replies[0]).toContain('נמשיך: שם מלא:');                      // the question it waits for is asked again
     const named = await runFlow(q, r.state, 'דנה', ans);
     const b = await runFlow(q, named.state, 'האם אפשר לעבוד מעל 7 שלבים בסולם ללא היתר?', ans);
     expect(b.state.node).toBe('b');
