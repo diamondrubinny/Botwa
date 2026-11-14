@@ -1,3 +1,4 @@
+import { fixQuality, kbQuality } from '../kb/quality.js';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { loadAccessible } from '../access.js';
@@ -177,6 +178,16 @@ export function kbRoutes(app: FastifyInstance, db: Db, kb: KnowledgeBase) {
          FROM kb_sources WHERE content_hash IS NOT NULL GROUP BY content_hash HAVING count(*) > 1 LIMIT 100`,
     );
     return rows;
+  });
+
+  // Data quality: duplicates and mistakes, and a safe correction of what can be corrected (duplicates are switched off, not deleted)
+  app.get('/kb/quality', { preHandler: manage, config: { rateLimit: { max: 20, timeWindow: '1 minute' } } }, async () => kbQuality(db));
+  app.post('/kb/quality/fix', { preHandler: manage, config: { rateLimit: { max: 5, timeWindow: '10 minutes' } } }, async (req) => {
+    const r = await fixQuality(db);
+    for (const id of r.cleaned) await kb.indexWritten(id).catch(() => undefined);
+    for (const id of r.requeued) { await db.query(`UPDATE kb_sources SET status = 'pending', error = NULL WHERE id = $1`, [id]); kb.enqueue(id); }
+    await audit(db, { actorId: req.user!.id, action: 'kb.quality_fix', ip: req.ip, meta: { disabled: r.disabled, cleaned: r.cleaned.length, requeued: r.requeued.length } });
+    return { disabled: r.disabled, cleaned: r.cleaned.length, requeued: r.requeued.length };
   });
 
   // Read every link source again now (changed pages are re-indexed, unchanged ones keep their version).

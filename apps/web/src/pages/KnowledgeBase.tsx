@@ -514,14 +514,7 @@ function Health() {
         )}
       </section>
 
-      <section className="card" aria-labelledby="hl-d">
-        <h2 id="hl-d">תוכן כפול ({dups.length})</h2>
-        <p className="hint">מקורות שהתוכן שלהם זהה. כדאי להשאיר אחד.</p>
-        {dups.length === 0 ? <p>לא נמצאו כפילויות.</p> : dups.map((g) => (
-          <ul key={g.hash}>{g.items.map((i, k) => <li key={i.id} className="row"><span>{i.title}{i.url && <span dir="ltr" className="hint"> {i.url}</span>}{k === 0 && ' (הראשון)'}</span>
-            {k > 0 && <button className="danger" onClick={() => setDel({ id: i.id, title: i.title })}>מחיקה<span className="sr-only"> {i.title}</span></button>}</li>)}</ul>
-        ))}
-      </section>
+      <Quality onDone={load} />
 
       <section className="card" aria-labelledby="hl-s">
         <h2 id="hl-s">לא רועננו מעל 60 יום ({h.stale.length}) ומקורות בלי תוכן ({h.empty.length})</h2>
@@ -539,5 +532,58 @@ function Health() {
       <ConfirmDialog open={!!del} danger title="מחיקת מקור" message={`"${del?.title}" יימחק מהמאגר.`} onCancel={() => setDel(null)}
         onConfirm={() => { const d = del!; setDel(null); void act(() => api('DELETE', `/kb/sources/${d.id}`), 'נמחק.'); }} />
     </>
+  );
+}
+
+interface QItem { id: string; title: string; kind: string; origin: string | null; url: string | null }
+interface QIssue { kind: string; action: 'fix' | 'review'; keep?: QItem; items: QItem[]; detail?: string }
+const Q_LABEL: Record<string, string> = {
+  same_content: 'תוכן זהה (כפילות)', contained: 'מקור שכלול כולו במקור אחר', empty: 'מקור בלי תוכן', repeated_variants: 'ניסוחים חוזרים בשאלה', stuck: 'ממתין לקריאה יותר מיום',
+  same_question: 'אותה שאלה עם תשובות שונות', short_answer: 'תשובה קצרה מדי או שחוזרת על השאלה', broken: 'מקור בשגיאה', garbled: 'טקסט לא קריא (סריקה או קובץ פגום)',
+};
+const Q_FIX: Record<string, string> = { same_content: 'יכובו העותקים, ויישאר', contained: 'יכובה, כי הכול נמצא גם ב', empty: 'יכובה', repeated_variants: 'יוסרו הכפילויות', stuck: 'תישלח שוב לקריאה' };
+
+/** Duplicates and mistakes in the knowledge base: a safe correction for what can be corrected, a list for a person for the rest. */
+function Quality({ onDone }: { onDone: () => Promise<void> }) {
+  const [q, setQ] = useState<{ issues: QIssue[]; checked: number } | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const load = async () => setQ(await api<{ issues: QIssue[]; checked: number }>('GET', '/kb/quality').catch(() => null));
+  useEffect(() => { void load(); }, []);
+  if (!q) return <section className="card" aria-labelledby="hl-q"><h2 id="hl-q">בדיקת איכות: כפילויות וטעויות</h2><Loading lines={2} /></section>;
+  const fix = q.issues.filter((i) => i.action === 'fix');
+  const review = q.issues.filter((i) => i.action === 'review');
+  async function run() {
+    setBusy(true); setMsg(null);
+    try {
+      const r = await api<{ disabled: number; cleaned: number; requeued: number }>('POST', '/kb/quality/fix');
+      setMsg({ ok: true, text: `תוקן: ${r.disabled} מקורות כפולים או ריקים כובו (לא נמחקו, ואפשר להפעיל אותם שוב ברשימת המקורות), ${r.cleaned} שאלות נוקו מניסוחים חוזרים, ${r.requeued} מקורות נשלחו שוב לקריאה.` });
+      await load(); await onDone();
+    } catch (e) { setMsg({ ok: false, text: errText(e instanceof ApiError ? e.code : 'generic') }); }
+    setBusy(false);
+  }
+  const list = (items: QIssue[]) => (
+    <ul>{items.map((i, n) => (
+      <li key={`${i.kind}-${n}`}><strong>{Q_LABEL[i.kind] ?? i.kind}:</strong> {i.items.map((x) => `"${x.title}"`).join(', ')}
+        {i.action === 'fix' && <span className="hint"> · {Q_FIX[i.kind] ?? ''}{i.keep ? ` "${i.keep.title}"` : ''}</span>}
+        {i.detail && <span className="hint"> · {i.detail}</span>}</li>))}</ul>
+  );
+  return (
+    <section className="card" aria-labelledby="hl-q">
+      <h2 id="hl-q">בדיקת איכות: כפילויות וטעויות</h2>
+      <p className="hint">נבדקו {q.checked} מקורות פעילים. כפילות מזוהה גם בין קובץ שהועלה לבין חוק שיובא, וגם כשמקור כלול כולו במקור אחר. בכפילות נשאר מקור מיובא (שמתעדכן לבד), אחר כך המקור שהבוט השתמש בו יותר, ואחר כך הוותיק.</p>
+      {q.issues.length === 0 ? <p className="ok">לא נמצאו כפילויות או טעויות.</p> : (
+        <>
+          <h3>אפשר לתקן אוטומטית ({fix.length})</h3>
+          {fix.length ? list(fix) : <p>אין.</p>}
+          {fix.length > 0 && <button type="button" className="primary" disabled={busy} onClick={() => void run()}>{busy ? 'מתקן…' : `תיקון אוטומטי (${fix.length})`}</button>}
+          <h3>לבדיקה של אדם ({review.length})</h3>
+          {review.length ? list(review) : <p>אין.</p>}
+          <p className="hint">שאלות זהות עם תשובות שונות: צריך להחליט איזו תשובה נכונה ולמחוק את השנייה, או לאחד ביניהן. טקסט לא קריא: כדאי להעלות קובץ מקורי (לא סרוק).</p>
+        </>
+      )}
+      <div className="row"><button type="button" disabled={busy} onClick={() => void load()}>בדיקה מחדש</button></div>
+      {msg && <p role="status" className={msg.ok ? 'ok' : 'error'}>{msg.text}</p>}
+    </section>
   );
 }

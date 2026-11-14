@@ -340,6 +340,10 @@ await page.waitForSelector('text=הבוט היה עונה.');
 check('knowledge base: playground finds the answer despite a Hebrew prefix', true);
 await axe('knowledge base: playground');
 for (const tab of ['שאלות ללא מענה', 'מילים נרדפות', 'סטטיסטיקה', 'בריאות וכלים']) { await page.click(`.chips >> text=${tab}`); await page.waitForTimeout(400); await axe(`knowledge base: ${tab}`); }
+await page.waitForSelector('#hl-q');
+await page.waitForSelector('section[aria-labelledby="hl-q"] button:has-text("בדיקה מחדש")');
+check('knowledge base: the data quality check (duplicates and mistakes) is shown', /נבדקו \d+ מקורות פעילים/.test(await page.textContent('section[aria-labelledby="hl-q"]')));
+await axe('knowledge base: data quality');
 await page.click('aside.sidebar nav >> text=בוט');
 await page.waitForSelector('legend:has-text("מענה ממאגר הידע")');
 await axe('bot page with knowledge base settings');
