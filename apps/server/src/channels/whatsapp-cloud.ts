@@ -112,6 +112,9 @@ export function flowErrorKey(httpStatus: number, code: number | undefined, messa
   if (code === 139001 || code === 139002) return 'flow_bad_state';
   if (code === 139004) return 'flow_published_cannot_delete';
   if (/validation errors/i.test(message)) return 'flow_validation';
+  if (/name should be unique|name.*already/i.test(message)) return 'flow_name_taken';
+  // a Flows request that Meta refuses as an invalid parameter is about the Flow, not the phone number id (its words are shown)
+  if (code === 100 && message) return 'flow_rejected';
   return metaCheckError(httpStatus, code);
 }
 /** The id of the Flow a refusal names ("… Flow ID: 1115664627978396 …"), so a draft Meta kept is not lost. */

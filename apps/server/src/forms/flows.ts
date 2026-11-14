@@ -74,7 +74,7 @@ export async function publishFlow(db: Db, api: FlowApi, templateId: string, chan
     draft = prev;   // the same version is already a draft at Meta: publish it again
   } else {
     let created: { id: string; errors: string[] };
-    try { created = await api.flowCreate(`${t.title} (${b.version.slice(0, 6)})`, b.json); } catch (e) {
+    try { created = await createUnique(api, t.title.slice(0, 120), b.json); } catch (e) {
       if (e instanceof FlowError) return refused(null, e);
       throw e;
     }
@@ -93,11 +93,23 @@ export async function publishFlow(db: Db, api: FlowApi, templateId: string, chan
   return f;
 }
 
+/**
+ * Meta: "Flow name should be unique within one WhatsApp business account". Every Flow gets the template's title and a short
+ * unique stamp; should the name still be taken (an old draft), it is tried once more with a new stamp.
+ */
+async function createUnique(api: FlowApi, base: string, json: unknown): Promise<{ id: string; errors: string[] }> {
+  const stamp = () => `${Date.now().toString(36)}${Math.floor(Math.random() * 1296).toString(36)}`;
+  try { return await api.flowCreate(`${base} (${stamp()})`, json); } catch (e) {
+    if (e instanceof FlowError && e.key === 'flow_name_taken') return api.flowCreate(`${base} (${stamp()}${stamp()})`, json);
+    throw e;
+  }
+}
+
 /** Publish a Flow JSON as a test and remove it again (retired if published, deleted if a draft). */
 async function trial(api: FlowApi, label: string, json: unknown): Promise<{ ok: true } | { ok: false; problem: string; detail?: string }> {
   let id: string | null = null;
   try {
-    const c = await api.flowCreate(`Botwa check ${label} ${new Date().toISOString().slice(0, 16)}`, json);
+    const c = await createUnique(api, `Botwa check ${label}`, json);
     id = c.id;
     if (c.errors.length) { await api.flowRetire(id, false); return { ok: false, problem: 'flow_validation', detail: c.errors[0] }; }
     await api.flowPublish(id);

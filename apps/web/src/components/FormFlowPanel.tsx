@@ -58,7 +58,7 @@ export function FormFlowPanel({ tpl, onClose }: { tpl: FormTemplate; onClose: ()
     try {
       const f = await api<{ status: string; errors: string[]; problem?: string; detail?: string; health?: Record<string, string> }>('POST', `${base}/publish`, { channelId });
       if (f.status === 'PUBLISHED') { setMsg({ ok: true, text: 'הטופס פורסם בווצאפ. אפשר לשלוח אותו מהשיחות בערוץ הזה.' }); setHealth(null); }
-      else { setMsg({ ok: false, text: errText(f.problem ?? 'flow_validation') }); setHealth(f.health ?? null); }
+      else { setMsg({ ok: false, text: `${errText(f.problem ?? 'flow_validation')}${f.detail && f.problem !== 'flow_integrity' ? ` (${f.detail})` : ''}` }); setHealth(f.health ?? null); }
       await load();
     } catch (e) { fail(e); }
     setBusy(false);

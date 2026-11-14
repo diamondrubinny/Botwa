@@ -102,9 +102,11 @@ describe('forms filled inside WhatsApp, end to end against a simulated Meta', ()
   let createErrors: unknown[] = [];
   let publishResponse: (flowJson: string) => Response = () => Response.json({ success: true });
   const flowJsons = new Map<string, string>();
+  let nameTaken = 0;
   const fakeFetch = async (url: string, init?: RequestInit): Promise<Response> => {
     const body = typeof init?.body === 'string' ? JSON.parse(init.body) : init?.body ? '[form]' : undefined;
     if (init?.method === 'POST' || init?.method === 'DELETE') posts.push({ url, body });
+    if (init?.method === 'POST' && url.endsWith('/5550009999/flows') && nameTaken > 0) { nameTaken--; return Response.json({ error: { code: 100, message: 'Flow name should be unique within one WhatsApp business account. Please select another name for your flow.' } }, { status: 400 }); }
     if (init?.method === 'POST' && url.endsWith('/5550009999/flows')) { const id = `77700011${++flowSeq}`; flowJsons.set(id, String((body as { flow_json?: string }).flow_json ?? '')); return Response.json({ id, success: true, validation_errors: createErrors }); }
     if (init?.method === 'POST' && /\/77700011\d+\/publish$/.test(url)) return publishResponse(flowJsons.get(/\/(77700011\d+)\/publish$/.exec(url)![1]!) ?? '');
     if (url.includes('/5550009999?fields=account_review_status')) return Response.json({ account_review_status: 'APPROVED' });
@@ -293,5 +295,22 @@ describe('forms filled inside WhatsApp, end to end against a simulated Meta', ()
     const sig = (await call('adm@t.io', 'POST', '/forms/flow/probe', { channelId, templateId })).json();
     expect(sig).toMatchObject({ verdict: 'signature', steps: [{ step: 'minimal', ok: true }, { step: 'fields', ok: true }, { step: 'full', ok: false }] });
     publishResponse = () => Response.json({ success: true });
+  });
+  it('a Flow name Meta already has: every Flow gets a unique stamp, and a taken name is retried once with a new one', async () => {
+    publishResponse = () => Response.json({ success: true });
+    createErrors = [];
+    await call('adm@t.io', 'PUT', `/forms/templates/${templateId}/flow`, { enabled: true, labels: { name: 'שם (שוב)' } });
+    nameTaken = 1;
+    posts.length = 0;
+    const r = (await call('adm@t.io', 'POST', `/forms/templates/${templateId}/flow/publish`, { channelId })).json();
+    expect(r).toMatchObject({ status: 'PUBLISHED' });
+    const names = posts.filter((p) => p.url.endsWith('/5550009999/flows')).map((p) => (p.body as { name: string }).name);
+    expect(names).toHaveLength(2);
+    expect(names[0]).not.toBe(names[1]);
+    expect(names[1]).toMatch(/^היתר עבודה \([0-9a-z]+\)$/);
+    // the error is named for what it is (not "phone number id not found")
+    const { flowErrorKey } = await import('../src/channels/whatsapp-cloud.js');
+    expect(flowErrorKey(400, 100, 'Flow name should be unique within one WhatsApp business account.')).toBe('flow_name_taken');
+    expect(flowErrorKey(400, 100, 'Invalid parameter')).toBe('flow_rejected');
   });
 });
