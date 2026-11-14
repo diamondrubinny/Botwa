@@ -37,6 +37,7 @@ import { composeAnswer, type KbAnswer } from '../kb/compose.js';
 import { loadPersona } from '../routes/branding.js';
 import { saveUsername } from './username-store.js';
 import { isSensitive, pickGif, type GifMoment } from '../bot-gifs.js';
+import { isEmergency } from '../emergency.js';
 import { detect, sanitizeFileName } from '../media/validate.js';
 import { renderBotText, cleanName, identityReply, smallTalkReply, withoutBotName, type BotTextContext } from '../bot-text.js';
 import { isCommentContact, META_CREDS_KEY, MetaMessagingAdapter, type CommentReplyMode, type MetaCreds } from './meta-messaging.js';
@@ -371,6 +372,14 @@ export class ChannelManager {
             await this.db.query('UPDATE contacts SET opted_out = false, opted_out_at = NULL WHERE id = $1', [r.contactId]); // they wrote again: conversation is welcome
           }
           const bot = r.messageId ? await loadBot(this.db) : null;
+          // an emergency: the numbers to call at once and an urgent hand-over, before anything else (no greeting, menu or GIF)
+          if (r.messageId && !stop && !m.media && bot?.emergency.enabled && !isCommentContact(m.externalContactId) && isEmergency(m.text)) {
+            await this.emergency(channelId, r.conversationId, m.externalContactId, r.messageId, bot.emergency.text).catch(() => undefined);
+            this.emit({ channelId, type: 'message', conversationId: r.conversationId, messageId: r.messageId });
+            this.onInbound?.(r.conversationId);
+            this.hookMessage('message.received', r.conversationId, r.messageId);
+            return;
+          }
           // a thank-you or praise ("תודה רבה", "אתם אחלה") gets a heart (or the chosen emoji), whoever handles the conversation
           let thanked = '';
           if (r.messageId && !stop && !m.media && bot?.reactions.thanks && !isCommentContact(m.externalContactId) && isThanks(m.text)) {
@@ -989,6 +998,31 @@ export class ChannelManager {
       // keep the cool-down even when sending failed: no retry storm on a channel that cannot take media right now
       return false;
     }
+  }
+
+  /**
+   * Emergency: the emergency numbers to the customer (at most once in 10 minutes), a 🚨 on the message, an urgent note and the
+   * tag "דחוף", the bot stops and a person gets the conversation (also outside working hours: no away notice instead of the
+   * numbers), and an alert to the admins (no customer text in it).
+   */
+  async emergency(channelId: string, convId: string, ext: string, messageId: string, text: string): Promise<void> {
+    const recent = (await this.db.query(`SELECT 1 FROM messages WHERE conversation_id = $1 AND automation = 'emergency' AND created_at > now() - interval '10 minutes' LIMIT 1`, [convId])).rowCount;
+    if (!recent) {
+      const sent = await this.sendText(channelId, ext, text, { background: true }).catch(() => ({} as { externalMessageId?: string }));
+      const ins = await this.db.query(`INSERT INTO messages (conversation_id, direction, body, external_id, auto, automation) VALUES ($1,'out',$2,$3,true,'emergency') ON CONFLICT DO NOTHING RETURNING id`, [convId, text, sent.externalMessageId ?? null]);
+      if (ins.rows[0]) { this.notifyMessage(channelId, convId, ins.rows[0].id); this.hookMessage('message.sent', convId, ins.rows[0].id); }
+    }
+    await this.setOurReaction(messageId, '🚨', null).catch(() => undefined);
+    await this.db.query(`INSERT INTO conversation_notes (conversation_id, body) VALUES ($1, '🚨 פנייה דחופה: ההודעה נראית כמו מצב חירום (סכנה, פציעה, שריפה או דליפה). נשלחו ללקוח מספרי החירום. יש לחזור אליו מיד.')`, [convId]);
+    await this.db.query(`INSERT INTO tags (name) SELECT 'דחוף' WHERE NOT EXISTS (SELECT 1 FROM tags WHERE lower(name) = 'דחוף')`).catch(() => undefined);
+    const tag = (await this.db.query(`SELECT id FROM tags WHERE lower(name) = 'דחוף' LIMIT 1`)).rows[0]?.id as string | undefined;
+    if (tag) await this.db.query('INSERT INTO conversation_tags (conversation_id, tag_id) VALUES ($1, $2) ON CONFLICT DO NOTHING', [convId, tag]).catch(() => undefined);
+    await this.db.query(`UPDATE conversations SET status = 'open', bot_state = 'human', snoozed_until = NULL WHERE id = $1`, [convId]);
+    const held = (await this.db.query('SELECT assigned_to FROM conversations WHERE id = $1', [convId])).rows[0]?.assigned_to as string | null;
+    const to = held ?? await autoAssign(this.db, convId).catch(() => null);
+    if (to) this.onAssigned?.(convId, to);
+    await audit(this.db, { action: 'conversation.emergency', target: convId, meta: { assignedTo: to } }).catch(() => undefined);
+    void sendAlert(this.cfg, `🚨 פנייה דחופה (נראית כמו מצב חירום) התקבלה ב-${this.types.get(channelId) ?? 'ערוץ'}. ${to ? 'שויכה לנציג.' : 'לא שויכה: אין נציג זמין!'} יש לפתוח את השיחה ולחזור ללקוח מיד.`, { conversationId: convId });
   }
 
   /** Hand a bot conversation to a person: note, assignment (the named person if active, else normal routing), then the hand-over or away notice. */

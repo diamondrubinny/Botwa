@@ -573,6 +573,16 @@ describe('safety flow live: areas, template endpoint, placeholders, profile, fil
     // the same person writes again from a new contact id? no: same contact, new topic after a person closed the case
     await db.query(`UPDATE conversations SET status = 'closed', flow_state = NULL, bot_state = NULL, assigned_to = NULL WHERE id = $1`, [c1.id]);
     await call('PUT', '/branding/bot', 'admin@t.io', { name: 'בטי', role: 'הבוט של יחידת הבטיחות' });
+    // an emergency from a known customer: the numbers at once, no "good to see you again", no menu; urgent, to a person
+    const sos = await say('wa99', 'מצב חירום');
+    expect(sos).toHaveLength(1);
+    expect(sos[0]).toContain('מד"א 101');
+    expect(sos[0]).not.toContain('טוב לראות');
+    const ec = await conv('wa99');
+    expect(ec.bot_state).toBe('human');
+    expect((await db.query(`SELECT t.name FROM conversation_tags x JOIN tags t ON t.id = x.tag_id WHERE x.conversation_id = $1`, [ec.id])).rows.map((r) => r.name)).toContain('דחוף');
+    expect((await db.query(`SELECT body FROM conversation_notes WHERE conversation_id = $1`, [ec.id])).rows.map((r) => r.body).join(' ')).toContain('🚨 פנייה דחופה');
+    expect(await say('wa99', 'יש עשן')).toEqual([]);                              // not twice in 10 minutes; the bot stays out
     // "היי בטי" is a greeting: the conversation opens as usual, no knowledge-base search on the bot's name
     const hi = await say('wa88', 'היי בטי');
     expect(hi.join(' ')).toContain('שלום, כאן בטי מיחידת הבטיחות');

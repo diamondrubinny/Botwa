@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { DEFAULT_EMERGENCY_TEXT } from './emergency.js';
 import type { Db } from './db.js';
 
 /** One emoji (a single user-perceived character, possibly with a skin tone or joiner) or empty for "do not react". */
@@ -96,6 +97,8 @@ export const botSchema = z.object({
   }).default({ enabled: false, minScore: 0.6, maxChars: 700, showSource: true, intro: 'מצאתי את זה במאגר המידע שלנו:', answerMode: 'quote', outro: 'אם צריך הבהרה או עזרה נוספת, אפשר לכתוב כאן, או לבקש נציג.' }),
   /** automatic emoji reactions on the customer's message: "working" while the bot searches, then "done" / "noAnswer", or "handoff" when a person takes over */
   reactions: z.object({ enabled: z.boolean(), /** react to every message the bot handles (not only to searches) */ ackAll: z.boolean().default(false), working: emoji, done: emoji, noAnswer: emoji, handoff: emoji, /** a greeting (שלום, היי…) gets this reaction and nothing else; empty = none */ greeting: emoji.default('👋'), /** a thank-you or praise (תודה, אתם אחלה, אין עליכם) gets this reaction, also when a person handles the chat; empty = none */ thanks: emoji.default('❤️') }).default(() => ({ ...DEFAULT_REACTIONS })),
+  /** a message about an emergency (danger, injury, fire, leak…): the emergency numbers at once and an urgent hand-over to a person (emergency.ts) */
+  emergency: z.object({ enabled: z.boolean(), text: z.string().trim().min(10).max(800) }).default(() => ({ enabled: true, text: DEFAULT_EMERGENCY_TEXT })),
   /** a fitting GIF from the gallery at pleasant moments (greeting, thanks, hand-over, closing): never on sensitive topics, at most one per cool-down */
   gifs: z.object({
     enabled: z.boolean(),
@@ -128,6 +131,7 @@ export const DEFAULT_BOT: BotConfig = {
   kb: { enabled: false, minScore: 0.6, maxChars: 700, showSource: true, intro: 'מצאתי את זה במאגר המידע שלנו:', answerMode: 'quote', outro: 'אם צריך הבהרה או עזרה נוספת, אפשר לכתוב כאן, או לבקש נציג.' },
   reactions: { ...DEFAULT_REACTIONS },
   gifs: { ...DEFAULT_GIFS },
+  emergency: { enabled: true, text: DEFAULT_EMERGENCY_TEXT },
   catchupHours: 12,
   interactiveMenus: true,
 };

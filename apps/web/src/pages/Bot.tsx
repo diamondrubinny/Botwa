@@ -14,6 +14,7 @@ interface BotCfg {
   catchupHours?: number;
   interactiveMenus?: boolean;
   gifs?: { enabled: boolean; greeting: boolean; thanks: boolean; handoff: boolean; close: boolean; cooldownMinutes: number };
+  emergency?: { enabled: boolean; text: string };
 }
 const GIFS = { enabled: true, greeting: true, thanks: true, handoff: true, close: true, cooldownMinutes: 360 };
 
@@ -201,6 +202,16 @@ export function Bot({ me }: { me: Me }) {
           </div>
           <ReactionDiagnostics />
           <p id="rx-hint" className="hint">אימוג׳י אחד בכל שדה. עובד בווצאפ (QR ורשמי) ובטלגרם (טלגרם מאפשר רק קבוצה קבועה של אימוג׳י, למשל 👀 👍 🤔 🙏; אחרים לא יוצגו). בצ׳אט באתר מוצגים רק הלב על תודה ורגשונים שנציג בחר. התגובות נשלחות רק בתגובה להודעה שהלקוח כתב, עד 30 בדקה לערוץ, ולכן הן לא מגדילות סיכון לחסימה כמו הודעות יזומות.</p>
+        </fieldset>
+
+        <fieldset disabled={!canEdit}>
+          <legend>מצב חירום</legend>
+          <p className="hint" id="em-h">הודעה שנראית כמו מצב חירום (חירום, הצילו, שריפה, עשן, דליפת גז או חומר, פיצוץ, פצוע, לא נושם, התחשמלות, אמבולנס…) מקבלת מיד את ההודעה הזו, לפני כל דבר אחר: בלי ברכה, תפריט או GIF. השיחה מסומנת "דחוף" ועוברת לנציג (גם מחוץ לשעות הפעילות), ונשלחת התראה למנהלים. שאלות על נהלים וציוד ("איפה יציאות החירום?", "גלאי עשן") לא נחשבות חירום.</p>
+          <div className="field"><label><input type="checkbox" role="switch" style={{ width: 'auto', minHeight: 'auto' }} aria-describedby="em-h" checked={b.emergency?.enabled ?? true} onChange={(e) => set({ emergency: { text: b.emergency?.text ?? '', enabled: e.target.checked } })} /> טיפול אוטומטי במצב חירום</label></div>
+          <div className="field">
+            <label htmlFor="em-t">ההודעה ללקוח (כדאי להוסיף את מספר מוקד הביטחון של המוסד)</label>
+            <textarea id="em-t" rows={4} maxLength={800} value={b.emergency?.text ?? ''} onChange={(e) => set({ emergency: { enabled: b.emergency?.enabled ?? true, text: e.target.value } })} />
+          </div>
         </fieldset>
 
         <fieldset disabled={!canEdit}>
