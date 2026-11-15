@@ -21,6 +21,7 @@ const PAIRS: [string, string][] = [
   ['הבוט של השירות', 'the service bot'],
   ['הבוט של יחידת הבטיחות', 'the safety unit bot'],
   ['נמשיך: {*}', "Let's continue: {1}"],
+  ['לתפריט הראשי כתבו "תפריט".', 'For the main menu, write "menu".'],
   ['נמשיך: אפשר לבחור מהתפריט שלמעלה, או לכתוב "תפריט".', 'Let\'s continue: you can choose from the menu above, or write "menu".'],
   ['💡 הידעת?', '💡 Did you know?'],
   ['רוצים עוד? כתבו "עוד". לשאלה על המקרה שלכם, כתבו לנו ונעזור.', 'Want another one? Write "more". For a question about your own case, write to us and we\'ll help.'],

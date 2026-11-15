@@ -49,6 +49,8 @@ export interface FlowContext {
   now?: number;
   /** what is already known about this customer (from earlier conversations), used when a conversation starts */
   profile?: Vars;
+  /** details the channel already collected (the website chat's form): a question of that kind is not asked again */
+  known?: { name?: string; email?: string; phone?: string };
   /** confident knowledge-base answer text (already formatted) or null */
   kbAnswer: (text: string) => Promise<string | null>;
   /** index of the option whose meaning matches the free text, or null (needs the local model; returns null when it is off) */
@@ -102,8 +104,12 @@ const withHint = (a: string) => `${a}\n\n${ANSWER_HINT}`;
 const DEFAULT_LABELS: Record<string, string> = { name: 'שם', phone: 'טלפון', email: 'אימייל', text: 'פירוט' };
 
 // the hint goes between the text and the options: the numbered options must stay the last lines (they become buttons)
+/**
+ * A menu as text. "0. נציג אנושי" only on menus that pick a topic: a menu that records an answer (status, faculty…) is part of
+ * the identification, where "a person" is not one of the answers (writing "נציג" still hands over).
+ */
 const menuText = (n: Extract<FlowNode, { type: 'menu' }>, humanOption: boolean, humanLabel = 'נציג אנושי', hint = '') =>
-  `${n.text}${hint ? `\n\n${hint}` : ''}\n\n${[...n.options.map((o, i) => `${i + 1}. ${o.label}`), ...(humanOption ? [`0. ${humanLabel}`] : [])].join('\n')}`;
+  `${n.text}${hint ? `\n\n${hint}` : ''}\n\n${[...n.options.map((o, i) => `${i + 1}. ${o.label}`), ...(humanOption && !n.save ? [`0. ${humanLabel}`] : [])].join('\n')}`;
 
 function validate(kind: string, raw: string): string | null {
   const t = raw.trim();
@@ -220,7 +226,7 @@ export async function runFlow(flow: Flow, prev: FlowState | null, input: FlowInp
   if (w && state.node !== null) {
     if (w.type === 'menu') {
       let idx: number | null = null;
-      if (ctx.humanOption && t === '0') return handoff('requested');
+      if (ctx.humanOption && t === '0' && !w.save) return handoff('requested');
       if (/^\d{1,2}$/.test(t)) idx = Number(t) - 1 < w.options.length ? Number(t) - 1 : null;
       if (idx === null) { const k = w.options.findIndex((o) => normalize(o.label) === t); if (k >= 0) idx = k; }
       const typedPick = idx !== null;   // a number or the exact label (not a guess from the meaning)
@@ -392,7 +398,16 @@ export async function runFlow(flow: Flow, prev: FlowState | null, input: FlowInp
         { const h = histFor(n.id); replies.push(menuText(n, ctx.humanOption, humanLabel, hintFor(h))); return { replies, state: { ...state, node: n.id, invalid: 0, history: h }, effects, menu: true }; }
       }
       // questions stay short (a hint under every question of a form is noise); "back" still works there
-      case 'question': case 'media': replies.push(n.text); return { replies, state: { ...state, node: n.id, invalid: 0, history: histFor(n.id) }, effects };
+      case 'question': case 'media': {
+        const already = n.type === 'question' && n.kind && n.kind !== 'text' ? ctx.known?.[n.kind] : undefined;
+        if (n.type === 'question' && already && !state.vars[n.save]) {   // given already (website chat form): taken, not asked again
+          state = { ...state, vars: { ...state.vars, [n.save]: already } };
+          cursor = n.next;
+          if (!cursor) return finished();
+          break;
+        }
+        replies.push(n.text); return { replies, state: { ...state, node: n.id, invalid: 0, history: histFor(n.id) }, effects };
+      }
       case 'list': replies.push(n.text); return { replies, state: { ...state, node: n.id, invalid: 0, list: { items: [], phase: 'item' }, history: histFor(n.id) }, effects };
       case 'handoff': {
         let who = n.userId;

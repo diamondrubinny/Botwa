@@ -72,6 +72,9 @@ export function createDefaultFactory(cfg: Config): AdapterFactory {
   };
 }
 
+/** After a side answer: how to get the menu (one line, not the menu itself). */
+const MENU_HINT = 'לתפריט הראשי כתבו "תפריט".';
+
 export class ChannelManager {
   readonly bus = new EventEmitter();
   private adapters = new Map<string, ChannelAdapter>();
@@ -994,16 +997,20 @@ export class ChannelManager {
       const last = (await this.db.query(`SELECT body FROM messages WHERE conversation_id = $1 AND direction = 'out' ORDER BY created_at DESC LIMIT 1`, [convId])).rows[0]?.body as string | undefined;
       return { r, lastWasFact: !!last && (last.startsWith('💡 הידעת?') || last.startsWith('💡 Did you know?')) };
     };
-    const own = identityReply(text, persona) ?? smallTalkReply(text, persona.name) ?? await officerReply(this.db, text).catch(() => null)
+    const chat = identityReply(text, persona) ?? smallTalkReply(text, persona.name);   // small talk: nothing to lose if the flow opens after it
+    const own = chat ?? await officerReply(this.db, text).catch(() => null)
       ?? await told().then(({ r, lastWasFact }) => factReply(text, r, lastWasFact)).catch(() => null);
     if (own) {
       const st = c.flow_state as FlowState | null;
       const flow = bot.mode === 'flow' ? await loadFlow(this.db) : null;
       const node = flow && st?.node && !st.done ? flow.nodes.find((n) => n.id === st.node) : undefined;
-      const resume = node?.type === 'question' ? `\n\nנמשיך: ${node.text}` : node?.type === 'menu' ? '\n\nנמשיך: אפשר לבחור מהתפריט שלמעלה, או לכתוב "תפריט".' : '';
+      // an answer with information (officer, safety fact) stays the last thing on the screen: never the whole menu again after
+      // it (it pushes the answer out of sight). In the middle of a question, the question once more; otherwise one line on how
+      // to get the menu. Only small talk at the very start is followed by the flow's opening.
+      const opening = !!chat && !!flow && (!st || (st.node === null && !st.done));   // "היי, מה נשמע?" to start with: the flow opens as usual
+      const resume = node?.type === 'question' ? `\n\nנמשיך: ${node.text}` : opening ? '' : flow || bot.mode === 'menu' ? `\n\n${MENU_HINT}` : '';
       await this.botSay(channelId, convId, ext, `${own}${resume}`);
-      // a new conversation: after the answer the flow starts as usual (its opening, identification…)
-      if (flow && (!st || (st.node === null && !st.done) || st.done)) await this.runFlowStep(channelId, convId, ext, bot, flow, { text: null, media: false }, rx);
+      if (opening) await this.runFlowStep(channelId, convId, ext, bot, flow!, { text: null, media: false }, rx);
       return;
     }
     await rx.greet(text);
@@ -1274,7 +1281,7 @@ export class ChannelManager {
   private async runFlowStep(channelId: string, convId: string, ext: string, bot: BotConfig, flow: NonNullable<Awaited<ReturnType<typeof loadFlow>>>, input: FlowInput, rx: ReturnType<ChannelManager['reactor']>): Promise<void> {
     let searched = false, found = false;
     let answeredFrom: string | null = null;
-    const row = (await this.db.query('SELECT c.flow_state, ct.profile FROM conversations c JOIN contacts ct ON ct.id = c.contact_id WHERE c.id = $1', [convId])).rows[0];
+    const row = (await this.db.query('SELECT c.flow_state, ct.profile, ct.display_name, ct.claimed_email, ct.claimed_phone FROM conversations c JOIN contacts ct ON ct.id = c.contact_id WHERE c.id = $1', [convId])).rows[0];
     const st = row?.flow_state as FlowState | null;
     const hours = await loadBusinessHours(this.db);
     const ctx: FlowContext = {
@@ -1282,6 +1289,11 @@ export class ChannelManager {
       channelType: this.types.get(channelId) ?? 'whatsapp',
       humanKeywords: bot.humanKeywords, humanOption: bot.humanOption, invalidRetries: bot.invalidRetries, invalidMessage: bot.invalidMessage,
       profile: (row?.profile ?? {}) as Record<string, string>,
+      // the website chat's own form already asked these: the flow does not ask them again
+      known: this.types.get(channelId) === 'webchat' ? {
+        name: row?.display_name && !/^מבקר באתר #/.test(row.display_name) ? cleanName(row.display_name) || undefined : undefined,
+        email: row?.claimed_email ?? undefined, phone: row?.claimed_phone ?? undefined,
+      } : undefined,
       resolveArea: (t) => resolveArea(this.db, t),
       kbAnswer: async (t) => { const a = await this.kbAnswer(bot, null, t, true, async () => { searched = true; await rx.set('working'); }, (id) => { answeredFrom = id; }); if (a) found = true; return a; },
       matchOption: async (t, options) => this.kb?.matchOption(t, options) ?? null,

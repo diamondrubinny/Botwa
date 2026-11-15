@@ -355,6 +355,15 @@ describe('the safety unit template', () => {
   const byId = new Map(t.nodes.map((n) => [n.id, n]));
   const U = '77777777-7777-4777-8777-777777777777';
 
+  it('the website chat already asked the name: the flow does not ask it again', async () => {
+    const r = await runFlow(t, null, 'שלום', ctx({ channelType: 'webchat', known: { name: 'רונית כהן' } }));
+    expect(r.replies.join('\n')).not.toContain('שם מלא:');
+    expect(r.replies.join('\n')).toContain('שם הבניין');
+    expect(r.state.vars.fullName).toBe('רונית כהן');
+    const wa = await runFlow(t, null, 'שלום', ctx());                       // WhatsApp: asked as before
+    expect(wa.replies.join('\n')).toContain('שם מלא:');
+  });
+
   it('links given for the forms, training and privacy are placed in the messages; none are invented', () => {
     const t = buildSafetyFlow((n) => tagIds.get(n as never) ?? '', { waste: 'https://forms.example/waste', accident: 'https://forms.example/accident', training: 'https://train.example/', privacy: 'https://example.org/privacy' });
     const text = (id: string) => (t.nodes.find((n) => n.id === id) as { text: string }).text;
@@ -549,14 +558,24 @@ describe('safety flow live: areas, template endpoint, placeholders, profile, fil
     expect(how[0]).toContain('הכול טוב אצלי');
     expect(how[0]).toContain('נמשיך: שם מלא:');
     // a new customer who starts with small talk: the answer, then the flow opens as usual
+    // an answer with information (a safety fact) stays the last thing: one line on the menu, not the menu itself
+    const fact = await say('wa66', 'תספרי לי עובדת בטיחות מעניינת');
+    expect(fact).toHaveLength(1);
+    expect(fact[0]).toContain('💡 הידעת?');
+    expect(fact[0]).toContain('לתפריט הראשי כתבו "תפריט".');
+    expect(fact[0]).not.toContain('שם מלא');
     const fresh = await say('wa77', 'היי, מה נשמע?');
     expect(fresh[0]).toContain('הכול טוב אצלי');
     expect(fresh.join(' ')).toContain('שם מלא');
-    await say('wa1', 'רונית כהן'); await say('wa1', 'דלג'); await say('wa1', 'דלג'); await say('wa1', 'מדעי החיים'); await say('wa1', 'פרופ׳ לוי');
+    await say('wa1', 'רונית כהן'); await say('wa1', 'דלג'); await say('wa1', 'דלג'); await say('wa1', 'מדעי החיים');
+    const status = (await say('wa1', 'פרופ׳ לוי')).join('\n');
+    expect(status).toContain('מה הסטטוס שלך?');
+    expect(status).not.toContain('נציג אנושי');                                               // an identification answer, not "a person"
     expect(first.join(' ')).toContain('שלום, כאן הבוט מיחידת הבטיחות');                     // no persona name yet: "the bot"
     const topics = await say('wa1', '1');                                                    // status: manager
     expect(topics[0]).toBe('תודה רונית! שמרתי את הפרטים, כך שבפעם הבאה לא נשאל אותם שוב.');  // thanked by first name
     expect(topics[1]).toContain('ברצוני לקבל מידע / לדווח על:');
+    expect(topics[1]).toContain('0. נציג אנושי');                                            // the topics menu still offers a person
     const c0 = await conv('wa1');
     expect(c0.display_name).toBe('רונית כהן');
     expect(c0.profile).toMatchObject({ fullName: 'רונית כהן', faculty: 'מדעי החיים', pi: 'פרופ׳ לוי', status: 'מנהל / מהנדס מעבדה' });
