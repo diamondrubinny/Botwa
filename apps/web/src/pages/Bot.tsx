@@ -16,7 +16,7 @@ interface BotCfg {
   catchupHours?: number;
   interactiveMenus?: boolean;
   gifs?: { enabled: boolean; greeting: boolean; thanks: boolean; handoff: boolean; close: boolean; cooldownMinutes: number };
-  emergency?: { enabled: boolean; text: string };
+  emergency?: { enabled: boolean; text: string; textEn?: string };
   empathy?: { enabled: boolean };
   escalation?: { enabled: boolean; minutes: number; backupUserId: string | null };
 }
@@ -212,10 +212,15 @@ export function Bot({ me }: { me: Me }) {
         <fieldset disabled={!canEdit}>
           <legend>מצב חירום</legend>
           <p className="hint" id="em-h">הודעה שנראית כמו מצב חירום (חירום, הצילו, שריפה, עשן, דליפת גז או חומר, פיצוץ, פצוע, לא נושם, התחשמלות, אמבולנס…) מקבלת מיד את ההודעה הזו, לפני כל דבר אחר: בלי ברכה, תפריט או GIF. השיחה מסומנת "דחוף" ועוברת לנציג (גם מחוץ לשעות הפעילות), ונשלחת התראה למנהלים. שאלות על נהלים וציוד ("איפה יציאות החירום?", "גלאי עשן") לא נחשבות חירום.</p>
-          <div className="field"><label><input type="checkbox" role="switch" style={{ width: 'auto', minHeight: 'auto' }} aria-describedby="em-h" checked={b.emergency?.enabled ?? true} onChange={(e) => set({ emergency: { text: b.emergency?.text ?? '', enabled: e.target.checked } })} /> טיפול אוטומטי במצב חירום</label></div>
+          <div className="field"><label><input type="checkbox" role="switch" style={{ width: 'auto', minHeight: 'auto' }} aria-describedby="em-h" checked={b.emergency?.enabled ?? true} onChange={(e) => set({ emergency: { text: b.emergency?.text ?? '', textEn: b.emergency?.textEn ?? '', enabled: e.target.checked } })} /> טיפול אוטומטי במצב חירום</label></div>
           <div className="field">
             <label htmlFor="em-t">ההודעה ללקוח (כדאי להוסיף את מספר מוקד הביטחון של המוסד)</label>
-            <textarea id="em-t" rows={4} maxLength={800} value={b.emergency?.text ?? ''} onChange={(e) => set({ emergency: { enabled: b.emergency?.enabled ?? true, text: e.target.value } })} />
+            <textarea id="em-t" rows={4} maxLength={800} value={b.emergency?.text ?? ''} onChange={(e) => set({ emergency: { enabled: b.emergency?.enabled ?? true, text: e.target.value, textEn: b.emergency?.textEn ?? '' } })} />
+          </div>
+          <div className="field">
+            <label htmlFor="em-en">ההודעה באנגלית (ללקוחות שכותבים באנגלית)</label>
+            <textarea id="em-en" dir="ltr" lang="en" rows={3} maxLength={800} aria-describedby="em-en-h" value={b.emergency?.textEn ?? ''} placeholder="🚨 If there is danger to life… call the Technion emergency centre …, Magen David Adom 101, Fire and Rescue 102 or the Police 100…" onChange={(e) => set({ emergency: { enabled: b.emergency?.enabled ?? true, text: b.emergency?.text ?? '', textEn: e.target.value } })} />
+            <p className="hint" id="em-en-h">אם שיניתם את ההודעה בעברית (למשל הוספתם את מספר מוקד הביטחון), כתבו כאן את אותה הודעה באנגלית. אם השדה ריק, נשלח התרגום המובנה של ההודעה המקורית.</p>
           </div>
           <h3 id="esc-h">הסלמה אוטומטית</h3>
           <p className="hint" id="esc-d">פנייה דחופה (מצב חירום או דיווח מפגע) שאף אדם מהצוות לא כתב בה עוברת אחרי הזמן שנקבע לממונה החלופי. אם לא נבחר ממונה חלופי, או שהוא כבר המטפל, היא עוברת למנהל זמין עם הכי מעט שיחות פתוחות. הנמען מקבל התראה, וגם הודעה בווצאפ אם קישר אותו לבטי. נוספת הערה בשיחה. ההסלמה פועלת גם מחוץ לשעות הפעילות.</p>

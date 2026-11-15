@@ -176,4 +176,19 @@ describe('a conversation in English', () => {
     expect(d.cases.opened).toBeGreaterThan(0);
     expect(d.safety.rows.find((x) => x.kind === 'emergency')!.events).toBeGreaterThanOrEqual(1);   // the emergency earlier in this file
   });
+
+  it('"Thank you" / "Thank u": a warm word back, never an answer to the menu (no hand-over); the emergency message in the unit\'s English', async () => {
+    const ext = '972500009191@s.whatsapp.net';
+    await say(ext, 'hello there, I have a question');
+    for (const t of ['Thank you', 'Thank u', 'thanks!']) {
+      const a = await say(ext, t);
+      expect(a, t).toContain("You're welcome");
+      expect(a, t).not.toContain('passing you to an agent');
+    }
+    expect((await conv(ext)).bot_state).not.toBe('human');
+    // a custom Hebrew emergency text with its English version
+    await db.query(`UPDATE settings SET value = jsonb_set(value, '{emergency}', $1::jsonb) WHERE key = 'bot'`, [JSON.stringify({ enabled: true, text: '🚨 בחירום: מוקד הביטחון 2222, מד"א 101.', textEn: '🚨 In an emergency: the Technion security centre 2222, Magen David Adom 101.' })]);
+    expect(await say('972500009292@s.whatsapp.net', 'Help me, someone is injured')).toContain('the Technion security centre 2222');
+    expect(await say('972500009393@s.whatsapp.net', 'עזרה, יש פצוע')).toContain('מוקד הביטחון 2222');
+  });
 });

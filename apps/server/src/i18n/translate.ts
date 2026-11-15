@@ -15,6 +15,7 @@ import type { Lang } from './lang.js';
 const PAIRS: [string, string][] = [
   // ---- Betty's own messages ----
   ['בטי', 'Betty'],
+  ['בשמחה 😊 אם צריך עוד משהו, אני כאן.', "You're welcome 😊 If you need anything else, I'm here."],
   ['כן, אני כאן איתך 😊', "Yes, I'm here with you 😊"],
   ['תודה ששאלת, הכול טוב אצלי 😊 במה אפשר לעזור?', "Thanks for asking, I'm doing well 😊 How can I help?"],
   ['אני {*}, {*} 🤖 זה בוט, לא בן אדם: התשובות מגיעות מהמידע של היחידה, ופניות מועברות לצוות. כדי לדבר עם נציג, אפשר לכתוב "נציג" בכל רגע.', "I'm {1}, {2} 🤖 I'm a bot, not a person: my answers come from the unit's information, and requests are passed on to the team. To talk to a person, write \"agent\" at any time."],

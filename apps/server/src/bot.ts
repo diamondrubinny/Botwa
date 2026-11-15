@@ -19,7 +19,7 @@ export function isGreeting(text: string | null): boolean {
   return w.length >= 1 && w.length <= 4 && w.some((x) => GREET_HEAD.has(x)) && w.every((x) => GREET_HEAD.has(x) || GREET_TAIL.has(x));
 }
 
-const THANKS = ['תודה', 'תודות', 'תנקס', 'טנקס', 'מודה', 'מודים', 'מודה לכם', 'מעריך', 'מעריכה', 'מעריכים', 'thanks', 'thank you', 'thx', 'ty', 'tnx',
+const THANKS = ['תודה', 'תודות', 'תנקס', 'טנקס', 'מודה', 'מודים', 'מודה לכם', 'מעריך', 'מעריכה', 'מעריכים', 'thanks', 'thank you', 'thank u', 'thanku', 'thankyou', 'thx', 'ty', 'tnx', 'tks', 'many thanks', 'thanks a lot', 'cheers', 'appreciate it', 'much appreciated',
   'אחלה', 'אין עליכם', 'אין עליך', 'אין עלייך', 'אין כמוכם', 'אלופים', 'אלופה', 'אלוף', 'מעולים', 'מעולה', 'מצוין', 'מצוינים', 'מדהימים', 'מדהים', 'מדהימה',
   'כל הכבוד', 'יישר כוח', 'ישר כוח', 'תותחים', 'תותח', 'תותחית', 'מלכים', 'מלכה', 'מלך', 'שירות מעולה', 'שירות מצוין', 'עזרתם מאוד', 'great', 'awesome', 'amazing', 'great service'];
 /** words that make it a question, a complaint or a request rather than a thank-you ("תודה, אבל זה לא עובד", "אחלה, ומה עם…") */
@@ -98,7 +98,7 @@ export const botSchema = z.object({
   /** automatic emoji reactions on the customer's message: "working" while the bot searches, then "done" / "noAnswer", or "handoff" when a person takes over */
   reactions: z.object({ enabled: z.boolean(), /** react to every message the bot handles (not only to searches) */ ackAll: z.boolean().default(false), working: emoji, done: emoji, noAnswer: emoji, handoff: emoji, /** a greeting (שלום, היי…) gets this reaction and nothing else; empty = none */ greeting: emoji.default('👋'), /** a thank-you or praise (תודה, אתם אחלה, אין עליכם) gets this reaction, also when a person handles the chat; empty = none */ thanks: emoji.default('❤️') }).default(() => ({ ...DEFAULT_REACTIONS })),
   /** a message about an emergency (danger, injury, fire, leak…): the emergency numbers at once and an urgent hand-over to a person (emergency.ts) */
-  emergency: z.object({ enabled: z.boolean(), text: z.string().trim().min(10).max(800) }).default(() => ({ enabled: true, text: DEFAULT_EMERGENCY_TEXT })),
+  emergency: z.object({ enabled: z.boolean(), text: z.string().trim().min(10).max(800), /** the same in English, for customers who write in English (empty: the built-in translation) */ textEn: z.string().trim().max(800).default('') }).default(() => ({ enabled: true, text: DEFAULT_EMERGENCY_TEXT, textEn: '' })),
   /** a stressed or upset customer: an acknowledging answer, a person at once and follow-ups until a person answers (empathy.ts) */
   empathy: z.object({ enabled: z.boolean() }).default(() => ({ enabled: true })),
   /** an urgent conversation (emergency, hazard report) nobody from the team answered within `minutes`: to the backup person, else an available manager */
@@ -135,7 +135,7 @@ export const DEFAULT_BOT: BotConfig = {
   kb: { enabled: false, minScore: 0.6, maxChars: 700, showSource: true, intro: 'מצאתי את זה במאגר המידע שלנו:', answerMode: 'quote', outro: 'אם צריך הבהרה או עזרה נוספת, אפשר לכתוב כאן, או לבקש נציג.' },
   reactions: { ...DEFAULT_REACTIONS },
   gifs: { ...DEFAULT_GIFS },
-  emergency: { enabled: true, text: DEFAULT_EMERGENCY_TEXT },
+  emergency: { enabled: true, text: DEFAULT_EMERGENCY_TEXT, textEn: '' },
   empathy: { enabled: true },
   escalation: { enabled: true, minutes: 15, backupUserId: null },
   catchupHours: 12,

@@ -79,6 +79,8 @@ export function createDefaultFactory(cfg: Config): AdapterFactory {
 
 /** After a side answer: how to get the menu (one line, not the menu itself). */
 const MENU_HINT = 'לתפריט הראשי כתבו "תפריט".';
+/** The answer to a plain thank-you. */
+const THANKS_REPLY = 'בשמחה 😊 אם צריך עוד משהו, אני כאן.';
 /** Under an answer from a Hebrew entry, in an English conversation. */
 const KB_HEBREW_NOTE = 'התשובה ממאגר המידע שלנו בעברית. אם צריך עזרה, אפשר לכתוב "נציג".';
 
@@ -401,7 +403,9 @@ export class ChannelManager {
           const bot = r.messageId ? await loadBot(this.db) : null;
           // an emergency: the numbers to call at once and an urgent hand-over, before anything else (no greeting, menu or GIF)
           if (r.messageId && !stop && !m.media && bot?.emergency.enabled && !isCommentContact(m.externalContactId) && isEmergency(m.text)) {
-            await this.emergency(channelId, r.conversationId, m.externalContactId, r.messageId, bot.emergency.text).catch(() => undefined);
+            // in English: the unit's own English text when it wrote one (its Hebrew text may have changed from the built-in one)
+            const emText = (await this.langOf(r.conversationId)) === 'en' && bot.emergency.textEn ? bot.emergency.textEn : bot.emergency.text;
+            await this.emergency(channelId, r.conversationId, m.externalContactId, r.messageId, emText).catch(() => undefined);
             this.emit({ channelId, type: 'message', conversationId: r.conversationId, messageId: r.messageId });
             this.onInbound?.(r.conversationId);
             this.hookMessage('message.received', r.conversationId, r.messageId);
@@ -1032,6 +1036,13 @@ export class ChannelManager {
       const resume = node?.type === 'question' ? `\n\nנמשיך: ${node.text}` : opening ? '' : flow || bot.mode === 'menu' ? `\n\n${MENU_HINT}` : '';
       await this.botSay(channelId, convId, ext, `${own}${resume}`);
       if (opening) await this.runFlowStep(channelId, convId, ext, bot, flow!, { text: null, media: false }, rx);
+      return;
+    }
+    // "תודה" / "thank you" (nothing else in it): a warm word back, never an answer to the menu or the flow's question (it is not
+    // a choice, and must not hand the conversation over); the heart reaction was put on already
+    if (text && isThanks(text) && text.trim().length <= 40) {
+      await this.botSay(channelId, convId, ext, THANKS_REPLY);
+      await this.botGif(channelId, convId, 'thanks', bot).catch(() => undefined);
       return;
     }
     await rx.greet(text);
