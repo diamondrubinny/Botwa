@@ -2,6 +2,7 @@ import { feedbackFor, isFlagged, isLiked } from '../learn.js';
 import { createHash } from 'node:crypto';
 import type { Config } from '../config.js';
 import type { Db } from '../db.js';
+import { detectLang } from '../i18n/lang.js';
 import type { MediaService } from '../media/store.js';
 import { matchOptionLexical } from '../flow/match.js';
 import { checkUrl, FetchError, safeGet, type Fetched } from './fetch.js';
@@ -120,6 +121,8 @@ export class KnowledgeBase {
         const terms = indexTerms(`${title} ${variantsList.join(' ')} ${c.heading ?? ''} ${c.body}`);
         await client.query(`INSERT INTO kb_chunks (source_id, ord, heading, body, terms, tsv) VALUES ($1,$2,$3,$4,$5,to_tsvector('simple', $5))`, [sourceId, ord++, c.heading, c.body, terms]);
       }
+      // the entry's language (Hebrew or English), from its title and text: the bot prefers entries in the customer's language
+      await client.query('UPDATE kb_sources SET lang = $2 WHERE id = $1', [sourceId, detectLang(`${title} ${variantsList.join(' ')} ${text.slice(0, 4000)}`)]);
       await client.query('COMMIT');
     } catch (e) {
       await client.query('ROLLBACK').catch(() => undefined);
@@ -476,7 +479,7 @@ export class KnowledgeBase {
   }
   invalidateSynonyms(): void { this.synCache.at = 0; }
 
-  async search(question: string, opts: { audience: 'bot' | 'staff' | 'any'; limit?: number; categoryId?: string } = { audience: 'any' }): Promise<Hit[]> {
+  async search(question: string, opts: { audience: 'bot' | 'staff' | 'any'; limit?: number; categoryId?: string; lang?: 'he' | 'en' } = { audience: 'any' }): Promise<Hit[]> {
     const tokens = queryTokens(question).slice(0, 14);
     const sem = await this.semanticCandidates(question).catch(() => new Map<string, { q: number; p: number; chunkId: number | null }>());
     if (tokens.length === 0 && sem.size === 0) return [];
@@ -494,8 +497,9 @@ export class KnowledgeBase {
         WHERE c.tsv @@ q.query AND s.enabled AND s.status = 'ready'
           AND ($2::text = 'any' OR s.audience IN ('both', $2))
           AND ($3::uuid IS NULL OR s.category_id = $3 OR EXISTS (SELECT 1 FROM kb_source_cats x WHERE x.source_id = s.id AND x.category_id = $3))
+          AND ($4::text IS NULL OR s.lang IS NULL OR s.lang = $4)
         ORDER BY rank DESC LIMIT 60`,
-      [terms.join(' | '), opts.audience, opts.categoryId ?? null],
+      [terms.join(' | '), opts.audience, opts.categoryId ?? null, opts.lang ?? null],
     );
     const qSet = new Set(tokens);
     const best = new Map<string, Hit & { rank: number }>();
@@ -520,8 +524,9 @@ export class KnowledgeBase {
     if (semIds.length) {
       const meta = new Map((await this.db.query(
         `SELECT s.id, s.title, s.kind, s.url, s.boost FROM kb_sources s WHERE s.id = ANY($1::uuid[]) AND s.enabled AND s.status = 'ready'
-            AND ($2::text = 'any' OR s.audience IN ('both', $2)) AND ($3::uuid IS NULL OR s.category_id = $3 OR EXISTS (SELECT 1 FROM kb_source_cats x WHERE x.source_id = s.id AND x.category_id = $3))`,
-        [semIds.map((x) => x.id), opts.audience, opts.categoryId ?? null])).rows.map((r) => [r.id as string, r]));
+            AND ($2::text = 'any' OR s.audience IN ('both', $2)) AND ($3::uuid IS NULL OR s.category_id = $3 OR EXISTS (SELECT 1 FROM kb_source_cats x WHERE x.source_id = s.id AND x.category_id = $3))
+            AND ($4::text IS NULL OR s.lang IS NULL OR s.lang = $4)`,
+        [semIds.map((x) => x.id), opts.audience, opts.categoryId ?? null, opts.lang ?? null])).rows.map((r) => [r.id as string, r]));
       for (const { id, c, ss } of semIds) {
         const m = meta.get(id);
         if (!m) continue;
@@ -542,8 +547,10 @@ export class KnowledgeBase {
   }
 
   /** The answer the bot may give: only a confident match (coverage over a threshold and at least two matching words, or an exact FAQ question). */
-  async answer(question: string, s: AnswerSettings, audience: 'bot' | 'staff' = 'bot', via: 'bot' | 'staff' | 'test' = 'bot'): Promise<(Hit & { text: string; passage?: string; note?: string; others?: Hit[] }) | null> {
-    const hits = await this.search(question, { audience, limit: 3 });
+  async answer(question: string, s: AnswerSettings, audience: 'bot' | 'staff' = 'bot', via: 'bot' | 'staff' | 'test' = 'bot', lang?: 'he' | 'en'): Promise<(Hit & { text: string; passage?: string; note?: string; others?: Hit[]; lang?: 'he' | 'en' | null }) | null> {
+    // entries in the customer's language first; when they hold no confident answer, the whole knowledge base
+    let hits = lang ? await this.search(question, { audience, limit: 3, lang }) : [];
+    if (!lang || !isConfident(hits[0], hits[1], s.minScore)) hits = await this.search(question, { audience, limit: 3 });
     const top = hits[0];
     // customers' reactions: an answer they keep marking unhelpful is only offered, not given; a well-liked one needs a little less evidence
     const fb = top && audience === 'bot' ? await feedbackFor(this.db, top.sourceId).catch(() => ({ up: 0, down: 0 })) : { up: 0, down: 0 };
@@ -551,10 +558,10 @@ export class KnowledgeBase {
     await this.logQuery(question, via, ok, top?.score ?? null, ok ? top!.sourceId : null);
     if (!ok || !top) return null;
     await this.db.query('UPDATE kb_sources SET uses = uses + 1 WHERE id = $1', [top.sourceId]);
-    const src = (await this.db.query('SELECT kind, body, origin FROM kb_sources WHERE id = $1', [top.sourceId])).rows[0];
+    const src = (await this.db.query('SELECT kind, body, origin, lang FROM kb_sources WHERE id = $1', [top.sourceId])).rows[0];
     // a FAQ answer is shown whole; documents give the most relevant passage
     const text = src?.kind === 'faq' && src.body ? src.body.slice(0, s.maxChars) : bestSnippet(top.snippet, queryTokens(question), s.maxChars);
-    return { ...top, text: withLegalNote(text, top, src?.origin), passage: text, note: withLegalNote('', top, src?.origin).trim(), others: hits.slice(1).filter((h) => isConfident(h, undefined, s.minScore)) };
+    return { ...top, text: withLegalNote(text, top, src?.origin), passage: text, note: withLegalNote('', top, src?.origin).trim(), others: hits.slice(1).filter((h) => isConfident(h, undefined, s.minScore)), lang: src?.lang ?? null };
   }
 
   /** The formatted passage of one chosen source for a question (used when the customer picks a "did you mean" suggestion). */

@@ -16,7 +16,7 @@ import { categorizeSource } from '../safety/importer.js';
 const idParam = z.object({ id: z.string().uuid() });
 const audience = z.enum(['bot', 'staff', 'both']);
 const common = { categoryId: z.string().uuid().nullable().optional(), audience: audience.default('both'), boost: z.number().int().min(0).max(2).default(0) };
-const SELECT = `s.id, s.kind, s.title, s.variants, s.url, s.file_name AS "fileName", s.category_id AS "categoryId", s.audience, s.boost, s.enabled, s.status, s.error,
+const SELECT = `s.id, s.kind, s.title, s.variants, s.url, s.file_name AS "fileName", s.category_id AS "categoryId", s.audience, s.lang, s.boost, s.enabled, s.status, s.error,
   s.refresh_hours AS "refreshHours", s.crawl_pages AS "crawlPages", s.crawl_cfg AS "crawlCfg", s.crawl_report AS "crawlReport", s.last_fetched_at AS "lastFetchedAt", s.parent_id AS "parentId", s.version,
   s.uses, s.helpful, s.unhelpful, s.updated_at AS "updatedAt", s.origin, s.detached, (SELECT count(*)::int FROM kb_chunks c WHERE c.source_id = s.id) AS chunks`;
 

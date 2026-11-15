@@ -126,4 +126,22 @@ describe('a conversation in English', () => {
     items = await get();
     expect(items.find((i) => i.he === 'לייזרים')).toMatchObject({ en: 'Lasers', custom: false });
   });
+
+  it('knowledge base in English: an English customer gets the English entry; a Hebrew customer the Hebrew one; a Hebrew-only answer says so', async () => {
+    await db.query(`UPDATE settings SET value = jsonb_set(value, '{kb}', $1::jsonb) WHERE key = 'bot'`, [JSON.stringify({ enabled: true, minScore: 0.6, maxChars: 700, showSource: false, intro: 'מצאתי את זה במאגר המידע שלנו:', answerMode: 'quote', outro: '' })]);
+    const faq = (title: string, body: string) => app.inject({ method: 'POST', url: '/kb/sources/faq', headers: { cookie, origin: ORIGIN }, payload: { title, body, variants: [] } });
+    expect((await faq('How do I dispose of chemical waste?', 'Fill in the chemical waste form of the Safety Unit and the waste is collected within a week.')).statusCode).toBe(201);
+    expect((await faq('איך מפנים פסולת כימית?', 'ממלאים את טופס פינוי הפסולת הכימית של יחידת הבטיחות, והפסולת נאספת תוך שבוע.')).statusCode).toBe(201);
+    expect((await faq('מה שעות הפעילות של המעבדה המרכזית?', 'המעבדה המרכזית פתוחה בימים א׳–ה׳ בין 8:00 ל-16:00.')).statusCode).toBe(201);
+    await new Promise((r) => setTimeout(r, 200));
+    expect((await db.query(`SELECT lang FROM kb_sources WHERE title = 'How do I dispose of chemical waste?'`)).rows[0].lang).toBe('en');
+    const en = '972500006666@s.whatsapp.net';
+    await say(en, 'hello, I have a question');
+    const a = await say(en, 'how do I dispose of chemical waste');
+    expect(a).toContain("Here's what I found in our knowledge base:");
+    expect(a).toContain('Fill in the chemical waste form');
+    expect(a).not.toContain('in Hebrew');
+    const he = await say('972500007777@s.whatsapp.net', 'איך מפנים פסולת כימית?');
+    expect(he).toContain('ממלאים את טופס פינוי הפסולת');
+  });
 });

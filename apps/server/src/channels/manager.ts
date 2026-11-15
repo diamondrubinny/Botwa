@@ -13,6 +13,7 @@ import { isStopMessage } from '../optout.js';
 import { isOpen } from '../business-hours.js';
 import { autoAssign } from '../routing.js';
 import { audit } from '../audit.js';
+import { permissionsOfRole } from '../routes/users.js';
 import { MediaService } from '../media/store.js';
 import type { KnowledgeBase } from '../kb/service.js';
 import { conversationEventData, messageEventData } from '../integrations/events.js';
@@ -74,6 +75,8 @@ export function createDefaultFactory(cfg: Config): AdapterFactory {
 
 /** After a side answer: how to get the menu (one line, not the menu itself). */
 const MENU_HINT = 'לתפריט הראשי כתבו "תפריט".';
+/** Under an answer from a Hebrew entry, in an English conversation. */
+const KB_HEBREW_NOTE = 'התשובה ממאגר המידע שלנו בעברית. אם צריך עזרה, אפשר לכתוב "נציג".';
 
 export class ChannelManager {
   readonly bus = new EventEmitter();
@@ -877,7 +880,7 @@ export class ChannelManager {
 
   /** Menu bot: answer, or hand over to a person (assign via routing, leave a note, away notice outside hours). */
   /** A confident knowledge-base answer for a free-text message, formatted for the customer; null when unsure (then the normal menu flow applies). */
-  private async kbAnswer(bot: BotConfig, state: string | null, text: string | null, inFlow = false, onSearch?: () => Promise<void>, onFound?: (sourceId: string) => void): Promise<string | null> {
+  private async kbAnswer(bot: BotConfig, state: string | null, text: string | null, inFlow = false, onSearch?: () => Promise<void>, onFound?: (sourceId: string) => void, lang?: Lang): Promise<string | null> {
     if (!this.kb || (!bot.kb.enabled && !inFlow) || state === 'human' || !text) return null;
     const t = text.trim();
     if (/^\d{1,2}$/.test(t) || t.length < 3) return null;
@@ -886,10 +889,12 @@ export class ChannelManager {
     if (bot.humanKeywords.some((k) => norm.includes(normalize(k)))) return null;
     try {
       await onSearch?.();
-      const a = await this.kb.answer(t, { minScore: bot.kb.minScore, maxChars: bot.kb.maxChars });
+      const a = await this.kb.answer(t, { minScore: bot.kb.minScore, maxChars: bot.kb.maxChars }, 'bot', 'bot', lang);
       if (!a) return null;
       onFound?.(a.sourceId);
-      return await this.wordAnswer(bot, t, a);
+      const worded = await this.wordAnswer(bot, t, a);
+      // an English conversation answered from a Hebrew entry: say so (the line is translated with the rest of the message)
+      return lang === 'en' && a.lang !== 'en' ? `${worded}\n\n${KB_HEBREW_NOTE}` : worded;
     } catch { return null; }
   }
 
@@ -1031,7 +1036,7 @@ export class ChannelManager {
 
     let searched = false;
     let answeredFrom: string | null = null;
-    const kbText = c.bot_state === 'area' ? null : await this.kbAnswer(bot, c.bot_state, text, false, async () => { searched = true; await rx.set('working'); }, (id) => { answeredFrom = id; });
+    const kbText = c.bot_state === 'area' ? null : await this.kbAnswer(bot, c.bot_state, text, false, async () => { searched = true; await rx.set('working'); }, (id) => { answeredFrom = id; }, c.lang === 'en' ? 'en' : 'he');
     const d = decide(bot, { state: c.bot_state, invalid: c.bot_invalid, item: c.bot_item }, text, kbText);
     const stepStart: Date = (await this.db.query('SELECT now() AS t')).rows[0].t;   // database clock, like the messages' own times
     await this.botSayAll(channelId, convId, ext, bot, d.replies, d.menu);
@@ -1111,12 +1116,65 @@ export class ChannelManager {
     await this.db.query(`INSERT INTO tags (name) SELECT 'דחוף' WHERE NOT EXISTS (SELECT 1 FROM tags WHERE lower(name) = 'דחוף')`).catch(() => undefined);
     const tag = (await this.db.query(`SELECT id FROM tags WHERE lower(name) = 'דחוף' LIMIT 1`)).rows[0]?.id as string | undefined;
     if (tag) await this.db.query('INSERT INTO conversation_tags (conversation_id, tag_id) VALUES ($1, $2) ON CONFLICT DO NOTHING', [convId, tag]).catch(() => undefined);
-    await this.db.query(`UPDATE conversations SET status = 'open', bot_state = 'human', snoozed_until = NULL WHERE id = $1`, [convId]);
+    await this.db.query(`UPDATE conversations SET status = 'open', bot_state = 'human', snoozed_until = NULL, urgent_since = COALESCE(urgent_since, now()), escalated_at = NULL WHERE id = $1`, [convId]);
     const held = (await this.db.query('SELECT assigned_to FROM conversations WHERE id = $1', [convId])).rows[0]?.assigned_to as string | null;
     const to = held ?? await autoAssign(this.db, convId).catch(() => null);
     if (to) this.onAssigned?.(convId, to);
     await audit(this.db, { action: 'conversation.emergency', target: convId, meta: { assignedTo: to } }).catch(() => undefined);
     void sendAlert(this.cfg, `🚨 פנייה דחופה (נראית כמו מצב חירום) התקבלה ב-${this.types.get(channelId) ?? 'ערוץ'}. ${to ? 'שויכה לנציג.' : 'לא שויכה: אין נציג זמין!'} יש לפתוח את השיחה ולחזור ללקוח מיד.`, { conversationId: convId });
+  }
+
+  /**
+   * Escalation (bot settings): an urgent conversation (emergency or hazard report) nobody from the team has written in since it was
+   * marked, after the set minutes: to the backup person, else the active manager (access to all conversations) with the fewest open
+   * conversations, other than whoever holds it now. A note, an audit entry, an alert, a push to that person and, when they linked
+   * their WhatsApp to Betty, a short message there (no customer details). Once per mark; a person's message or closing ends it.
+   */
+  async runEscalations(now = new Date()): Promise<number> {
+    const bot = await loadBot(this.db);
+    if (!bot.escalation.enabled) return 0;
+    const due = (await this.db.query(
+      `SELECT c.id, c.assigned_to, c.urgent_since,
+              (SELECT number FROM cases k WHERE k.conversation_id = c.id AND k.closed_at IS NULL ORDER BY opened_at DESC LIMIT 1) AS num
+         FROM conversations c
+        WHERE c.urgent_since IS NOT NULL AND c.escalated_at IS NULL AND c.status = 'open'
+          AND c.urgent_since < $1::timestamptz - make_interval(mins => $2)
+          AND NOT EXISTS (SELECT 1 FROM messages m WHERE m.conversation_id = c.id AND m.direction = 'out' AND NOT m.auto AND m.created_at > c.urgent_since)
+        ORDER BY c.urgent_since LIMIT 20`, [now, bot.escalation.minutes])).rows as { id: string; assigned_to: string | null; urgent_since: Date; num: number | null }[];
+    let n = 0;
+    for (const c of due) {
+      // the backup person if active and not the one already holding it, else the least busy available manager
+      let to: string | null = null;
+      if (bot.escalation.backupUserId && bot.escalation.backupUserId !== c.assigned_to) {
+        to = (await this.db.query('SELECT id FROM users WHERE id = $1 AND active', [bot.escalation.backupUserId])).rows[0]?.id ?? null;
+      }
+      if (!to) {
+        const managers = (await this.db.query(
+          `SELECT u.id, u.role FROM users u WHERE u.active AND u.id IS DISTINCT FROM $1
+            ORDER BY (u.available IS NOT FALSE) DESC, (SELECT count(*) FROM conversations x WHERE x.assigned_to = u.id AND x.status = 'open'), u.created_at`, [c.assigned_to])).rows as { id: string; role: string }[];
+        for (const m of managers) { const perms = await permissionsOfRole(this.db, m.role); if (perms?.includes('inbox.view_all')) { to = m.id; break; } }
+      }
+      const claimed = await this.db.query(`UPDATE conversations SET escalated_at = $2, assigned_to = COALESCE($3, assigned_to), assigned_at = CASE WHEN $3::uuid IS NULL THEN assigned_at ELSE $2 END
+          WHERE id = $1 AND escalated_at IS NULL RETURNING id`, [c.id, now, to]);
+      if (!claimed.rowCount) continue;
+      n++;
+      const mins = Math.round((now.getTime() - new Date(c.urgent_since).getTime()) / 60_000);
+      const who = to ? (await this.db.query('SELECT COALESCE(name_he, name) AS n FROM users WHERE id = $1', [to])).rows[0]?.n : null;
+      await this.db.query(`INSERT INTO conversation_notes (conversation_id, body) VALUES ($1, $2)`, [c.id, `⏫ הסלמה אוטומטית: אין מענה אנושי לפנייה הדחופה כבר ${mins} דקות. ${who ? `הועברה אל ${who}.` : 'לא נמצא מנהל זמין להעביר אליו!'}`]);
+      await audit(this.db, { action: 'conversation.escalate', target: c.id, meta: { to, minutes: mins } }).catch(() => undefined);
+      void sendAlert(this.cfg, `⏫ פנייה דחופה${c.num ? ` #${c.num}` : ''} בלי מענה אנושי ${mins} דקות. ${who ? `הועברה אל ${who}.` : 'לא נמצא מנהל זמין!'}`, { conversationId: c.id });
+      if (to) {
+        this.onAssigned?.(c.id, to, 'handover');
+        // the person linked their WhatsApp to Betty: a short message there (no customer details)
+        const link = (await this.db.query('SELECT channel_id, external_id FROM staff_links WHERE user_id = $1 ORDER BY last_used_at DESC NULLS LAST LIMIT 1', [to])).rows[0] as { channel_id: string; external_id: string } | undefined;
+        if (link) await this.sendText(link.channel_id, link.external_id, `⏫ פנייה דחופה${c.num ? ` #${c.num}` : ''} הועברה אליך: אין מענה אנושי כבר ${mins} דקות.
+לפתיחה: ${this.cfg.APP_ORIGIN.split(',')[0]!.trim()}/#/inbox?c=${c.id}`, { background: true }).catch(() => undefined);
+      }
+    }
+    // a person answered or the conversation was closed: the mark is done
+    await this.db.query(`UPDATE conversations c SET urgent_since = NULL WHERE c.urgent_since IS NOT NULL AND (c.status <> 'open'
+        OR EXISTS (SELECT 1 FROM messages m WHERE m.conversation_id = c.id AND m.direction = 'out' AND NOT m.auto AND m.created_at > c.urgent_since))`);
+    return n;
   }
 
   alertTeam(text: string, extra: Record<string, unknown> = {}): void { if (this.alertBudget()) void sendAlert(this.cfg, text, extra); }
@@ -1175,7 +1233,8 @@ export class ChannelManager {
       if (to) { this.onAssigned?.(convId, to); movedNow = true; }
       else movedNow = c.bot_state !== 'human';
     }
-    await this.db.query(`UPDATE conversations SET status = 'open', bot_state = 'human', snoozed_until = NULL, comfort_since = now(), comfort_steps = 0 WHERE id = $1`, [convId]);
+    await this.db.query(`UPDATE conversations SET status = 'open', bot_state = 'human', snoozed_until = NULL, comfort_since = now(), comfort_steps = 0,
+        urgent_since = CASE WHEN $2 THEN COALESCE(urgent_since, now()) ELSE urgent_since END, escalated_at = CASE WHEN $2 THEN NULL ELSE escalated_at END WHERE id = $1`, [convId, level === 'hazard']);
     const who = (await this.db.query(`SELECT COALESCE(u.name_he, u.name) AS who FROM conversations c JOIN users u ON u.id = c.assigned_to WHERE c.id = $1`, [convId])).rows[0]?.who as string | undefined;
     const hours = await loadBusinessHours(this.db);
     const closed = hours.enabled && !isOpen(hours, new Date());
@@ -1281,7 +1340,8 @@ export class ChannelManager {
   private async runFlowStep(channelId: string, convId: string, ext: string, bot: BotConfig, flow: NonNullable<Awaited<ReturnType<typeof loadFlow>>>, input: FlowInput, rx: ReturnType<ChannelManager['reactor']>): Promise<void> {
     let searched = false, found = false;
     let answeredFrom: string | null = null;
-    const row = (await this.db.query('SELECT c.flow_state, ct.profile, ct.display_name, ct.claimed_email, ct.claimed_phone FROM conversations c JOIN contacts ct ON ct.id = c.contact_id WHERE c.id = $1', [convId])).rows[0];
+    const row = (await this.db.query('SELECT c.flow_state, c.lang, ct.profile, ct.display_name, ct.claimed_email, ct.claimed_phone FROM conversations c JOIN contacts ct ON ct.id = c.contact_id WHERE c.id = $1', [convId])).rows[0];
+    const convLang: Lang = row?.lang === 'en' ? 'en' : 'he';
     const st = row?.flow_state as FlowState | null;
     const hours = await loadBusinessHours(this.db);
     const ctx: FlowContext = {
@@ -1295,7 +1355,7 @@ export class ChannelManager {
         email: row?.claimed_email ?? undefined, phone: row?.claimed_phone ?? undefined,
       } : undefined,
       resolveArea: (t) => resolveArea(this.db, t),
-      kbAnswer: async (t) => { const a = await this.kbAnswer(bot, null, t, true, async () => { searched = true; await rx.set('working'); }, (id) => { answeredFrom = id; }); if (a) found = true; return a; },
+      kbAnswer: async (t) => { const a = await this.kbAnswer(bot, null, t, true, async () => { searched = true; await rx.set('working'); }, (id) => { answeredFrom = id; }, convLang); if (a) found = true; return a; },
       matchOption: async (t, options) => this.kb?.matchOption(t, options) ?? null,
       kbSuggest: async (t) => {
         if (!this.kb || t.trim().length < 3) return [];

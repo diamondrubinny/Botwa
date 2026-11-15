@@ -146,4 +146,26 @@ describe('Betty stays with a stressed customer until a person answers', () => {
     expect(text).toContain('⚠️ דיווחי מפגע');
     expect(text).not.toContain('972500000');
   });
+
+  it('escalation: an urgent conversation with no answer from a person goes to an available manager after the set minutes, once', async () => {
+    const boss = (await db.query(`INSERT INTO users (email, name, name_he, role, password_hash) VALUES ('boss-esc@t.io', 'boss', 'מנהלת', 'admin', 'x') RETURNING id`)).rows[0].id;
+    const ext = '972500009999@s.whatsapp.net';
+    await say(ext, 'סכנה לייזר בחדר 12');
+    const c = await conv(ext);
+    expect(c.urgent_since).not.toBeNull();
+    expect(c.assigned_to).toBe(officer);
+    await db.query(`UPDATE conversations SET urgent_since = NULL WHERE id <> $1`, [c.id]);   // only this one (earlier tests left theirs)
+    const at = (min: number) => new Date(new Date(c.urgent_since).getTime() + min * 60_000);
+    expect(await mgr.runEscalations(at(10))).toBe(0);                                  // not yet (15 minutes by default)
+    expect(await mgr.runEscalations(at(16))).toBe(1);
+    const after = await conv(ext);
+    expect(after.assigned_to).toBe(boss);                                              // the officer did not answer: to a manager
+    expect(after.escalated_at).not.toBeNull();
+    expect((await db.query(`SELECT body FROM conversation_notes WHERE conversation_id = $1 AND body LIKE '⏫%'`, [c.id])).rows[0].body).toContain('הועברה אל מנהלת');
+    expect(await mgr.runEscalations(at(30))).toBe(0);                                  // once per mark
+    // a person answers: the mark is done
+    await db.query(`INSERT INTO messages (conversation_id, direction, body, auto) VALUES ($1, 'out', 'בדרך אליך', false)`, [c.id]);
+    await mgr.runEscalations(at(31));
+    expect((await conv(ext)).urgent_since).toBeNull();
+  });
 });

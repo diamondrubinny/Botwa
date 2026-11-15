@@ -74,7 +74,8 @@ const PAIRS: [string, string][] = [
   ['ווצאפ: {*}', 'WhatsApp: {1}'],
   ['אימייל: {*}', 'E-mail: {1}'],
   // knowledge base
-  ['מצאתי את זה במאגר המידע שלנו:', "Here's what I found in our knowledge base (the source may be in Hebrew):"],
+  ['מצאתי את זה במאגר המידע שלנו:', "Here's what I found in our knowledge base:"],
+  ['התשובה ממאגר המידע שלנו בעברית. אם צריך עזרה, אפשר לכתוב "נציג".', 'This answer comes from our knowledge base in Hebrew. If you need help, write "agent".'],
   ['אם צריך הבהרה או עזרה נוספת, אפשר לכתוב כאן, או לבקש נציג.', 'If you need clarification or more help, you can write here or ask for an agent.'],
   ['מקור: {*}', 'Source: {1}'],
   ['לא מצאתי תשובה מדויקת. האם התכוונתם לאחד מאלה?', "I couldn't find an exact answer. Did you mean one of these?"],

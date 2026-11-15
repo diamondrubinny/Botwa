@@ -17,6 +17,7 @@ interface BotCfg {
   gifs?: { enabled: boolean; greeting: boolean; thanks: boolean; handoff: boolean; close: boolean; cooldownMinutes: number };
   emergency?: { enabled: boolean; text: string };
   empathy?: { enabled: boolean };
+  escalation?: { enabled: boolean; minutes: number; backupUserId: string | null };
 }
 const GIFS = { enabled: true, greeting: true, thanks: true, handoff: true, close: true, cooldownMinutes: 360 };
 
@@ -34,6 +35,7 @@ export function Bot({ me }: { me: Me }) {
   if (!b) return <><h1 tabIndex={-1}>בוט</h1><Loading card lines={5} /></>;
 
   const set = (patch: Partial<BotCfg>) => setB({ ...b, ...patch });
+  const esc = b.escalation ?? { enabled: true, minutes: 15, backupUserId: null };
   const setItem = (i: number, patch: Partial<BotCfg['items'][number]>) => set({ items: b.items.map((it, k) => (k === i ? { ...it, ...patch } : it)) });
   const move = (i: number, d: -1 | 1) => {
     const j = i + d; if (j < 0 || j >= b.items.length) return;
@@ -213,6 +215,16 @@ export function Bot({ me }: { me: Me }) {
           <div className="field">
             <label htmlFor="em-t">ההודעה ללקוח (כדאי להוסיף את מספר מוקד הביטחון של המוסד)</label>
             <textarea id="em-t" rows={4} maxLength={800} value={b.emergency?.text ?? ''} onChange={(e) => set({ emergency: { enabled: b.emergency?.enabled ?? true, text: e.target.value } })} />
+          </div>
+          <h3 id="esc-h">הסלמה אוטומטית</h3>
+          <p className="hint" id="esc-d">פנייה דחופה (מצב חירום או דיווח מפגע) שאף אדם מהצוות לא כתב בה עוברת אחרי הזמן שנקבע לממונה החלופי. אם לא נבחר ממונה חלופי, או שהוא כבר המטפל, היא עוברת למנהל זמין עם הכי מעט שיחות פתוחות. הנמען מקבל התראה, וגם הודעה בווצאפ אם קישר אותו לבטי. נוספת הערה בשיחה. ההסלמה פועלת גם מחוץ לשעות הפעילות.</p>
+          <div className="field"><label><input type="checkbox" role="switch" style={{ width: 'auto', minHeight: 'auto' }} aria-describedby="esc-d" checked={esc.enabled} onChange={(e) => set({ escalation: { ...esc, enabled: e.target.checked } })} /> הסלמה כשאין מענה אנושי</label></div>
+          <div className="field"><label htmlFor="esc-m">אחרי כמה דקות בלי מענה</label><input id="esc-m" type="number" min={3} max={240} value={esc.minutes} disabled={!esc.enabled} onChange={(e) => set({ escalation: { ...esc, minutes: Math.max(3, Math.min(240, Number(e.target.value) || 15)) } })} /></div>
+          <div className="field"><label htmlFor="esc-u">ממונה חלופי</label>
+            <select id="esc-u" value={esc.backupUserId ?? ''} disabled={!esc.enabled} onChange={(e) => set({ escalation: { ...esc, backupUserId: e.target.value || null } })}>
+              <option value="">מנהל זמין (אוטומטי)</option>
+              {people.map((u) => <option key={u.id} value={u.id}>{personLabel(u)}</option>)}
+            </select>
           </div>
         </fieldset>
 

@@ -11,7 +11,7 @@ import { errText } from '../strings';
 
 interface Source {
   id: string; kind: 'faq' | 'text' | 'file' | 'link'; title: string; variants: string[]; url: string | null; fileName: string | null; categoryId: string | null;
-  audience: 'bot' | 'staff' | 'both'; boost: number; enabled: boolean; status: 'pending' | 'ready' | 'error'; error: string | null; refreshHours: number | null;
+  audience: 'bot' | 'staff' | 'both'; lang?: 'he' | 'en' | null; boost: number; enabled: boolean; status: 'pending' | 'ready' | 'error'; error: string | null; refreshHours: number | null;
   crawlPages: number; crawlReport?: CrawlReport | null; lastFetchedAt: string | null; parentId: string | null; version: number; uses: number; helpful: number; unhelpful: number; chunks: number; body?: string; origin?: string | null; detached?: boolean;
 }
 interface Category { id: string; name: string; sources: number }
@@ -68,7 +68,8 @@ function Sources() {
     setMsg(null);
     try { await fn(); await load(); if (ok) setMsg({ ok: true, text: ok }); } catch (e) { setMsg({ ok: false, text: errText(e instanceof ApiError ? e.code : 'generic') }); }
   };
-  const shown = list.filter((s) => !filter || `${s.title} ${s.url ?? ''} ${s.fileName ?? ''}`.toLowerCase().includes(filter.toLowerCase()));
+  const [langF, setLangF] = useState<'' | 'he' | 'en'>('');
+  const shown = list.filter((s) => (!filter || `${s.title} ${s.url ?? ''} ${s.fileName ?? ''}`.toLowerCase().includes(filter.toLowerCase())) && (!langF || s.lang === langF));
 
   return (
     <>
@@ -90,6 +91,13 @@ function Sources() {
           <label htmlFor="kb-f">סינון לפי שם</label>
           <input id="kb-f" value={filter} onChange={(e) => setFilter(e.target.value)} />
         </div>
+        <div className="field" style={{ maxWidth: 220 }}>
+          <label htmlFor="kb-lang">שפה</label>
+          <select id="kb-lang" value={langF} onChange={(e) => setLangF(e.target.value as typeof langF)}>
+            <option value="">הכול</option><option value="he">עברית</option><option value="en">English</option>
+          </select>
+        </div>
+        <p className="hint">מקור באנגלית (תג <span className="badge" lang="en">EN</span>) נענה קודם ללקוחות שכותבים באנגלית, ומקור בעברית קודם ללקוחות בעברית. השפה מזוהה אוטומטית מהכותרת ומהתוכן. כדי לענות באנגלית, הוסיפו שאלה ותשובה שכתובות באנגלית.</p>
         <table>
           <caption className="sr-only">מקורות המידע במאגר</caption>
           <thead><tr><th scope="col">שם</th><th scope="col">סוג</th><th scope="col">מצב</th><th scope="col">קהל</th><th scope="col">שימושים</th><th scope="col">פעולות</th></tr></thead>
@@ -103,6 +111,7 @@ function Sources() {
                   {s.parentId && <span className="hint">↳ </span>}{s.title}
                   {s.url && <div dir="ltr" className="hint" style={{ wordBreak: 'break-all' }}>{s.url}</div>}
                   {s.fileName && <div className="hint">{s.fileName}</div>}
+                  {s.lang === 'en' && <span className="badge" lang="en" title="באנגלית">EN<span className="sr-only"> (מקור באנגלית)</span></span>}
                   {s.boost > 0 && <span className="badge connected">מועדף</span>}
                   {!s.enabled && <span className="badge stopped">מושבת</span>}
                   {s.origin?.startsWith('gov:') && <span className="badge connecting">{s.detached ? 'חקיקה, נערך אצלכם' : 'חקיקה, מתעדכן אוטומטית'}</span>}

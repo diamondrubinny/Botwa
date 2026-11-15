@@ -101,6 +101,8 @@ export const botSchema = z.object({
   emergency: z.object({ enabled: z.boolean(), text: z.string().trim().min(10).max(800) }).default(() => ({ enabled: true, text: DEFAULT_EMERGENCY_TEXT })),
   /** a stressed or upset customer: an acknowledging answer, a person at once and follow-ups until a person answers (empathy.ts) */
   empathy: z.object({ enabled: z.boolean() }).default(() => ({ enabled: true })),
+  /** an urgent conversation (emergency, hazard report) nobody from the team answered within `minutes`: to the backup person, else an available manager */
+  escalation: z.object({ enabled: z.boolean(), minutes: z.number().int().min(3).max(240), backupUserId: z.string().uuid().nullable() }).default(() => ({ enabled: true, minutes: 15, backupUserId: null })),
   /** a fitting GIF from the gallery at pleasant moments (greeting, thanks, hand-over, closing): never on sensitive topics, at most one per cool-down */
   gifs: z.object({
     enabled: z.boolean(),
@@ -135,6 +137,7 @@ export const DEFAULT_BOT: BotConfig = {
   gifs: { ...DEFAULT_GIFS },
   emergency: { enabled: true, text: DEFAULT_EMERGENCY_TEXT },
   empathy: { enabled: true },
+  escalation: { enabled: true, minutes: 15, backupUserId: null },
   catchupHours: 12,
   interactiveMenus: true,
 };
