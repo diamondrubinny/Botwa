@@ -13,19 +13,19 @@ import { permissionsOfRole } from '../routes/users.js';
  *  - The questions are not stored as a customer conversation and never reach the bot; each one is audited.
  */
 export const NEEDED = ['inbox.view_all', 'reports.view'] as const;
-const CODE = /^\s*botwa[-\s]?(\d{6})\s*$/i;
+const CODE = /^\s*botwa[-\s]?(\d{8})\s*$/i;
 const sha = (s: string) => createHash('sha256').update(s).digest('hex');
 
 export async function mayAsk(db: Db, userId: string): Promise<boolean> {
-  const u = (await db.query('SELECT role, active FROM users WHERE id = $1', [userId])).rows[0] as { role: string; active: boolean } | undefined;
-  if (!u?.active) return false;
+  const u = (await db.query('SELECT role, active, must_change_password FROM users WHERE id = $1', [userId])).rows[0] as { role: string; active: boolean; must_change_password: boolean } | undefined;
+  if (!u?.active || u.must_change_password) return false;   // a reset password: the account is being recovered
   const perms = await permissionsOfRole(db, u.role);
   return !!perms && NEEDED.every((p) => perms.includes(p));
 }
 
 /** A new code for the signed-in user (replaces an older one). Shown once in the panel. */
 export async function newLinkCode(db: Db, userId: string): Promise<{ code: string; expiresAt: Date }> {
-  const code = `BOTWA-${String(randomInt(0, 1_000_000)).padStart(6, '0')}`;
+  const code = `BOTWA-${String(randomInt(0, 100_000_000)).padStart(8, '0')}`;   // 8 digits, single use, 10 minutes
   const expiresAt = new Date(Date.now() + 10 * 60_000);
   await db.query(`INSERT INTO staff_link_codes (user_id, code_hash, expires_at) VALUES ($1,$2,$3) ON CONFLICT (user_id) DO UPDATE SET code_hash = EXCLUDED.code_hash, expires_at = EXCLUDED.expires_at`, [userId, sha(code.slice(6)), expiresAt]);
   return { code, expiresAt };
@@ -33,11 +33,24 @@ export async function newLinkCode(db: Db, userId: string): Promise<{ code: strin
 
 /** Wrong codes from one WhatsApp account: at most 5 an hour (the code has a million values and lives 10 minutes). */
 const tries = new Map<string, { n: number; at: number }>();
+/** Guessing codes: 5 tries an hour per sender, and 30 wrong codes an hour from everyone together (many numbers guessing at once). */
+let wrong: number[] = [];
 function tooMany(key: string): boolean {
+  const now = Date.now();
+  for (const [k, v] of tries) if (now - v.at > 3_600_000) tries.delete(k);   // the map never grows without bound
+  wrong = wrong.filter((t) => now - t < 3_600_000);
+  if (wrong.length >= 30) return true;
   const t = tries.get(key);
-  if (!t || Date.now() - t.at > 3_600_000) { tries.set(key, { n: 1, at: Date.now() }); return false; }
+  if (!t) { tries.set(key, { n: 1, at: now }); return false; }
   t.n++;
   return t.n > 5;
+}
+const failedCode = () => { wrong.push(Date.now()); };
+
+/** Remove a person's WhatsApp/Telegram links to Betty and any open code (sign-out everywhere, password or second-factor reset). */
+export async function revokeStaffLinks(db: Db, userId: string): Promise<void> {
+  await db.query('DELETE FROM staff_links WHERE user_id = $1', [userId]);
+  await db.query('DELETE FROM staff_link_codes WHERE user_id = $1', [userId]);
 }
 
 /** A linked account asks at most 20 questions a minute. */
@@ -138,6 +151,7 @@ export async function staffMessage(db: Db, channelId: string, externalId: string
   if (!link && code) {
     if (tooMany(`${channelId}:${externalId}`)) return 'יותר מדי ניסיונות. נסו שוב בעוד שעה.';
     const row = (await db.query(`DELETE FROM staff_link_codes WHERE code_hash = $1 AND expires_at > now() RETURNING user_id`, [sha(code)])).rows[0] as { user_id: string } | undefined;
+    if (!row) failedCode();
     if (!row) return 'הקוד שגוי או שפג תוקפו. אפשר ליצור קוד חדש בפאנל: החשבון שלי ← בטי בווצאפ.';
     if (!(await mayAsk(db, row.user_id))) return 'לחשבון הזה אין הרשאה לשאול על הקריאות (צריך גישה לכל השיחות ולדוחות).';
     await db.query(`INSERT INTO staff_links (user_id, channel_id, external_id) VALUES ($1,$2,$3) ON CONFLICT (channel_id, external_id) DO UPDATE SET user_id = EXCLUDED.user_id, created_at = now()`, [row.user_id, channelId, externalId]);

@@ -122,7 +122,7 @@ describe('officers by topic', () => {
     const out = await say('9725100001', 'מעבדה 5');
     expect(out.join('\n')).toContain('מעבירים לממונה הלייזרים.');
     expect(out.join('\n')).toContain('הממונה על הנושא: דנה כהן');
-    expect(out.join('\n')).toContain('https://wa.me/972501234567');
+    expect(out.join('\n')).not.toContain('972501234567');               // her WhatsApp (a personal mobile) only if she allows it
     expect(out.join('\n')).toContain('dana@example.org');
     expect((await conv('9725100001')).assigned_to).toBe(ids.laser);
     expect((await notes((await conv('9725100001')).id)).join('\n')).toContain('ממונה בתחום "לייזרים": דנה כהן');

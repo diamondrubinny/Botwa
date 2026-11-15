@@ -69,8 +69,8 @@ describe('Betty for managers on WhatsApp', () => {
     expect((await call('dana@t.io', 'POST', '/me/whatsapp-links/code')).statusCode).toBe(403);
     expect((await call('dana@t.io', 'GET', '/me/whatsapp-links')).json()).toMatchObject({ allowed: false });
     const { code } = (await call('boss@t.io', 'POST', '/me/whatsapp-links/code')).json();
-    expect(code).toMatch(/^BOTWA-\d{6}$/);
-    expect(await say('9725999999@s.whatsapp.net', 'BOTWA-000000')).toContain('הקוד שגוי');
+    expect(code).toMatch(/^BOTWA-\d{8}$/);
+    expect(await say('9725999999@s.whatsapp.net', 'BOTWA-00000000')).toContain('הקוד שגוי');
     const r = await say('9725888888@s.whatsapp.net', code.toLowerCase());
     expect(r).toContain('קושר לחשבון שלך');
     expect((await db.query(`SELECT count(*)::int AS n FROM contacts WHERE external_id = '9725888888@s.whatsapp.net'`)).rows[0].n).toBe(0);   // not in the inbox
@@ -102,6 +102,23 @@ describe('Betty for managers on WhatsApp', () => {
     for (const t of [sum, agents, topics, oldest]) { expect(t).not.toContain('דנה כהן הלקוחה'); expect(t).not.toContain('0501234567'); expect(t).not.toContain('9725000001'); }
     expect(await say(me, 'עזרה')).toContain('1. מצב');
     expect((await db.query(`SELECT count(*)::int AS n FROM audit_log WHERE action = 'staff.whatsapp_query'`)).rows[0].n).toBeGreaterThanOrEqual(6);
+  });
+
+  it('a password reset or "sign out everywhere" removes the WhatsApp link too', async () => {
+    const { code } = (await call('boss@t.io', 'POST', '/me/whatsapp-links/code')).json();
+    await say('9725444444@s.whatsapp.net', code);
+    expect(await say('9725444444@s.whatsapp.net', 'מצב')).toContain('קריאות פתוחות');
+    await db.query(`UPDATE users SET must_change_password = true WHERE id = $1`, [ids['boss@t.io']]);   // being recovered: no answers
+    expect(await say('9725444444@s.whatsapp.net', 'מצב')).toContain('אין יותר הרשאה');
+    await db.query(`UPDATE users SET must_change_password = false WHERE id = $1`, [ids['boss@t.io']]);
+    const { code: c2 } = (await call('boss@t.io', 'POST', '/me/whatsapp-links/code')).json();
+    await say('9725444444@s.whatsapp.net', c2);
+    expect((await db.query('SELECT count(*)::int AS n FROM staff_links WHERE user_id = $1', [ids['boss@t.io']])).rows[0].n).toBeGreaterThan(0);
+    expect((await call('boss@t.io', 'POST', '/auth/logout-all')).statusCode).toBe(200);
+    expect((await db.query('SELECT count(*)::int AS n FROM staff_links WHERE user_id = $1', [ids['boss@t.io']])).rows[0].n).toBe(0);
+    cookies['boss@t.io'] = `botwa_sid=${(await app.inject({ method: 'POST', url: '/auth/login', payload: { email: 'boss@t.io', password: PW }, remoteAddress: `10.85.8.${++ip % 250}`, headers: { origin: ORIGIN } })).cookies[0]!.value}`;
+    const { code: c3 } = (await call('boss@t.io', 'POST', '/me/whatsapp-links/code')).json();
+    await say('9725888888@s.whatsapp.net', c3);                                       // linked again for the next test
   });
 
   it('loses access at once when the role changes; "ניתוק" removes the link', async () => {

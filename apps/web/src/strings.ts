@@ -13,6 +13,7 @@ export const t = {
   errors: {
     invalid_credentials: 'האימייל או הסיסמה שגויים.',
     mfa_required: 'יש להזין קוד אימות בן 6 ספרות.',
+    passkey_required: 'החשבון הזה מחייב אימות דו-שלבי, והאימות שלו הוא Passkey. התחברו בכפתור "כניסה עם Passkey".',
     account_locked: 'החשבון ננעל זמנית עקב ניסיונות כושלים. נסו שוב בעוד כמה דקות.',
     invalid_code: 'הקוד שגוי.',
     email_taken: 'האימייל כבר קיים במערכת.',

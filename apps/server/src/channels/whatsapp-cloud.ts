@@ -432,6 +432,9 @@ export class WhatsAppCloudAdapter implements ChannelAdapter {
       for (const ch of entry.changes ?? []) {
         if (ch.field === 'business_username_updates' && ch.value) { this.onUsernameUpdate?.(ch.value); continue; }
         if (ch.field !== 'messages' || !ch.value) continue;
+        // several numbers under one Meta app share the callback: only this channel's number is taken in here
+        const to = (ch.value as { metadata?: { phone_number_id?: string } }).metadata?.phone_number_id;
+        if (to && this.creds?.phoneNumberId && to !== this.creds.phoneNumberId) continue;
         const contacts = ch.value.contacts ?? [];
         for (const m of ch.value.messages ?? []) {
           if (!m.id) continue;

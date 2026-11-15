@@ -19,15 +19,43 @@ export function isPublicIp(ip: string): boolean {
     return true;
   }
   if (net.isIPv6(ip)) {
-    const x = ip.toLowerCase();
-    const mapped = /^::ffff:(\d+\.\d+\.\d+\.\d+)$/.exec(x);
-    if (mapped) return isPublicIp(mapped[1]!);
-    if (x === '::' || x === '::1') return false;
-    if (/^f[cd]/.test(x) || /^fe[89ab]/.test(x) || x.startsWith('ff')) return false; // ULA, link-local, multicast
-    if (x.startsWith('64:ff9b:') || x.startsWith('2001:db8')) return false;
+    const b = ipv6Bytes(ip);
+    if (!b) return false;
+    const zero = (from: number, to: number) => b.slice(from, to).every((x) => x === 0);
+    // IPv4 inside IPv6, in any spelling ("::ffff:127.0.0.1", "::ffff:7f00:1", "::127.0.0.1"): the IPv4 address decides
+    if (zero(0, 10) && b[10] === 0xff && b[11] === 0xff) return isPublicIp(b.slice(12).join('.'));
+    if (zero(0, 12)) return false;                                               // "::", "::1" and the old IPv4-compatible form
+    if (b[0] === 0x00 && b[1] === 0x64 && b[2] === 0xff && b[3] === 0x9b) return false;   // 64:ff9b::/96 NAT64
+    if (b[0] === 0x20 && b[1] === 0x02) return false;                             // 2002::/16 6to4 (an IPv4 inside)
+    if (b[0] === 0x20 && b[1] === 0x01 && b[2] === 0x00 && b[3] === 0x00) return false;   // 2001::/32 Teredo
+    if (b[0] === 0x20 && b[1] === 0x01 && b[2] === 0x0d && b[3] === 0xb8) return false;   // documentation
+    if ((b[0]! & 0xfe) === 0xfc) return false;                                    // fc00::/7 unique local
+    if (b[0] === 0xfe && (b[1]! & 0xc0) === 0x80) return false;                   // fe80::/10 link-local
+    if (b[0] === 0xfe && (b[1]! & 0xc0) === 0xc0) return false;                   // fec0::/10 old site-local
+    if (b[0] === 0xff) return false;                                              // multicast
     return true;
   }
   return false;
+}
+
+/** The 16 bytes of an IPv6 address (any spelling: "::" shortening, an IPv4 tail, a zone id), or null when it is not one. */
+export function ipv6Bytes(ip: string): number[] | null {
+  let x = ip.toLowerCase().replace(/^\[|\]$/g, '').split('%')[0]!;
+  const v4 = /(\d+\.\d+\.\d+\.\d+)$/.exec(x);
+  if (v4) {
+    const p = v4[1]!.split('.').map(Number);
+    if (p.length !== 4 || p.some((n) => n > 255)) return null;
+    x = x.slice(0, -v4[1]!.length) + `${((p[0]! << 8) | p[1]!).toString(16)}:${((p[2]! << 8) | p[3]!).toString(16)}`;
+  }
+  const halves = x.split('::');
+  if (halves.length > 2) return null;
+  const head = halves[0] ? halves[0].split(':') : [];
+  const tail = halves.length === 2 && halves[1] ? halves[1].split(':') : [];
+  const missing = 8 - head.length - tail.length;
+  if (halves.length === 1 ? missing !== 0 : missing < 1) return null;
+  const groups = [...head, ...Array(halves.length === 2 ? missing : 0).fill('0'), ...tail];
+  if (groups.length !== 8 || groups.some((g) => !/^[0-9a-f]{1,4}$/.test(g))) return null;
+  return groups.flatMap((g) => { const n = parseInt(g, 16); return [n >> 8, n & 0xff]; });
 }
 
 export const lookup: net.LookupFunction = (hostname, options, cb) => {

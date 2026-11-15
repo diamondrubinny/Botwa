@@ -2,6 +2,8 @@ import type { FastifyInstance } from 'fastify';
 import { authenticator } from 'otplib';
 import { z } from 'zod';
 import { audit } from '../audit.js';
+import { revokeStaffLinks } from '../staff/assistant.js';
+import { BUILTIN_ROLES } from '../permissions.js';
 import { needsMfaEnrollment, requireAuth, SESSION_COOKIE, startSession } from '../auth.js';
 import type { Config } from '../config.js';
 import { decrypt, encrypt, newToken, sha256 } from '../crypto.js';
@@ -46,7 +48,11 @@ export function authRoutes(app: FastifyInstance, db: Db, cfg: Config) {
     let ok = await verifyPassword(u.password_hash, password);
     if (ok && u.totp_enabled) {
       if (!totp) return reply.code(401).send({ error: 'mfa_required' });
-      ok = authenticator.check(totp, decrypt(u.totp_secret_enc, cfg.ENCRYPTION_KEY));
+      ok = await acceptTotp(db, u.id, totp, decrypt(u.totp_secret_enc, cfg.ENCRYPTION_KEY));
+    } else if (ok && (await passkeyOnlySecondFactor(db, u.id, u.role))) {
+      // the role requires a second factor and this person's only one is a passkey: a password alone must not open the account
+      await audit(db, { actorId: u.id, action: 'login.passkey_required', ip: req.ip });
+      return reply.code(401).send({ error: 'passkey_required' });
     }
     if (!ok) {
       // Single atomic statement: concurrent guesses cannot read the same counter value.
@@ -78,6 +84,7 @@ export function authRoutes(app: FastifyInstance, db: Db, cfg: Config) {
   // Sign out everywhere (e.g. a lost phone): every session of this user, this one included.
   app.post('/auth/logout-all', { preHandler: auth, config: { rateLimit: { max: 10, timeWindow: '1 minute' } } }, async (req, reply) => {
     const r = await db.query('DELETE FROM sessions WHERE user_id = $1', [req.user!.id]);
+    await revokeStaffLinks(db, req.user!.id);   // "sign out everywhere" includes the WhatsApp link to Betty
     await audit(db, { actorId: req.user!.id, action: 'logout_all', ip: req.ip, meta: { sessions: r.rowCount } });
     reply.clearCookie(SESSION_COOKIE, { path: '/' });
     return { ok: true, sessions: r.rowCount };
@@ -138,6 +145,7 @@ export function authRoutes(app: FastifyInstance, db: Db, cfg: Config) {
       await hashPassword(body.data.next),
     ]);
     await db.query('DELETE FROM sessions WHERE user_id = $1 AND id <> $2', [req.user!.id, req.user!.sessionId]);
+    await revokeStaffLinks(db, req.user!.id);
     await audit(db, { actorId: req.user!.id, action: 'password.change', ip: req.ip });
     return { ok: true };
   });
@@ -154,7 +162,7 @@ export function authRoutes(app: FastifyInstance, db: Db, cfg: Config) {
     if (!body.success) return reply.code(400).send({ error: 'bad_request' });
     const { rows } = await db.query('SELECT totp_secret_enc FROM users WHERE id = $1', [req.user!.id]);
     const enc = rows[0]?.totp_secret_enc;
-    if (!enc || !authenticator.check(body.data.code, decrypt(enc, cfg.ENCRYPTION_KEY))) {
+    if (!enc || !(await acceptTotp(db, req.user!.id, body.data.code, decrypt(enc, cfg.ENCRYPTION_KEY)))) {
       return reply.code(400).send({ error: 'invalid_code' });
     }
     await db.query('UPDATE users SET totp_enabled = true WHERE id = $1', [req.user!.id]);
@@ -162,4 +170,25 @@ export function authRoutes(app: FastifyInstance, db: Db, cfg: Config) {
     await audit(db, { actorId: req.user!.id, action: 'mfa.enable', ip: req.ip });
     return { ok: true };
   });
+}
+
+/**
+ * A TOTP code accepted once only: the code's time step must be newer than the last accepted one (stops replaying a code that
+ * was seen, within its validity window). The step is stored atomically, so two simultaneous uses of one code cannot both pass.
+ */
+export async function acceptTotp(db: Db, userId: string, code: string, secret: string): Promise<boolean> {
+  const delta = authenticator.checkDelta(code, secret);
+  if (delta === null) return false;
+  const step = Math.floor(Date.now() / 1000 / (authenticator.allOptions().step ?? 30)) + delta;
+  const r = await db.query('UPDATE users SET totp_last_step = $2 WHERE id = $1 AND (totp_last_step IS NULL OR totp_last_step < $2) RETURNING id', [userId, step]);
+  return (r.rowCount ?? 0) > 0;
+}
+
+/** The role requires a second factor and the person has passkeys but no authenticator app: sign in with the passkey. */
+async function passkeyOnlySecondFactor(db: Db, userId: string, role: string): Promise<boolean> {
+  const r = (await db.query(
+    `SELECT r.builtin, r.mfa_required, (SELECT count(*)::int FROM passkeys p WHERE p.user_id = $1) AS passkeys FROM roles r WHERE r.key = $2`, [userId, role])).rows[0];
+  if (!r || r.passkeys === 0) return false;
+  const builtin = BUILTIN_ROLES[role];
+  return r.builtin && builtin ? builtin.mfaRequired : !!r.mfa_required;
 }

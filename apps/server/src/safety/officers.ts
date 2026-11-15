@@ -39,10 +39,12 @@ export const pickOfficer = (list: Officer[]): Officer | null => list.find((o) =>
 
 /**
  * The officer's details for a customer: the office phone and e-mail; the WhatsApp number (often a personal mobile) only when the
- * officer allows it, or, for flows set up before office phones existed, when it is the only number there is.
+ * officer allows it. An officer not marked public: the name only.
  */
 export function contactText(o: Officer): string {
-  const wa = o.phone && (o.showWhatsapp || !o.officePhone);
+  // an officer not marked public: the name only; the WhatsApp number (often a personal mobile) only when the officer allows it
+  if (!o.public) return `הממונה על הנושא: ${o.name}`;
+  const wa = o.phone && o.showWhatsapp;
   return [`הממונה על הנושא: ${o.name}`, o.officePhone && `טלפון משרדי: ${o.officePhone}`, wa && `ווצאפ: https://wa.me/${o.phone}`, o.email && `אימייל: ${o.email}`].filter(Boolean).join('\n');
 }
 export function officerNote(topic: string, o: Officer): string {

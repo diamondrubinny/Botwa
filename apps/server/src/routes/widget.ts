@@ -1,4 +1,5 @@
-import { createHash, randomBytes, randomUUID } from 'node:crypto';
+import { createHash, createHmac, randomBytes, randomUUID } from 'node:crypto';
+import { failureLimiter } from '../failLimit.js';
 import { readFileSync } from 'node:fs';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
@@ -84,13 +85,18 @@ export function widgetRoutes(app: FastifyInstance, db: Db, mgr: ChannelManager, 
   // ---- visitor session -------------------------------------------------------------------------------------------
   const contactId = (visitor: { id: string; identity_id: string | null }) => (visitor.identity_id ? `${visitor.identity_id}@web` : `v${visitor.id.replaceAll('-', '')}@web`);
 
+  const badTokens = failureLimiter(30);
   async function visitorFrom(req: FastifyRequest): Promise<{ id: string; channel_id: string; identity_id: string | null } | null> {
+    if (badTokens.blocked(req.ip)) return null;
     const h = req.headers.authorization;
     const t = h?.startsWith('Bearer ') ? h.slice(7) : '';
-    if (!/^[\w-]{30,80}$/.test(t)) return null;
+    if (!/^[\w-]{30,80}$/.test(t)) { badTokens.fail(req.ip); return null; }
     const { rows } = await db.query('UPDATE webchat_visitors SET last_seen_at = now() WHERE token_hash = $1 RETURNING id, channel_id, identity_id', [sha(t)]);
+    if (!rows[0]) badTokens.fail(req.ip);
     return rows[0] ?? null;
   }
+  /** A keyed hash of the visitor's address: enough to count new sessions per address, without keeping the address. */
+  const ipHash = (ip: string) => createHmac('sha256', cfg.ENCRYPTION_KEY).update(`webchat-ip:${ip}`).digest('base64url').slice(0, 32);
 
   const conversationOf = async (channelId: string, v: { id: string; identity_id: string | null }) =>
     (await db.query(`SELECT c.id FROM conversations c JOIN contacts ct ON ct.id = c.contact_id WHERE ct.channel_id = $1 AND ct.external_id = $2`, [channelId, contactId(v)])).rows[0]?.id as string | undefined;
@@ -108,8 +114,11 @@ export function widgetRoutes(app: FastifyInstance, db: Db, mgr: ChannelManager, 
     if (!visitor) {
       const recent = (await db.query(`SELECT count(*)::int AS n FROM webchat_visitors WHERE channel_id = $1 AND created_at > now() - interval '1 hour'`, [s.channelId])).rows[0].n as number;
       if (recent >= 1000) return reply.code(429).send({ error: 'rate_limited' }); // a flood of new sessions is not a normal day
+      // one address cannot use up the allowance for everyone (a campus NAT shares one address: 60 new chats an hour is generous)
+      const fromHere = (await db.query(`SELECT count(*)::int AS n FROM webchat_visitors WHERE ip_hash = $1 AND created_at > now() - interval '1 hour'`, [ipHash(req.ip)])).rows[0].n as number;
+      if (fromHere >= 60) return reply.code(429).send({ error: 'rate_limited' });
       token = randomBytes(32).toString('base64url');
-      visitor = (await db.query('INSERT INTO webchat_visitors (channel_id, token_hash) VALUES ($1, $2) RETURNING id, identity_id', [s.channelId, sha(token)])).rows[0];
+      visitor = (await db.query('INSERT INTO webchat_visitors (channel_id, token_hash, ip_hash) VALUES ($1, $2, $3) RETURNING id, identity_id', [s.channelId, sha(token), ipHash(req.ip)])).rows[0];
     }
     // verified identity: only a valid signature (computed by the host site's server with the identity secret) links the chat to a customer id
     const idn = b.data.identity;

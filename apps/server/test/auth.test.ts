@@ -99,7 +99,22 @@ describe('auth', () => {
     expect((await post('/auth/mfa/enable', { code: authenticator.generate(setup.secret) }, cookie)).statusCode).toBe(200);
     expect((await login('mfa@t.io')).res.json()).toEqual({ error: 'mfa_required' });
     expect((await login('mfa@t.io', { totp: '000000' })).res.statusCode).toBe(401);
+    // the code just used to switch it on cannot be used again (a code is accepted once)
+    expect((await login('mfa@t.io', { totp: authenticator.generate(setup.secret) })).res.statusCode).toBe(401);
+    await db.query(`UPDATE users SET totp_last_step = totp_last_step - 2, failed_logins = 0 WHERE email = 'mfa@t.io'`);   // as if it was an earlier code
     expect((await login('mfa@t.io', { totp: authenticator.generate(setup.secret) })).res.statusCode).toBe(200);
+    expect((await login('mfa@t.io', { totp: authenticator.generate(setup.secret) })).res.statusCode).toBe(401);   // replayed
+  });
+
+  it('a role that requires a second factor, with a passkey only: a password alone does not sign in', async () => {
+    await mkUser('pk-admin@t.io', 'admin');
+    const id = (await db.query(`SELECT id FROM users WHERE email = 'pk-admin@t.io'`)).rows[0].id;
+    await db.query(`INSERT INTO passkeys (user_id, credential_id, public_key) VALUES ($1, 'cred-1', '\\x00')`, [id]);
+    expect((await login('pk-admin@t.io')).res.json()).toEqual({ error: 'passkey_required' });
+    await mkUser('pk-agent@t.io', 'agent');                                   // a role without the requirement: as before
+    const aid = (await db.query(`SELECT id FROM users WHERE email = 'pk-agent@t.io'`)).rows[0].id;
+    await db.query(`INSERT INTO passkeys (user_id, credential_id, public_key) VALUES ($1, 'cred-2', '\\x00')`, [aid]);
+    expect((await login('pk-agent@t.io')).res.statusCode).toBe(200);
   });
 
   it('locks account after repeated failures, with a response indistinguishable from a wrong password', async () => {
@@ -128,6 +143,7 @@ describe('auth', () => {
     expect((await get('/auth/me')).statusCode).toBe(200); // enrolment endpoints stay reachable
     const setup = (await post('/auth/mfa/setup', {}, cookie)).json();
     await post('/auth/mfa/enable', { code: authenticator.generate(setup.secret) }, cookie);
+    await db.query(`UPDATE users SET totp_last_step = totp_last_step - 2 WHERE email = 'sup@t.io'`);   // the next code (a code is accepted once)
     const again = await login('sup@t.io', { totp: authenticator.generate(setup.secret) });
     expect((await app.inject({ url: '/users', headers: { cookie: again.cookie } })).statusCode).toBe(200);
     // non-privileged roles are not affected

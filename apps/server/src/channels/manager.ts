@@ -1070,7 +1070,16 @@ export class ChannelManager {
     void sendAlert(this.cfg, `🚨 פנייה דחופה (נראית כמו מצב חירום) התקבלה ב-${this.types.get(channelId) ?? 'ערוץ'}. ${to ? 'שויכה לנציג.' : 'לא שויכה: אין נציג זמין!'} יש לפתוח את השיחה ולחזור ללקוח מיד.`, { conversationId: convId });
   }
 
-  alertTeam(text: string, extra: Record<string, unknown> = {}): void { void sendAlert(this.cfg, text, extra); }
+  alertTeam(text: string, extra: Record<string, unknown> = {}): void { if (this.alertBudget()) void sendAlert(this.cfg, text, extra); }
+  /** At most 30 "stressed customer" alerts in 10 minutes: a flood of chats must not flood the managers (notes and tags still go on). */
+  private alertTimes: number[] = [];
+  private alertBudget(): boolean {
+    const now = Date.now();
+    this.alertTimes = this.alertTimes.filter((t) => now - t < 600_000);
+    if (this.alertTimes.length >= 30) return false;
+    this.alertTimes.push(now);
+    return true;
+  }
 
   /**
    * A stressed or upset customer (empathy.ts): an acknowledging answer with who handles the inquiry, the inquiry handed to a
@@ -1099,7 +1108,7 @@ export class ChannelManager {
       const sent = await this.sendText(channelId, ext, body, { background: true }).catch(() => ({} as { externalMessageId?: string }));
       const ins = await this.db.query(`INSERT INTO messages (conversation_id, direction, body, external_id, auto, automation) VALUES ($1,'out',$2,$3,true,'comfort_follow') ON CONFLICT DO NOTHING RETURNING id`, [convId, body, sent.externalMessageId ?? null]);
       if (ins.rows[0]) { this.notifyMessage(channelId, convId, ins.rows[0].id); this.hookMessage('message.sent', convId, ins.rows[0].id); }
-      void sendAlert(this.cfg, `💛 הלקוח כתב שוב ועדיין מחכה למענה${who ? ` (אצל ${who})` : ''}.`, { conversationId: convId });
+      if (this.alertBudget()) void sendAlert(this.cfg, `💛 הלקוח כתב שוב ועדיין מחכה למענה${who ? ` (אצל ${who})` : ''}.`, { conversationId: convId });
       return true;
     }
     // a person now: the officer for the topic named (if they have an account), else whoever holds it, else normal routing
@@ -1130,7 +1139,7 @@ export class ChannelManager {
     const tag = (await this.db.query(`SELECT id FROM tags WHERE lower(name) = 'זקוק לליווי' LIMIT 1`)).rows[0]?.id as string | undefined;
     if (tag) await this.db.query('INSERT INTO conversation_tags (conversation_id, tag_id) VALUES ($1, $2) ON CONFLICT DO NOTHING', [convId, tag]).catch(() => undefined);
     await audit(this.db, { action: 'conversation.comfort', target: convId, meta: { level, assignedTo: who ? 'yes' : 'no' } }).catch(() => undefined);
-    void sendAlert(this.cfg, `💛 לקוח ${feeling} מחכה למענה${who ? ` (אצל ${who})` : ' (עדיין לא שויך!)'}. כדאי לחזור אליו בהקדם.`, { conversationId: convId });
+    if (this.alertBudget()) void sendAlert(this.cfg, `💛 לקוח ${feeling} מחכה למענה${who ? ` (אצל ${who})` : ' (עדיין לא שויך!)'}. כדאי לחזור אליו בהקדם.`, { conversationId: convId });
     return true;
   }
 

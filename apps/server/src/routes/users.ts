@@ -31,6 +31,8 @@ async function activeAdmins(db: Db, exceptUserId?: string): Promise<number> {
   return rows[0].n;
 }
 
+import { revokeStaffLinks } from '../staff/assistant.js';
+
 export function userRoutes(app: FastifyInstance, db: Db, scan: (buf: Buffer) => Promise<'clean' | 'infected' | 'unavailable'> = async () => 'unavailable') {
   const manage = requireAuth(db, 'users.manage');
 
@@ -194,6 +196,7 @@ export function userRoutes(app: FastifyInstance, db: Db, scan: (buf: Buffer) => 
     await db.query('UPDATE users SET totp_enabled = false, totp_secret_enc = NULL WHERE id = $1', [p.data.id]);
     await db.query('DELETE FROM passkeys WHERE user_id = $1', [p.data.id]);
     await db.query('DELETE FROM sessions WHERE user_id = $1', [p.data.id]);
+    await revokeStaffLinks(db, p.data.id);
     await audit(db, { actorId: req.user!.id, action: 'user.mfa_reset', target: p.data.id, ip: req.ip });
     return { ok: true };
   });
@@ -211,6 +214,7 @@ export function userRoutes(app: FastifyInstance, db: Db, scan: (buf: Buffer) => 
     const pw = b.data.password ?? Array.from({ length: 16 }, () => TEMP_ALPHABET[randomInt(TEMP_ALPHABET.length)]).join('');
     await db.query('UPDATE users SET password_hash = $2, must_change_password = true, failed_logins = 0, locked_until = NULL, updated_at = now() WHERE id = $1', [p.data.id, await hashPassword(pw)]);
     await db.query('DELETE FROM sessions WHERE user_id = $1', [p.data.id]);
+    await revokeStaffLinks(db, p.data.id);
     await audit(db, { actorId: req.user!.id, action: 'user.password_reset', target: p.data.id, ip: req.ip, meta: { generated } });
     return reply.header('cache-control', 'no-store').send(generated ? { ok: true, temporaryPassword: pw } : { ok: true });
   });

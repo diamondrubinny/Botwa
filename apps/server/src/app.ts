@@ -64,12 +64,19 @@ import type { Db } from './db.js';
 /** what a real session token looks like (32 random bytes, base64url) */
 const SESSION_SHAPE = /^[A-Za-z0-9_-]{43}$/;
 
+/** The request address for the log: no query string, and the token in a personal link replaced. */
+export function safeLogUrl(url: string): string {
+  return url.split('?')[0]!.replace(/^\/(f|w)\/[^/]+/, '/$1/[token]');
+}
+
 export async function buildApp(cfg: Config, db: Db, mgr: ChannelManager, media: MediaService = new MediaService(db, cfg), webhookSender?: Sender): Promise<FastifyInstance> {
   const app = Fastify({
     logger: {
       level: cfg.NODE_ENV === 'test' ? 'silent' : 'info',
       // never log credentials or session cookies
       redact: ['req.headers.cookie', 'req.headers.authorization', 'res.headers["set-cookie"]'],
+      // addresses are logged without their query (webhook verify tokens) and with personal links hidden (form tokens, widget tokens)
+      serializers: { req: (req: { method: string; url: string; ip?: string; id?: string }) => ({ id: req.id, method: req.method, url: safeLogUrl(req.url), ip: req.ip }) },
     },
     trustProxy: cfg.TRUST_PROXY,
     bodyLimit: 100 * 1024,

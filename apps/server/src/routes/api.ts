@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
+import { failureLimiter } from '../failLimit.js';
 import { audit } from '../audit.js';
 import { sendBlock, type AccessibleConversation } from '../access.js';
 import type { ChannelManager } from '../channels/manager.js';
@@ -22,13 +23,15 @@ declare module 'fastify' { interface FastifyRequest { apiKey?: { id: string; nam
  * There is deliberately no "message anyone" endpoint: replies go through the same blocking, opt-out and reply-window rules as staff.
  */
 export function apiRoutes(app: FastifyInstance, db: Db, mgr: ChannelManager, cfg: Config) {
+  const badKeys = failureLimiter(20);
   const need = (scope: Scope) => async (req: FastifyRequest, reply: FastifyReply) => {
+    if (badKeys.blocked(req.ip)) return reply.code(429).send({ error: 'rate_limited' });   // made-up keys, one after another
     const h = req.headers.authorization;
     const key = h?.startsWith('Bearer ') ? h.slice(7).trim() : '';
-    if (!/^bk_[\w-]{6,12}_[\w-]{30,80}$/.test(key)) return reply.code(401).send({ error: 'unauthorized' });
+    if (!/^bk_[\w-]{6,12}_[\w-]{30,80}$/.test(key)) { badKeys.fail(req.ip); return reply.code(401).send({ error: 'unauthorized' }); }
     const { rows } = await db.query('SELECT id, name, scopes, last_used_at FROM api_keys WHERE key_hash = $1 AND revoked_at IS NULL', [sha(key)]);
     const k = rows[0];
-    if (!k) return reply.code(401).send({ error: 'unauthorized' });
+    if (!k) { badKeys.fail(req.ip); return reply.code(401).send({ error: 'unauthorized' }); }
     if (!k.scopes.includes(scope)) return reply.code(403).send({ error: 'insufficient_scope', required: scope });
     req.apiKey = { id: k.id, name: k.name, scopes: k.scopes };
     if (!k.last_used_at || Date.now() - new Date(k.last_used_at).getTime() > 60_000) void db.query('UPDATE api_keys SET last_used_at = now() WHERE id = $1', [k.id]).catch(() => undefined);

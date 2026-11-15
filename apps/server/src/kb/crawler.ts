@@ -79,12 +79,33 @@ export function parseRobots(text: string, agent = 'botwakb'): Robots {
   return { allow: mine?.allow ?? [], disallow: mine?.disallow ?? [], crawlDelay: mine?.delay ?? null, sitemaps };
 }
 
-const ruleRe = (rule: string) => new RegExp(`^${rule.replace(/[.+?^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*').replace(/\\\$$/, '$')}`);
+/**
+ * "*" wildcards matched in linear time (a greedy two-pointer glob, never a regular expression): a site's own robots.txt or a
+ * pattern can otherwise make the matcher run for minutes and freeze the server. `anchored`: the pattern must match from the start
+ * (robots rules); a trailing "$" means "at the end". Unanchored: anywhere in the text (include/exclude patterns).
+ */
+export function globMatch(pattern: string, text: string, anchored: boolean): boolean {
+  let p = pattern.replace(/\*+/g, '*');
+  const end = anchored && p.endsWith('$');
+  if (end) p = p.slice(0, -1);
+  if (!anchored) p = `*${p}*`;
+  else if (!end) p = `${p}*`;
+  let pi = 0, ti = 0, star = -1, mark = 0;
+  while (ti < text.length) {
+    if (pi < p.length && p[pi] !== '*' && p[pi] === text[ti]) { pi++; ti++; }
+    else if (pi < p.length && p[pi] === '*') { star = pi++; mark = ti; }
+    else if (star >= 0) { pi = star + 1; ti = ++mark; }
+    else return false;
+  }
+  while (pi < p.length && p[pi] === '*') pi++;
+  return pi === p.length;
+}
+
 export function robotsAllows(r: Robots, pathAndQuery: string): boolean {
   let best = { len: -1, allow: true };
   for (const [rules, allow] of [[r.disallow, false], [r.allow, true]] as const) {
     for (const rule of rules) {
-      if (!ruleRe(rule).test(pathAndQuery)) continue;
+      if (rule.length > 500 || !globMatch(rule, pathAndQuery.slice(0, 2000), true)) continue;
       if (rule.length > best.len || (rule.length === best.len && allow)) best = { len: rule.length, allow };
     }
   }
@@ -93,14 +114,16 @@ export function robotsAllows(r: Robots, pathAndQuery: string): boolean {
 
 /** Addresses listed by a sitemap, and further sitemaps when it is an index. */
 export function parseSitemap(xml: string): { urls: string[]; sitemaps: string[] } {
-  const locs = [...xml.matchAll(/<loc>\s*(?:<!\[CDATA\[)?\s*([^<\]\s][^<\]]*?)\s*(?:\]\]>)?\s*<\/loc>/gi)].map((m) => m[1]!.replace(/&amp;/g, '&'));
+  // a bounded, backtracking-free pattern; the CDATA wrapper and spaces are taken off afterwards
+  const locs = [...xml.matchAll(/<loc>([^<]{1,4000})<\/loc>|<loc><!\[CDATA\[([^\]]{1,4000})\]\]><\/loc>/gi)]
+    .map((m) => (m[1] ?? m[2] ?? '').trim().replace(/^<!\[CDATA\[|\]\]>$/g, '').trim().replace(/&amp;/g, '&')).filter(Boolean);
   return /<sitemapindex/i.test(xml) ? { urls: [], sitemaps: locs.slice(0, 5) } : { urls: locs.slice(0, 5000), sitemaps: [] };
 }
 
 /** A pattern is a plain piece of the address, or uses "*" as a wildcard. */
 export function patternMatches(pattern: string, target: string): boolean {
   if (!pattern.includes('*')) return target.toLowerCase().includes(pattern.toLowerCase());
-  return new RegExp(pattern.split('*').map((p) => p.replace(/[.+?^${}()|[\]\\]/g, '\\$&')).join('.*'), 'i').test(target);
+  return globMatch(pattern.toLowerCase(), target.toLowerCase(), false);
 }
 
 export type Verdict = 'ok' | 'filtered';
