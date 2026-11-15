@@ -14,6 +14,7 @@ export const SEARCH_INDEX: SearchEntry[] = [
   { label: 'הודעת פתיחה של הבוט', where: 'בוט', words: 'פתיחה ברוכים הבאים welcome תפריט ראשי', page: 'bot', s: 'b-welcome', allowed: P('bot.view') },
   { label: 'זהות הבוט (בטי): שם, תפקיד ותמונה', where: 'בוט', words: 'בטי פרסונה שם הבוט תמונה אווטאר persona', page: 'bot', s: 'persona-h', allowed: P('bot.view') },
   { label: 'מצב חירום: הודעת חירום ומספרים', where: 'בוט', words: 'חירום מד"א 101 102 100 מוקד ביטחון שריפה דחוף emergency', page: 'bot', s: 'em-t', allowed: P('bot.view') },
+  { label: 'ליווי אמפתי במצבי לחץ', where: 'בוט', words: 'אמפתיה לחץ לחוץ תסכול מתוסכל ליווי רגיש מפחד', page: 'bot', s: 'emp-l', allowed: P('bot.view') },
   { label: 'GIF מהבוט ברגעים נעימים', where: 'בוט', words: 'gif גיף אנימציה', page: 'bot', s: 'gif-cd', allowed: P('bot.view') },
   { label: 'תגובות אוטומטיות (אימוג׳י, לב על תודה)', where: 'בוט', words: 'רגשון אימוגי emoji לב תודה reactions', page: 'bot', s: 'rx-thanks-l', allowed: P('bot.view') },
   { label: 'מענה ממאגר הידע: רמת ביטחון, ניסוח, מודל מקומי', where: 'בוט', words: 'מאגר ידע ביטחון מודל מקומי llm ollama ניסוח ציטוט', page: 'bot', s: 'b-kms', allowed: P('bot.view') },

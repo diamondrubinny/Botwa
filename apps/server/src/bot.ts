@@ -99,6 +99,8 @@ export const botSchema = z.object({
   reactions: z.object({ enabled: z.boolean(), /** react to every message the bot handles (not only to searches) */ ackAll: z.boolean().default(false), working: emoji, done: emoji, noAnswer: emoji, handoff: emoji, /** a greeting (שלום, היי…) gets this reaction and nothing else; empty = none */ greeting: emoji.default('👋'), /** a thank-you or praise (תודה, אתם אחלה, אין עליכם) gets this reaction, also when a person handles the chat; empty = none */ thanks: emoji.default('❤️') }).default(() => ({ ...DEFAULT_REACTIONS })),
   /** a message about an emergency (danger, injury, fire, leak…): the emergency numbers at once and an urgent hand-over to a person (emergency.ts) */
   emergency: z.object({ enabled: z.boolean(), text: z.string().trim().min(10).max(800) }).default(() => ({ enabled: true, text: DEFAULT_EMERGENCY_TEXT })),
+  /** a stressed or upset customer: an acknowledging answer, a person at once and follow-ups until a person answers (empathy.ts) */
+  empathy: z.object({ enabled: z.boolean() }).default(() => ({ enabled: true })),
   /** a fitting GIF from the gallery at pleasant moments (greeting, thanks, hand-over, closing): never on sensitive topics, at most one per cool-down */
   gifs: z.object({
     enabled: z.boolean(),
@@ -132,6 +134,7 @@ export const DEFAULT_BOT: BotConfig = {
   reactions: { ...DEFAULT_REACTIONS },
   gifs: { ...DEFAULT_GIFS },
   emergency: { enabled: true, text: DEFAULT_EMERGENCY_TEXT },
+  empathy: { enabled: true },
   catchupHours: 12,
   interactiveMenus: true,
 };

@@ -15,6 +15,7 @@ interface BotCfg {
   interactiveMenus?: boolean;
   gifs?: { enabled: boolean; greeting: boolean; thanks: boolean; handoff: boolean; close: boolean; cooldownMinutes: number };
   emergency?: { enabled: boolean; text: string };
+  empathy?: { enabled: boolean };
 }
 const GIFS = { enabled: true, greeting: true, thanks: true, handoff: true, close: true, cooldownMinutes: 360 };
 
@@ -212,6 +213,12 @@ export function Bot({ me }: { me: Me }) {
             <label htmlFor="em-t">ההודעה ללקוח (כדאי להוסיף את מספר מוקד הביטחון של המוסד)</label>
             <textarea id="em-t" rows={4} maxLength={800} value={b.emergency?.text ?? ''} onChange={(e) => set({ emergency: { enabled: b.emergency?.enabled ?? true, text: e.target.value } })} />
           </div>
+        </fieldset>
+
+        <fieldset disabled={!canEdit}>
+          <legend id="emp-l">ליווי אמפתי במצבי לחץ</legend>
+          <p className="hint" id="emp-h">לקוח שכותב שהוא לחוץ, מפחד או לא יודע מה לעשות, או מתוסכל מההמתנה ("כבר שעה מחכה", "אף אחד לא עונה"), מקבל תשובה שמכירה ברגש ואומרת מי מטפל בפנייה. השיחה עוברת מיד לאדם: לממונה על הנושא אם זוהה נושא ולממונה יש חשבון, ואחרת לפי הניתוב. היא מקבלת תגית "זקוק לליווי", ונשלחת התראה לצוות. עד שמישהו מהצוות עונה, בטי שולחת עדכוני ליווי אחרי 5, 15 ו-30 דקות, ואחרי 15 דקות נשלחת התראה נוספת. מחוץ לשעות הפעילות נשלח עדכון אחד בלבד. כשאדם כותב בשיחה, הליווי נעצר.</p>
+          <div className="field"><label><input type="checkbox" role="switch" style={{ width: 'auto', minHeight: 'auto' }} aria-describedby="emp-h" checked={b.empathy?.enabled ?? true} onChange={(e) => set({ empathy: { enabled: e.target.checked } })} /> ליווי אמפתי עד מענה של אדם</label></div>
         </fieldset>
 
         <fieldset disabled={!canEdit}>

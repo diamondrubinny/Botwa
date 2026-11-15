@@ -73,7 +73,13 @@ export function withoutBotName(text: string | null, name: string | null | undefi
 
 /** Small talk ("מה שלומך?", "מה נשמע?", "מה קורה?"): a short friendly answer; null for anything else. */
 const HOW = /^(ו?מה שלומך|מה שלומכם|מה נשמע|מה נשמע איתך|מה קורה|מה קורה איתך|מה העניינים|מה איתך|איך את|איך אתה|איך הולך|איך היום שלך|מה המצב|מה מצבך|הכל טוב|הכול טוב|הכל בסדר|הכול בסדר)( איתך| אצלך| היום)?$/;
-export function smallTalkReply(text: string | null | undefined): string | null {
+/** "את כאן?", "יש מישהו?", "הלו?", or just the bot's name: Betty is here (never taken as an answer to the question she asked). */
+const HERE = /^(את|אתה|עדיין|את עדיין|אתה עדיין) (כאן|פה|שם|איתי|איתנו|זמינה|זמין|ערה|ער|מחוברת|מחובר|שומעת|שומע|קוראת|קורא)$|^(יש|יש פה|יש כאן|יש שם)? ?מישהו( כאן| פה| שם)?$|^(הלו+|הללו|הי+|היי+)$|^(את|אתה) עונה( לי)?$/;
+export function smallTalkReply(text: string | null | undefined, botName?: string | null): string | null {
   const t = (text ?? '').toLowerCase().replace(/[?!.,״"׳:;()\u200e\u200f\u{1F300}-\u{1FAFF}\u2600-\u27BF]/gu, ' ').replace(/^(היי|הי|שלום|אהלן|בוקר טוב|ערב טוב|צהריים טובים)\s+/, '').replace(/\s+/g, ' ').trim();
-  return t && HOW.test(t) ? 'תודה ששאלת, הכול טוב אצלי 😊 במה אפשר לעזור?' : null;
+  if (!t) return /^\s*[?？]+\s*$/.test(text ?? '') ? 'כן, אני כאן איתך 😊' : null;   // a lone "?" (or "בטי?"): are you there?
+  if (HOW.test(t)) return 'תודה ששאלת, הכול טוב אצלי 😊 במה אפשר לעזור?';
+  const name = (botName ?? '').trim().toLowerCase();
+  if ((HERE.test(t) && !/^(הי+|היי+)$/.test(t)) || (name && t.replace(/^(ו|ה)/, '') === name)) return 'כן, אני כאן איתך 😊';
+  return null;
 }

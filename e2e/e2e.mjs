@@ -206,6 +206,7 @@ await page.keyboard.press('Control+k');
 await page.waitForSelector('dialog.gsearch[open]');
 await page.keyboard.type('כפילויות');
 await page.waitForSelector('.gs-item[aria-selected="true"]');
+
 await page.keyboard.press('Enter');
 await page.waitForFunction(() => location.hash.includes('tab=health') && document.activeElement?.id === 'hl-q', null, { timeout: 8000 });
 check('search: a result inside a tab opens that tab (knowledge base > health > quality)', await page.isVisible('#hl-q'));

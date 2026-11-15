@@ -28,7 +28,7 @@ export function GlobalSearch({ me, open, onClose }: { me: Me; open: boolean; onC
     if (!d) return;
     if (open) {
       if (!d.open) d.showModal();
-      setTimeout(() => { input.current?.focus(); input.current?.select(); }, 0);
+      if (document.activeElement !== input.current) input.current?.focus();   // never select: the first letters typed would be replaced
     } else {
       if (d.open) d.close();
       setQ(''); setData(null); setActive(0);     // a fresh search next time

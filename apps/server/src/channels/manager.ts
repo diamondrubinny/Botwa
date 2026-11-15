@@ -39,7 +39,8 @@ import { saveUsername } from './username-store.js';
 import { isSensitive, pickGif, type GifMoment } from '../bot-gifs.js';
 import { isEmergency } from '../emergency.js';
 import { isWaitingQuestion } from '../waiting.js';
-import { officerReply } from '../safety/whoIs.js';
+import { officerReply, officerUserFor } from '../safety/whoIs.js';
+import { comfortText, detectDistress, type Distress } from '../empathy.js';
 import { factReply } from '../safety/facts.js';
 import { hoursSummary } from '../canned.js';
 import { staffMessage } from '../staff/assistant.js';
@@ -385,6 +386,14 @@ export class ChannelManager {
           // an emergency: the numbers to call at once and an urgent hand-over, before anything else (no greeting, menu or GIF)
           if (r.messageId && !stop && !m.media && bot?.emergency.enabled && !isCommentContact(m.externalContactId) && isEmergency(m.text)) {
             await this.emergency(channelId, r.conversationId, m.externalContactId, r.messageId, bot.emergency.text).catch(() => undefined);
+            this.emit({ channelId, type: 'message', conversationId: r.conversationId, messageId: r.messageId });
+            this.onInbound?.(r.conversationId);
+            this.hookMessage('message.received', r.conversationId, r.messageId);
+            return;
+          }
+          // a stressed or upset customer: the feeling acknowledged, a person at once, and Betty stays until a person answers
+          const distress = r.messageId && !stop && !m.media && (bot?.empathy?.enabled ?? true) && !isCommentContact(m.externalContactId) ? detectDistress(m.text) : null;
+          if (distress && r.messageId && await this.comfort(channelId, r.conversationId, m.externalContactId, r.messageId, m.text ?? '', distress).catch(() => false)) {
             this.emit({ channelId, type: 'message', conversationId: r.conversationId, messageId: r.messageId });
             this.onInbound?.(r.conversationId);
             this.hookMessage('message.received', r.conversationId, r.messageId);
@@ -932,7 +941,7 @@ export class ChannelManager {
       const last = (await this.db.query(`SELECT body FROM messages WHERE conversation_id = $1 AND direction = 'out' ORDER BY created_at DESC LIMIT 1`, [convId])).rows[0]?.body as string | undefined;
       return { r, lastWasFact: !!last?.startsWith('💡 הידעת?') };
     };
-    const own = identityReply(text, persona) ?? smallTalkReply(text) ?? await officerReply(this.db, text).catch(() => null)
+    const own = identityReply(text, persona) ?? smallTalkReply(text, persona.name) ?? await officerReply(this.db, text).catch(() => null)
       ?? await told().then(({ r, lastWasFact }) => factReply(text, r, lastWasFact)).catch(() => null);
     if (own) {
       const st = c.flow_state as FlowState | null;
@@ -1047,6 +1056,59 @@ export class ChannelManager {
     if (to) this.onAssigned?.(convId, to);
     await audit(this.db, { action: 'conversation.emergency', target: convId, meta: { assignedTo: to } }).catch(() => undefined);
     void sendAlert(this.cfg, `🚨 פנייה דחופה (נראית כמו מצב חירום) התקבלה ב-${this.types.get(channelId) ?? 'ערוץ'}. ${to ? 'שויכה לנציג.' : 'לא שויכה: אין נציג זמין!'} יש לפתוח את השיחה ולחזור ללקוח מיד.`, { conversationId: convId });
+  }
+
+  alertTeam(text: string, extra: Record<string, unknown> = {}): void { void sendAlert(this.cfg, text, extra); }
+
+  /**
+   * A stressed or upset customer (empathy.ts): an acknowledging answer with who handles the inquiry, the inquiry handed to a
+   * person (the officer for the topic when they have an account, else normal routing), a note, a "זקוק לליווי" tag and an alert;
+   * the follow-ups run from runComfort until a person answers. Not when a person answered in the last 10 minutes (only a note
+   * for them) or a comforting message went out in the last 15 minutes. Returns true when it handled the message.
+   */
+  async comfort(channelId: string, convId: string, ext: string, messageId: string, text: string, level: Distress): Promise<boolean> {
+    const c = (await this.db.query(
+      `SELECT c.assigned_to, c.bot_state,
+              EXISTS (SELECT 1 FROM messages m WHERE m.conversation_id = c.id AND m.direction = 'out' AND NOT m.auto AND m.created_at > now() - interval '10 minutes') AS answered,
+              EXISTS (SELECT 1 FROM messages m WHERE m.conversation_id = c.id AND m.automation = 'comfort' AND m.created_at > now() - interval '15 minutes') AS recent
+         FROM conversations c WHERE c.id = $1`, [convId])).rows[0];
+    if (!c) return false;
+    const feeling = level === 'worried' ? 'נשמע/ת לחוץ/ה או מודאג/ת' : 'נשמע/ת מתוסכל/ת מההמתנה';
+    if (c.answered) {
+      await this.db.query(`INSERT INTO conversation_notes (conversation_id, body) VALUES ($1, $2)`, [convId, `💛 הלקוח ${feeling}. כדאי להכיר בזה בתשובה ולומר מה הצעד הבא ומתי.`]);
+      return false;   // a person is in the conversation: they answer, as usual
+    }
+    if (c.recent) return false;
+    // a person now: the officer for the topic named (if they have an account), else whoever holds it, else normal routing
+    let movedNow = false;
+    let topic: string | null = null;
+    if (!c.assigned_to) {
+      const officer = await officerUserFor(this.db, text).catch(() => null);
+      let to: string | null = null;
+      if (officer) {
+        const u = await this.db.query(`UPDATE conversations SET assigned_to = $2, assigned_at = now() WHERE id = $1 AND assigned_to IS NULL RETURNING id`, [convId, officer.userId]).catch(() => ({ rowCount: 0 }));
+        if (u.rowCount) { to = officer.userId; topic = officer.topic; await audit(this.db, { action: 'conversation.topic_assign', target: convId, meta: { to, topic, via: 'comfort' } }).catch(() => undefined); }
+      }
+      if (!to) to = await autoAssign(this.db, convId).catch(() => null);
+      if (to) { this.onAssigned?.(convId, to); movedNow = true; }
+      else movedNow = c.bot_state !== 'human';
+    }
+    await this.db.query(`UPDATE conversations SET status = 'open', bot_state = 'human', snoozed_until = NULL, comfort_since = now(), comfort_steps = 0 WHERE id = $1`, [convId]);
+    const who = (await this.db.query(`SELECT COALESCE(u.name_he, u.name) AS who FROM conversations c JOIN users u ON u.id = c.assigned_to WHERE c.id = $1`, [convId])).rows[0]?.who as string | undefined;
+    const hours = await loadBusinessHours(this.db);
+    const closed = hours.enabled && !isOpen(hours, new Date());
+    const body = comfortText(level, { who: who ?? null, topic: topic ? `האחראי/ת על ${topic}` : null, closed, hours: closed ? hoursSummary(hours) : undefined, movedNow });
+    const sent = await this.sendText(channelId, ext, body, { background: true }).catch(() => ({} as { externalMessageId?: string }));
+    const ins = await this.db.query(`INSERT INTO messages (conversation_id, direction, body, external_id, auto, automation) VALUES ($1,'out',$2,$3,true,'comfort') ON CONFLICT DO NOTHING RETURNING id`, [convId, body, sent.externalMessageId ?? null]);
+    if (ins.rows[0]) { this.notifyMessage(channelId, convId, ins.rows[0].id); this.hookMessage('message.sent', convId, ins.rows[0].id); }
+    await this.setOurReaction(messageId, '💛', null).catch(() => undefined);
+    await this.db.query(`INSERT INTO conversation_notes (conversation_id, body) VALUES ($1, $2)`, [convId, `💛 הלקוח ${feeling}. בטי הכירה בזה, ${movedNow ? 'העבירה את הפנייה לטיפול אנושי ' : ''}ותשלח עדכוני ליווי עד שמישהו מהצוות יענה. מומלץ לחזור אליו בהקדם.`]);
+    await this.db.query(`INSERT INTO tags (name) SELECT 'זקוק לליווי' WHERE NOT EXISTS (SELECT 1 FROM tags WHERE lower(name) = 'זקוק לליווי')`).catch(() => undefined);
+    const tag = (await this.db.query(`SELECT id FROM tags WHERE lower(name) = 'זקוק לליווי' LIMIT 1`)).rows[0]?.id as string | undefined;
+    if (tag) await this.db.query('INSERT INTO conversation_tags (conversation_id, tag_id) VALUES ($1, $2) ON CONFLICT DO NOTHING', [convId, tag]).catch(() => undefined);
+    await audit(this.db, { action: 'conversation.comfort', target: convId, meta: { level, assignedTo: who ? 'yes' : 'no' } }).catch(() => undefined);
+    void sendAlert(this.cfg, `💛 לקוח ${feeling} מחכה למענה${who ? ` (אצל ${who})` : ' (עדיין לא שויך!)'}. כדאי לחזור אליו בהקדם.`, { conversationId: convId });
+    return true;
   }
 
   /**

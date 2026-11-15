@@ -102,3 +102,14 @@ export async function officerReply(db: Db, text: string | null | undefined): Pro
   }
   return formatOfficers(hit.map((topic) => ({ topic, officers: rows.filter((r) => r.topics.includes(topic)) })));
 }
+
+/** The officer with a panel account responsible for a topic the message names (for handing a stressed customer to them). */
+export async function officerUserFor(db: Db, text: string | null | undefined): Promise<{ userId: string; name: string; topic: string } | null> {
+  if (!text) return null;
+  const rows = (await db.query(
+    `SELECT u.id AS "userId", COALESCE(u.name_he, u.name) AS name, t.topic FROM officers o JOIN officer_topics t ON t.officer_id = o.id JOIN users u ON u.id = o.user_id
+      WHERE o.active AND u.active ORDER BY o.sort, o.created_at`)).rows as { userId: string; name: string; topic: string }[];
+  if (!rows.length) return null;
+  const hit = topicsIn(fixOfficerTypos(text), [...new Set(rows.map((r) => r.topic))])[0];
+  return hit ? rows.find((r) => r.topic === hit) ?? null : null;
+}

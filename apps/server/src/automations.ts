@@ -5,6 +5,9 @@ import { isOpen } from './business-hours.js';
 import { loadBusinessHours } from './routes/settings.js';
 import { sendBlock, type AccessibleConversation } from './access.js';
 import { loadSending } from './channels/sender.js';
+import { FOLLOW_UP_AFTER, followUpText } from './empathy.js';
+import { hoursSummary } from './canned.js';
+import { autoAssign } from './routing.js';
 
 const text = z.string().trim().max(1000);
 const mins = z.number().int().min(1).max(10080);   // up to a week
@@ -75,6 +78,10 @@ export async function loadAutomations(db: Db): Promise<Automations> {
 export interface AutoSender {
   sendText(channelId: string, externalContactId: string, text: string, opts?: { background?: boolean }): Promise<{ externalMessageId?: string }>;
   notifyMessage(channelId: string, conversationId: string, messageId: string): void;
+  /** an alert to the team (webhook / e-mail as configured); optional */
+  alertTeam?(text: string, extra?: Record<string, unknown>): void;
+  /** a conversation was assigned (push to that person); optional */
+  onAssigned?: ((conversationId: string, userId: string) => void) | null;
 }
 
 type ConvRow = AccessibleConversation & { contact_name: string | null; channel_label: string; agent_name: string | null; agent_title: string | null; agent_phone: string | null };
@@ -88,7 +95,7 @@ const NOT_COMMENT = `ct.external_id !~ '@(fb|ig)comment$'`;
  * Send one automatic message to a conversation if the rules allow it (not blocked, not opted out, inside the platform's
  * reply window). Returns false when it was not sent; the caller decides what that means (e.g. close anyway).
  */
-export async function sendAutomatic(db: Db, out: AutoSender, conv: ConvRow, body: string, kind: 'idle_reminder' | 'idle_close' | 'holding' | 'closing' | 'feedback' | 'feedback_thanks' | 'customer_close' | 'introduce'): Promise<boolean> {
+export async function sendAutomatic(db: Db, out: AutoSender, conv: ConvRow, body: string, kind: 'idle_reminder' | 'idle_close' | 'holding' | 'closing' | 'feedback' | 'feedback_thanks' | 'customer_close' | 'introduce' | 'comfort_follow'): Promise<boolean> {
   if (!body.trim() || /@(fb|ig)comment$/.test(conv.external_id)) return false;
   if (await sendBlock(db, conv, (await loadSending(db)).replyWindowHours)) return false;
   const hours = await loadBusinessHours(db);
@@ -264,6 +271,44 @@ export async function runAutomations(db: Db, out: AutoSender, now = new Date()):
         if (await sendAutomatic(db, out, conv, a.holding.text, 'holding')) done.held++;
       }
     }
+  }
+  await runComfort(db, out, now).catch(() => undefined);
+  return done;
+}
+
+/**
+ * Betty stays with a stressed customer (empathy.ts) until a person answers: follow-ups 5, 15 and 30 minutes after her first
+ * comforting message, as long as nobody from the team has written since and the conversation is open. At 15 minutes the team is
+ * alerted again and an unassigned conversation is routed again. Outside working hours one follow-up only. A person's message,
+ * or closing the conversation, ends it.
+ */
+export async function runComfort(db: Db, out: AutoSender, now = new Date()): Promise<{ sent: number; ended: number }> {
+  const done = { sent: 0, ended: 0 };
+  const { rows } = await db.query(
+    `SELECT c.id, c.status, c.comfort_since, c.comfort_steps, c.assigned_to,
+            EXISTS (SELECT 1 FROM messages m WHERE m.conversation_id = c.id AND m.direction = 'out' AND NOT m.auto AND m.created_at > c.comfort_since) AS answered
+       FROM conversations c WHERE c.comfort_since IS NOT NULL ORDER BY c.comfort_since LIMIT 100`);
+  const hours = await loadBusinessHours(db);
+  const closed = hours.enabled && !isOpen(hours, now);
+  for (const r of rows as { id: string; status: string; comfort_since: Date; comfort_steps: number; assigned_to: string | null; answered: boolean }[]) {
+    if (r.status !== 'open' || r.answered || r.comfort_steps >= FOLLOW_UP_AFTER.length) {
+      await db.query('UPDATE conversations SET comfort_since = NULL WHERE id = $1', [r.id]); done.ended++; continue;
+    }
+    const due = FOLLOW_UP_AFTER[r.comfort_steps]!;
+    if ((now.getTime() - new Date(r.comfort_since).getTime()) / 60_000 < due) continue;
+    const step = (r.comfort_steps + 1) as 1 | 2 | 3;
+    if (step === 2) {
+      let to = r.assigned_to;
+      if (!to) { to = await autoAssign(db, r.id).catch(() => null); if (to) out.onAssigned?.(r.id, to); }
+      out.alertTeam?.(`💛 לקוח לחוץ מחכה כבר ${due} דקות בלי מענה מהצוות${to ? '' : ' ועדיין לא שויך'}. נא לחזור אליו עכשיו.`, { conversationId: r.id });
+      await db.query(`INSERT INTO conversation_notes (conversation_id, body) VALUES ($1, $2)`, [r.id, `💛 עברו ${due} דקות בלי מענה מהצוות ללקוח לחוץ. נשלחה התראה נוספת.`]);
+    }
+    const conv = (await db.query(`${CONV} WHERE c.id = $1`, [r.id])).rows[0] as ConvRow | undefined;
+    if (!conv) continue;
+    const body = followUpText(step, { who: conv.agent_name, closed, hours: closed ? hoursSummary(hours) : undefined });
+    if (await sendAutomatic(db, out, conv, body, 'comfort_follow')) done.sent++;
+    // outside working hours one follow-up is enough; otherwise the next step
+    await db.query('UPDATE conversations SET comfort_steps = $2 WHERE id = $1', [r.id, closed ? FOLLOW_UP_AFTER.length : step]);
   }
   return done;
 }
