@@ -65,6 +65,7 @@ export const SEARCH_INDEX: SearchEntry[] = [
   { label: 'תשובות מוכנות', where: 'תשובות ותגיות', words: 'תשובות מוכנות canned משתנים', page: 'canned', allowed: P('canned.manage') },
   { label: 'תגיות לשיחות', where: 'תשובות ותגיות', words: 'תגיות tags', page: 'canned', s: 'tags-h', allowed: P('tags.manage') },
   { label: 'ספריית GIF', where: 'תשובות ותגיות', words: 'gif גיף ספרייה', page: 'canned', s: 'gifs-h', allowed: P('canned.manage') },
+  { label: 'מפת מפגעים לפי בניין', where: 'דוחות', words: 'מפת מפגעים בניין נקודות חמות מיקום זמן טיפול', page: 'reports', s: 'bld-h', allowed: P('reports.view') },
   { label: 'דוח בטיחות ודחיפות (חירום, מפגעים, לקוחות לחוצים)', where: 'דוחות', words: 'בטיחות דחיפות חירום מפגע לחוץ ליווי זמן מענה דוח', page: 'reports', s: 'sf-rep-h', allowed: P('reports.view') },
   { label: 'דוחות: סיכום, לפי נציג, שעות עומס', where: 'דוחות', words: 'דוחות סטטיסטיקה נציג עומס מגמה', page: 'reports', s: 'sum-h', allowed: P('reports.view') },
   { label: 'אינטגרציות: מפתחות API, Webhooks, Power Apps', where: 'אינטגרציות', words: 'api מפתח webhook power apps automate bi', page: 'integrations', allowed: P('api.manage') },

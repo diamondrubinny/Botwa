@@ -9,7 +9,7 @@ import { createDb } from '../src/db.js';
 import { comfortText, detectDistress, detectHazard, followUpText, hazardAdvice } from '../src/empathy.js';
 import { migrate } from '../src/migrate.js';
 import { isWaitingQuestion } from '../src/waiting.js';
-import { safetyReport, safetyReportText } from '../src/safety/report.js';
+import { hazardsByBuilding, safetyReport, safetyReportText } from '../src/safety/report.js';
 
 describe('recognising stress', () => {
   it('worried, upset, or neither; the technical "לחץ" is not a feeling', () => {
@@ -167,5 +167,18 @@ describe('Betty stays with a stressed customer until a person answers', () => {
     await db.query(`INSERT INTO messages (conversation_id, direction, body, auto) VALUES ($1, 'out', 'בדרך אליך', false)`, [c.id]);
     await mgr.runEscalations(at(31));
     expect((await conv(ext)).urgent_since).toBeNull();
+  });
+
+  it('hazards by building: grouped by the reporter\'s building, with open count and reply time', async () => {
+    const ext = '972500005151@s.whatsapp.net';
+    await say(ext, 'שלום');
+    const c = await conv(ext);
+    await db.query(`UPDATE contacts SET profile = profile || '{"building": "בניין דייוידסון"}' WHERE id = $1`, [c.contact_id]);
+    await say(ext, 'יש מפגע חשמלי בחדר 3, חוט חשוף');
+    const rows = await hazardsByBuilding(db, 7);
+    const r = rows.find((x) => x.building === 'דייוידסון');
+    expect(r).toBeTruthy();
+    expect(r!.reports).toBeGreaterThanOrEqual(1);
+    expect(r!.open).toBeGreaterThanOrEqual(1);
   });
 });

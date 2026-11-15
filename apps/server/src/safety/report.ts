@@ -45,3 +45,36 @@ export function safetyReportText(r: SafetyReport): string {
   if (!lines.length) return `🛡️ ב-${r.days} הימים האחרונים לא היו מצבי חירום, דיווחי מפגע או לקוחות לחוצים.`;
   return [`🛡️ בטיחות ודחיפות, ${r.days} ימים אחרונים:`, ...lines, ...(r.topics.length ? [`נושאים: ${r.topics.slice(0, 5).map((t) => `${t.name} (${t.n})`).join(', ')}`] : []), ...(r.waitingNow ? [`⏳ עכשיו מחכים למענה: ${r.waitingNow}`] : [])].join('\n');
 }
+
+/**
+ * Reports > hazards by building: inquiries about hazards and emergencies in the period (tagged "מפגע" or "דחוף", or flagged by Betty),
+ * grouped by building: the reporter's identification (building), else the place written in the conversation. How many, how many
+ * still open, the median time to a person's first answer and to closing, and the topics. No names or message text.
+ */
+export interface BuildingRow { building: string; reports: number; open: number; medianReplyMinutes: number | null; medianCloseHours: number | null; topics: string[] }
+
+export async function hazardsByBuilding(db: Db, days: number): Promise<BuildingRow[]> {
+  const rows = (await db.query(
+    `WITH k AS (
+       SELECT k.id, k.conversation_id AS conv, k.opened_at, k.closed_at
+         FROM cases k
+        WHERE k.opened_at > now() - make_interval(days => $1)
+          AND (EXISTS (SELECT 1 FROM conversation_tags x JOIN tags t ON t.id = x.tag_id WHERE x.conversation_id = k.conversation_id AND lower(t.name) IN ('מפגע', 'דחוף'))
+               OR EXISTS (SELECT 1 FROM audit_log a WHERE a.target = k.conversation_id::text AND a.created_at >= k.opened_at AND (a.action = 'conversation.emergency' OR (a.action = 'conversation.comfort' AND a.meta->>'level' = 'hazard'))))
+     ), b AS (
+       SELECT k.*, nullif(trim(regexp_replace(coalesce(
+                ct.profile->>'building',
+                (SELECT substring(n.body from 'בניין: ([^\\n]+)') FROM conversation_notes n WHERE n.conversation_id = k.conv AND n.body ~ 'בניין: ' ORDER BY n.created_at DESC LIMIT 1),
+                (SELECT substring(n.body from 'מיקום(?: שנמסר)?: ([^\\n]+)') FROM conversation_notes n WHERE n.conversation_id = k.conv AND n.body ~ 'מיקום' ORDER BY n.created_at DESC LIMIT 1),
+                ''), '^\\s*בניין\\s+', '')), '') AS building,
+              (SELECT min(m.created_at) FROM messages m WHERE m.conversation_id = k.conv AND m.direction = 'out' AND NOT m.auto AND m.created_at > k.opened_at) AS reply
+         FROM k JOIN conversations c ON c.id = k.conv JOIN contacts ct ON ct.id = c.contact_id
+     ), g AS (SELECT b.*, coalesce(lower(left(b.building, 60)), '') AS bkey FROM b)
+     SELECT g.bkey AS building, count(*)::int AS reports, count(*) FILTER (WHERE closed_at IS NULL)::int AS open,
+            round((percentile_cont(0.5) WITHIN GROUP (ORDER BY extract(epoch FROM reply - opened_at)) FILTER (WHERE reply IS NOT NULL) / 60)::numeric, 1)::float AS "medianReplyMinutes",
+            round((percentile_cont(0.5) WITHIN GROUP (ORDER BY extract(epoch FROM closed_at - opened_at)) FILTER (WHERE closed_at IS NOT NULL) / 3600)::numeric, 1)::float AS "medianCloseHours",
+            (SELECT array_agg(DISTINCT t.name) FROM g g2 JOIN conversation_tags x ON x.conversation_id = g2.conv JOIN tags t ON t.id = x.tag_id
+              WHERE g2.bkey = g.bkey AND lower(t.name) NOT IN ('מפגע', 'דחוף', 'זקוק לליווי', 'english', 'אירוע חירום')) AS topics
+       FROM g GROUP BY g.bkey ORDER BY reports DESC, g.bkey LIMIT 50`, [days])).rows as (BuildingRow & { topics: string[] | null })[];
+  return rows.map((r) => ({ ...r, building: r.building || '', topics: (r.topics ?? []).slice(0, 5) }));
+}

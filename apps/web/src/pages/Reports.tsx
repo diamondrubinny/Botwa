@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { api } from '../api';
 import { usePoll } from '../hooks';
 import { SafetyReport } from '../components/SafetyReport';
+import { HazardsByBuilding } from '../components/HazardsByBuilding';
 
 type Bucket = 'day' | 'week' | 'month';
 interface Summary {
@@ -106,6 +107,7 @@ export function Reports() {
       {!data ? <Loading card lines={6} /> : (
         <>
           <SafetyReport days={days} />
+          <HazardsByBuilding days={days} />
           <section className="card" aria-labelledby="sum-h">
             <h2 id="sum-h">סיכום</h2>
             <dl className="kpis">

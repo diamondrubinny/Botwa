@@ -5,7 +5,7 @@ import { requireAuth } from '../auth.js';
 import type { Config } from '../config.js';
 import type { Db } from '../db.js';
 import { loadSla } from '../sla.js';
-import { safetyReport } from '../safety/report.js';
+import { hazardsByBuilding, safetyReport } from '../safety/report.js';
 
 /** Aggregate support metrics (no message content). Supervisors/admins only. */
 /** Spreadsheet formula injection guard: cells starting with = + - @ (or tab/CR) are prefixed with an apostrophe. */
@@ -39,6 +39,12 @@ export function reportRoutes(app: FastifyInstance, db: Db, cfg: Config) {
     const q = z.object({ days: z.coerce.number().int().min(1).max(365).default(30) }).safeParse(req.query);
     if (!q.success) return reply.code(400).send({ error: 'bad_request' });
     return safetyReport(db, q.data.days);
+  });
+
+  app.get('/reports/buildings', { preHandler: managers }, async (req, reply) => {
+    const q = z.object({ days: z.coerce.number().int().min(1).max(365).default(30) }).safeParse(req.query);
+    if (!q.success) return reply.code(400).send({ error: 'bad_request' });
+    return hazardsByBuilding(db, q.data.days);
   });
 
   app.get('/reports/summary', { preHandler: managers }, async (req, reply) => {

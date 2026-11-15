@@ -917,3 +917,4 @@ dialog.gsearch { width: min(640px, calc(100vw - 1.5rem)); max-width: none; margi
 .gs-empty, .gs-foot { color: var(--muted); }
 .en-field { border-inline-start: 3px solid var(--border); padding-inline-start: .6rem; }
 .incident-banner { background: color-mix(in srgb, var(--danger, #b42318) 14%, var(--surface)); border: 2px solid var(--danger, #b42318); color: var(--text); }
+.bld-table td:nth-child(2) { display: flex; align-items: center; gap: .5rem; min-inline-size: 140px; } .bld-bar { display: inline-block; block-size: .6rem; max-inline-size: 100px; min-inline-size: 4px; background: var(--accent); border-radius: 999px; opacity: .75; }

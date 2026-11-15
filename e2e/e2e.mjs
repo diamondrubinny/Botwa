@@ -243,6 +243,8 @@ const csvRes = await page.request.get(BASE + csvHref);
 check('reports CSV export downloads', csvRes.ok() && (csvRes.headers()['content-type'] ?? '').includes('text/csv') && (await csvRes.text()).includes('messages_sent'));
 await page.waitForSelector('#sf-rep-h');
 check('reports: the safety and urgency section is there', await page.isVisible('#sf-rep-h'));
+await page.waitForSelector('#bld-h');
+check('reports: hazards by building is there', await page.isVisible('#bld-h'));
 await axe('reports');
 
 // settings + audit pages (admin)
