@@ -62,6 +62,11 @@ const PAIRS: [string, string][] = [
   ['הפנייה שלך התקבלה ומחכה לנציג הפנוי הבא.', 'Your request was received and is waiting for the next available person.'],
   ['כרגע אנחנו מחוץ לשעות הפעילות ({*}), ונחזור אליך בהקדם בשעות הפעילות.', "We're outside working hours right now ({1}), and we'll get back to you as soon as we're open."],
   ['נחזור אליך בהקדם האפשרי. אפשר לכתוב כאן כל פרט נוסף, והוא יתווסף לפנייה.', "We'll get back to you as soon as possible. You can write any further detail here and it will be added to your request."],
+  ['הפנייה האחרונה שלך (מספר {*}, מ-{*}) {*} ב-{*} ✅', 'Your last request (number {1}, from {2}) {3} on {4} ✅'],
+  ['טופלה ונסגרה על ידי {*}', 'was handled and closed by {1}'],
+  ['טופלה ונסגרה', 'was handled and closed'],
+  ['נסגרה אוטומטית', 'was closed automatically'],
+  ['אם הבעיה עדיין קיימת, כתבו כאן מה המצב, ונפתח פנייה חדשה.', 'If the problem is still there, write here what the situation is, and we will open a new request.'],
   // who is in charge
   ['👷 {*}:', '👷 {1}:'],
   ['☎️ טלפון משרדי: {*}', '☎️ Office phone: {1}'],

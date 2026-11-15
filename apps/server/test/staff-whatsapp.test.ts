@@ -156,4 +156,16 @@ describe('Betty for managers on WhatsApp', () => {
     expect(await say('9725000003@s.whatsapp.net', 'מי ממונה בטיחות ליזר')).toBe('');            // a person answered a moment ago: quiet
     expect(await say('9725000004@s.whatsapp.net', 'שלום')).not.toContain('👷');                 // other messages: nothing new
   });
+
+  it('"מה עם הדיווח שלי?" after the inquiry was closed: its number, dates and who handled it; an open one is answered as before', async () => {
+    const ext = '9725000003@s.whatsapp.net';                                          // with Yoni
+    const c = (await db.query(`SELECT c.id FROM conversations c JOIN contacts ct ON ct.id = c.contact_id WHERE ct.external_id = $1`, [ext])).rows[0].id;
+    await db.query(`UPDATE conversations SET status = 'closed' WHERE id = $1`, [c]);
+    await db.query(`UPDATE cases SET closed_at = now() - interval '1 day', close_kind = 'staff', closed_by = $2 WHERE conversation_id = $1 AND closed_at IS NULL`, [c, ids['yoni@t.io']]);
+    const a = await say(ext, 'מה עם הדיווח שלי מאתמול?');
+    expect(a).toMatch(/הפנייה האחרונה שלך \(מספר \d+, מ-[\d.]+\) טופלה ונסגרה על ידי יוני ב-[\d.]+ ✅/);
+    expect(a).toContain('אם הבעיה עדיין קיימת');
+    // an inquiry still open (with Dana) is answered with where it stands
+    expect(await say('9725000001@s.whatsapp.net', 'מה עם הדיווח שלי?')).not.toContain('הפנייה האחרונה שלך');
+  });
 });

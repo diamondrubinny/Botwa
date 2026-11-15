@@ -39,7 +39,7 @@ import { loadPersona } from '../routes/branding.js';
 import { saveUsername } from './username-store.js';
 import { isSensitive, pickGif, type GifMoment } from '../bot-gifs.js';
 import { isEmergency } from '../emergency.js';
-import { isWaitingQuestion } from '../waiting.js';
+import { isPastReportQuestion, isWaitingQuestion } from '../waiting.js';
 import { officerReply, officerUserFor } from '../safety/whoIs.js';
 import { comfortText, detectDistress, stillHereText, type Distress } from '../empathy.js';
 import { detectLang, withDirectionMarks, type Lang } from '../i18n/lang.js';
@@ -436,12 +436,15 @@ export class ChannelManager {
             return;
           }
           // "מתי חוזרים אליי?" while the inquiry is with the team: where it stands, instead of silence (the team is notified as usual)
-          const waited = !!r.messageId && !stop && !m.media && !isCommentContact(m.externalContactId) && isWaitingQuestion(m.text)
+          // "מה עם הדיווח שלי מאתמול?" about an inquiry that was closed (this message only reopened the conversation): what became of it
+          const told = !!r.messageId && !stop && !m.media && !isCommentContact(m.externalContactId) && (isPastReportQuestion(m.text) || isWaitingQuestion(m.text))
+            && await this.pastReportStatus(channelId, r.conversationId, m.externalContactId, isPastReportQuestion(m.text)).catch(() => false);
+          const waited = !told && !!r.messageId && !stop && !m.media && !isCommentContact(m.externalContactId) && isWaitingQuestion(m.text)
             && await this.waitingStatus(channelId, r.conversationId, m.externalContactId).catch(() => false);
           // "מי הממונה על לייזרים?" while the inquiry is with the team: the officer's public details, unless a person is answering now
-          const informed = !waited && !!r.messageId && !stop && !m.media && !isCommentContact(m.externalContactId)
+          const informed = !waited && !told && !!r.messageId && !stop && !m.media && !isCommentContact(m.externalContactId)
             && await this.officerWhileWaiting(channelId, r.conversationId, m.externalContactId, m.text).catch(() => false);
-          if (waited || informed) {
+          if (waited || informed || told) {
             // nothing more: no bot and no away notice for this message
           } else if (r.messageId && stop) {
             // customer said stop: no bot, no away reply - a person decides what happens next
@@ -1278,6 +1281,32 @@ export class ChannelManager {
     const textL = await this.say(convId, text);
     const sent = await this.sendText(channelId, ext, textL, { background: true });
     const ins = await this.db.query(`INSERT INTO messages (conversation_id, direction, body, external_id, auto, automation) VALUES ($1,'out',$2,$3,true,'waiting_status') ON CONFLICT DO NOTHING RETURNING id`, [convId, textL, sent.externalMessageId ?? null]);
+    if (ins.rows[0]) { this.notifyMessage(channelId, convId, ins.rows[0].id); this.hookMessage('message.sent', convId, ins.rows[0].id); }
+    return true;
+  }
+
+  /**
+   * The customer asks about an earlier inquiry that was closed (their message only reopened the conversation): its number, when it
+   * was opened and closed, and by whom; if the problem is still there, writing about it goes on in the new one. False when there is
+   * nothing to tell, or an inquiry is still open (waitingStatus answers that).
+   */
+  async pastReportStatus(channelId: string, convId: string, ext: string, aboutReport = true): Promise<boolean> {
+    // an inquiry still open (other than one this very message opened) is answered by waitingStatus
+    const open = (await this.db.query(`SELECT opened_at FROM cases WHERE conversation_id = $1 AND closed_at IS NULL ORDER BY opened_at DESC LIMIT 1`, [convId])).rows[0] as { opened_at: Date } | undefined;
+    if (open && Date.now() - new Date(open.opened_at).getTime() > 3 * 60_000) return false;
+    const k = (await this.db.query(
+      `SELECT k.number, k.opened_at, k.closed_at, k.close_kind, COALESCE(u.name_he, u.name) AS who
+         FROM cases k LEFT JOIN users u ON u.id = COALESCE(k.closed_by, k.assigned_to)
+        WHERE k.conversation_id = $1 AND k.closed_at IS NOT NULL ORDER BY k.closed_at DESC LIMIT 1`, [convId])).rows[0] as { number: number; opened_at: Date; closed_at: Date; close_kind: string | null; who: string | null } | undefined;
+    if (!k) return false;
+    // "מתי חוזרים אליי?" / "?" (not about a report as such): only when that inquiry closed in the last three days
+    if (!aboutReport && Date.now() - new Date(k.closed_at).getTime() > 3 * 86_400_000) return false;
+    const d = (x: Date) => new Date(x).toLocaleDateString('he-IL', { timeZone: 'Asia/Jerusalem', day: 'numeric', month: 'numeric' });
+    const by = k.close_kind === 'auto' ? 'נסגרה אוטומטית' : k.who ? `טופלה ונסגרה על ידי ${k.who}` : 'טופלה ונסגרה';
+    const body = `הפנייה האחרונה שלך (מספר ${k.number}, מ-${d(k.opened_at)}) ${by} ב-${d(k.closed_at)} ✅\nאם הבעיה עדיין קיימת, כתבו כאן מה המצב, ונפתח פנייה חדשה.`;
+    const bodyL = await this.say(convId, body);
+    const sent = await this.sendText(channelId, ext, bodyL, { background: true });
+    const ins = await this.db.query(`INSERT INTO messages (conversation_id, direction, body, external_id, auto, automation) VALUES ($1,'out',$2,$3,true,'waiting_status') ON CONFLICT DO NOTHING RETURNING id`, [convId, bodyL, sent.externalMessageId ?? null]);
     if (ins.rows[0]) { this.notifyMessage(channelId, convId, ins.rows[0].id); this.hookMessage('message.sent', convId, ins.rows[0].id); }
     return true;
   }
