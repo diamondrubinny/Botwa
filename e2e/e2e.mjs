@@ -51,7 +51,7 @@ await axe('account');
 await page.waitForSelector('#sw-h');
 await page.click('section[aria-labelledby="sw-h"] button:has-text("יצירת קוד קישור")');
 await page.waitForSelector('section[aria-labelledby="sw-h"] [role=status] strong');
-check('Betty for managers: a linking code BOTWA-123456 is shown', /^BOTWA-\d{6}$/.test((await page.textContent('section[aria-labelledby="sw-h"] [role=status] strong')).trim()));
+check('Betty for managers: a linking code BOTWA-12345678 is shown', /^BOTWA-\d{8}$/.test((await page.textContent('section[aria-labelledby="sw-h"] [role=status] strong')).trim()));
 await axe('account: Betty for managers on WhatsApp');
 // sign-out is always reachable: on screen at the bottom of the side menu (even a short window), and on the account page
 await page.setViewportSize({ width: 1200, height: 560 });
