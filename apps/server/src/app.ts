@@ -13,6 +13,7 @@ import { formRoutes } from './routes/forms.js';
 import { smsRoutes } from './routes/sms.js';
 import { staffLinkRoutes } from './routes/staffLinks.js';
 import { translationRoutes } from './routes/translations.js';
+import { incidentRoutes } from './routes/incident.js';
 import { searchRoutes } from './routes/search.js';
 import { userRoutes } from './routes/users.js';
 import { channelRoutes } from './routes/channels.js';
@@ -168,6 +169,7 @@ export async function buildApp(cfg: Config, db: Db, mgr: ChannelManager, media: 
   scheduledRoutes(app, db);
   settingsRoutes(app, db, mgr);
   translationRoutes(app, db);
+  incidentRoutes(app, db, cfg);
   backupRoutes(app, db, cfg);
   const push = new PushService(db, cfg);
   await push.init();

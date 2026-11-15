@@ -144,4 +144,22 @@ describe('a conversation in English', () => {
     const he = await say('972500007777@s.whatsapp.net', 'איך מפנים פסולת כימית?');
     expect(he).toContain('ממלאים את טופס פינוי הפסולת');
   });
+
+  it('a wide emergency: everyone who writes gets the status message once (English when given), tagged; a personal emergency still first; off in one click', async () => {
+    const put = (body: object) => app.inject({ method: 'PUT', url: '/incident', headers: { cookie, origin: ORIGIN }, payload: body });
+    expect((await put({ active: true, text: 'עדכון: אזעקה בקמפוס, היכנסו למרחב מוגן ופעלו לפי ההנחיות.', textEn: 'Update: an alarm on campus. Go to a protected space and follow the instructions.' })).statusCode).toBe(200);
+    const he = '972500008881@s.whatsapp.net';
+    expect(await say(he, 'שלום, מה קורה?')).toContain('עדכון: אזעקה בקמפוס');
+    const c = await conv(he);
+    expect(await tags(c.id)).toContain('אירוע חירום');
+    expect(await say(he, 'מה שלומך?')).not.toContain('אזעקה');                       // once per conversation
+    expect(await say('972500008882@s.whatsapp.net', 'hello, what is going on?')).toContain('Update: an alarm on campus');
+    expect(await say('972500008883@s.whatsapp.net', 'מצב חירום, יש פצוע')).toContain('מד"א 101');   // a personal emergency first
+    const st = (await app.inject({ method: 'GET', url: '/incident', headers: { cookie, origin: ORIGIN } })).json();
+    expect(st).toMatchObject({ active: true });
+    expect(st.answered).toBeGreaterThanOrEqual(2);
+    expect((await put({ active: false, text: st.text, textEn: st.textEn })).statusCode).toBe(200);
+    expect(await say('972500008884@s.whatsapp.net', 'שלום')).not.toContain('אזעקה');
+    expect((await db.query(`SELECT count(*)::int AS n FROM audit_log WHERE action IN ('incident.start', 'incident.end')`)).rows[0].n).toBe(2);
+  });
 });

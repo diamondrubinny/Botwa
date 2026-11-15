@@ -384,6 +384,16 @@ await axe('knowledge base: data quality');
 await page.click('aside.sidebar nav >> text=בוט');
 await page.waitForSelector('legend:has-text("מענה ממאגר הידע")');
 await axe('bot page with knowledge base settings');
+// a wide emergency: switched on from the bot page, every screen shows the banner, switched off from the banner
+page.once('dialog', (d) => d.accept());
+await page.click('button:has-text("הפעלת מצב אירוע חירום")');
+await page.waitForSelector('.incident-banner', { timeout: 35000 }).catch(async () => { await page.reload(); await page.waitForSelector('.incident-banner'); });
+check('wide emergency: the banner shows on every screen', await page.isVisible('.incident-banner'));
+await axe('wide emergency banner');
+page.once('dialog', (d) => d.accept());
+await page.click('.incident-banner button:has-text("סיום האירוע")');
+await page.waitForSelector('.incident-banner', { state: 'detached' });
+check('wide emergency: switched off from the banner', !(await page.isVisible('.incident-banner')));
 // flow chart editor: create from the menu, edit, save, simulate, accessibility
 await page.click('aside.sidebar nav >> text=תרשים זרימה');
 await page.waitForSelector('h1:has-text("תרשים זרימה של הבוט")');

@@ -916,3 +916,4 @@ dialog.gsearch { width: min(640px, calc(100vw - 1.5rem)); max-width: none; margi
 @media (prefers-reduced-motion: no-preference) { :root:not([data-motion='off']) .spot { animation: spot 1.2s var(--ease) 2; } @keyframes spot { 50% { outline-color: transparent; } } }
 .gs-empty, .gs-foot { color: var(--muted); }
 .en-field { border-inline-start: 3px solid var(--border); padding-inline-start: .6rem; }
+.incident-banner { background: color-mix(in srgb, var(--danger, #b42318) 14%, var(--surface)); border: 2px solid var(--danger, #b42318); color: var(--text); }

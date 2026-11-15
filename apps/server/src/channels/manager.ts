@@ -40,6 +40,7 @@ import { saveUsername } from './username-store.js';
 import { isSensitive, pickGif, type GifMoment } from '../bot-gifs.js';
 import { isEmergency } from '../emergency.js';
 import { isPastReportQuestion, isWaitingQuestion } from '../waiting.js';
+import { loadIncident } from '../incident.js';
 import { officerReply, officerUserFor } from '../safety/whoIs.js';
 import { comfortText, detectDistress, stillHereText, type Distress } from '../empathy.js';
 import { detectLang, withDirectionMarks, type Lang } from '../i18n/lang.js';
@@ -396,6 +397,13 @@ export class ChannelManager {
           // an emergency: the numbers to call at once and an urgent hand-over, before anything else (no greeting, menu or GIF)
           if (r.messageId && !stop && !m.media && bot?.emergency.enabled && !isCommentContact(m.externalContactId) && isEmergency(m.text)) {
             await this.emergency(channelId, r.conversationId, m.externalContactId, r.messageId, bot.emergency.text).catch(() => undefined);
+            this.emit({ channelId, type: 'message', conversationId: r.conversationId, messageId: r.messageId });
+            this.onInbound?.(r.conversationId);
+            this.hookMessage('message.received', r.conversationId, r.messageId);
+            return;
+          }
+          // a wide emergency is on: the unit's status message, once per conversation for this incident
+          if (r.messageId && !stop && !isCommentContact(m.externalContactId) && await this.incidentReply(channelId, r.conversationId, m.externalContactId).catch(() => false)) {
             this.emit({ channelId, type: 'message', conversationId: r.conversationId, messageId: r.messageId });
             this.onInbound?.(r.conversationId);
             this.hookMessage('message.received', r.conversationId, r.messageId);
@@ -1282,6 +1290,21 @@ export class ChannelManager {
     const sent = await this.sendText(channelId, ext, textL, { background: true });
     const ins = await this.db.query(`INSERT INTO messages (conversation_id, direction, body, external_id, auto, automation) VALUES ($1,'out',$2,$3,true,'waiting_status') ON CONFLICT DO NOTHING RETURNING id`, [convId, textL, sent.externalMessageId ?? null]);
     if (ins.rows[0]) { this.notifyMessage(channelId, convId, ins.rows[0].id); this.hookMessage('message.sent', convId, ins.rows[0].id); }
+    return true;
+  }
+
+  /** A wide emergency is on and this conversation has not had its status message yet: send it (English when given) and tag it. */
+  async incidentReply(channelId: string, convId: string, ext: string): Promise<boolean> {
+    const i = await loadIncident(this.db);
+    if (!i.active || !i.startedAt) return false;
+    const already = (await this.db.query(`SELECT 1 FROM messages WHERE conversation_id = $1 AND automation = 'incident' AND created_at >= $2 LIMIT 1`, [convId, i.startedAt])).rowCount;
+    if (already) return false;
+    const body = (await this.langOf(convId)) === 'en' && i.textEn ? i.textEn : i.text;
+    const sent = await this.sendText(channelId, ext, body, { background: true }).catch(() => ({} as { externalMessageId?: string }));
+    const ins = await this.db.query(`INSERT INTO messages (conversation_id, direction, body, external_id, auto, automation) VALUES ($1,'out',$2,$3,true,'incident') ON CONFLICT DO NOTHING RETURNING id`, [convId, body, sent.externalMessageId ?? null]);
+    if (ins.rows[0]) { this.notifyMessage(channelId, convId, ins.rows[0].id); this.hookMessage('message.sent', convId, ins.rows[0].id); }
+    await this.db.query(`INSERT INTO tags (name) SELECT 'אירוע חירום' WHERE NOT EXISTS (SELECT 1 FROM tags WHERE lower(name) = 'אירוע חירום')`).catch(() => undefined);
+    await this.db.query(`INSERT INTO conversation_tags (conversation_id, tag_id) SELECT $1, id FROM tags WHERE lower(name) = 'אירוע חירום' ON CONFLICT DO NOTHING`, [convId]).catch(() => undefined);
     return true;
   }
 

@@ -8,6 +8,7 @@ import { Icon } from './components/Icon';
 import { ThemeMenu } from './components/ThemeMenu';
 import { useHashRoute, useHashSpot, usePoll } from './hooks';
 import { GlobalSearch } from './components/GlobalSearch';
+import { IncidentBanner } from './components/Incident';
 import { LiveProvider, resubscribeIfEnabled, unsubscribePush, useLive } from './live';
 import { Account } from './pages/Account';
 import { Audit } from './pages/Audit';
@@ -181,6 +182,7 @@ function Shell({ me, reloadMe, onLogout }: { me: Me; reloadMe: () => Promise<voi
         </header>
 
         <main id="main">
+          <IncidentBanner me={me} />
           {me.passwordChangeRequired && <p className="banner" role="alert">מנהל המערכת איפס את הסיסמה שלכם. בחרו עכשיו סיסמה חדשה משלכם (הסיסמה הזמנית היא "הסיסמה הנוכחית") כדי להמשיך.</p>}
           {me.mfaEnrollmentRequired && <p className="banner" role="alert">התפקיד שלכם מחייב אימות דו-שלבי או Passkey. הפעילו אחד מהם כדי להמשיך.</p>}
           {page === 'inbox' && <Inbox me={me} />}

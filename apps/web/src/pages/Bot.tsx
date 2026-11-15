@@ -1,5 +1,6 @@
 import { BotPersona } from '../components/BotPersona';
 import { Translations } from '../components/Translations';
+import { IncidentControl } from '../components/Incident';
 import { AnswerMode } from '../components/AnswerMode';
 import { Loading } from '../components/Loading';
 import { PageTitle } from '../components/Illustration';
@@ -294,6 +295,7 @@ export function Bot({ me }: { me: Me }) {
         {canEdit && <button className="primary" type="submit">שמירה</button>}
         <p role="status" className={msg?.ok ? 'ok' : 'error'}>{msg?.text}</p>
       </form>
+      <IncidentControl canEdit={canEdit} />
       <Translations canEdit={canEdit} />
     </>
   );
