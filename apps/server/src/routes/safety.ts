@@ -9,7 +9,7 @@ import { sanitizeFileName } from '../media/validate.js';
 import { boardCategories, ensureBoardCategories } from '../safety/categories.js';
 import { importWorkbook, reapplyCategories } from '../safety/importer.js';
 import { areasTemplate, importAreas } from '../safety/areasImport.js';
-import { cleanTopics, importOfficers, listOfficers, normalizePhone, officersTemplate } from '../safety/officers.js';
+import { cleanOfficePhone, cleanTopics, importOfficers, listOfficers, normalizePhone, officersTemplate } from '../safety/officers.js';
 import { TEMPLATE_TAGS } from '../flow/safetyTemplate.js';
 import { hashPassword, PASSWORD_MIN } from '../password.js';
 import { mayUseRole, permissionsOfRole } from './users.js';
@@ -213,12 +213,19 @@ export function safetyRoutes(app: FastifyInstance, db: Db, kb: KnowledgeBase) {
     topics: z.array(z.string().trim().min(1).max(60)).max(30).default([]),
     notes: z.string().trim().max(300).default(''),
     active: z.boolean().default(true),
+    officePhone: z.string().trim().max(40).nullable().default(null),
+    /** Betty may give this officer's details to customers who ask */
+    public: z.boolean().default(true),
+    /** the WhatsApp number (often a personal mobile) may be given too */
+    showWhatsapp: z.boolean().default(false),
   });
-  async function officerFields(b: z.infer<typeof officerBody>): Promise<{ phone: string | null } | { error: string }> {
+  async function officerFields(b: z.infer<typeof officerBody>): Promise<{ phone: string | null; officePhone: string | null } | { error: string }> {
     let phone: string | null = null;
     if (b.phone) { phone = normalizePhone(b.phone); if (!phone) return { error: 'bad_phone' }; }
+    const officePhone = cleanOfficePhone(b.officePhone);
+    if (officePhone === false) return { error: 'bad_office_phone' };
     if (b.userId && !(await db.query('SELECT 1 FROM users WHERE id = $1 AND active', [b.userId])).rowCount) return { error: 'unknown_user' };
-    return { phone };
+    return { phone, officePhone };
   }
   async function setTopics(id: string, topics: string[]) {
     await db.query('DELETE FROM officer_topics WHERE officer_id = $1', [id]);
@@ -313,7 +320,7 @@ export function safetyRoutes(app: FastifyInstance, db: Db, kb: KnowledgeBase) {
     const f = await officerFields(b.data);
     if ('error' in f) return reply.code(400).send({ error: f.error });
     if ((await db.query('SELECT count(*)::int AS n FROM officers')).rows[0].n >= 300) return reply.code(409).send({ error: 'too_many' });
-    const r = await db.query(`INSERT INTO officers (name, email, phone, user_id, notes, active, sort) VALUES ($1,$2,$3,$4,$5,$6, COALESCE((SELECT max(sort) + 1 FROM officers), 0)) RETURNING id`, [b.data.name, b.data.email, f.phone, b.data.userId, b.data.notes, b.data.active]);
+    const r = await db.query(`INSERT INTO officers (name, email, phone, user_id, notes, active, office_phone, public, show_whatsapp, sort) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9, COALESCE((SELECT max(sort) + 1 FROM officers), 0)) RETURNING id`, [b.data.name, b.data.email, f.phone, b.data.userId, b.data.notes, b.data.active, f.officePhone, b.data.public, b.data.showWhatsapp]);
     await setTopics(r.rows[0].id, b.data.topics);
     await audit(db, { actorId: req.user!.id, action: 'safety.officer_create', target: r.rows[0].id, ip: req.ip });
     return reply.code(201).send({ id: r.rows[0].id });
@@ -325,7 +332,7 @@ export function safetyRoutes(app: FastifyInstance, db: Db, kb: KnowledgeBase) {
     if (!p.success || !b.success) return reply.code(400).send({ error: 'bad_request' });
     const f = await officerFields(b.data);
     if ('error' in f) return reply.code(400).send({ error: f.error });
-    const r = await db.query('UPDATE officers SET name = $2, email = $3, phone = $4, user_id = $5, notes = $6, active = $7 WHERE id = $1', [p.data.id, b.data.name, b.data.email, f.phone, b.data.userId, b.data.notes, b.data.active]);
+    const r = await db.query('UPDATE officers SET name = $2, email = $3, phone = $4, user_id = $5, notes = $6, active = $7, office_phone = $8, public = $9, show_whatsapp = $10 WHERE id = $1', [p.data.id, b.data.name, b.data.email, f.phone, b.data.userId, b.data.notes, b.data.active, f.officePhone, b.data.public, b.data.showWhatsapp]);
     if (!r.rowCount) return reply.code(404).send({ error: 'not_found' });
     await setTopics(p.data.id, b.data.topics);
     await audit(db, { actorId: req.user!.id, action: 'safety.officer_update', target: p.data.id, ip: req.ip });

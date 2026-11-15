@@ -302,7 +302,7 @@ function Areas({ canEdit }: { canEdit: boolean }) {
   );
 }
 
-interface OfficerRow { id: string; name: string; email: string | null; phone: string | null; userId: string | null; userName: string | null; userActive: boolean; notes: string; active: boolean; topics: string[] }
+interface OfficerRow { id: string; name: string; email: string | null; phone: string | null; officePhone: string | null; public: boolean; showWhatsapp: boolean; userId: string | null; userName: string | null; userActive: boolean; notes: string; active: boolean; topics: string[] }
 
 function Officers({ canEdit, me }: { canEdit: boolean; me: Me | null }) {
   const [list, setList] = useState<OfficerRow[]>([]);
@@ -310,18 +310,18 @@ function Officers({ canEdit, me }: { canEdit: boolean; me: Me | null }) {
   const [topics, setTopics] = useState<string[]>([]);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [editId, setEditId] = useState<string | null>(null);   // '' = new
-  const [f, setF] = useState({ name: '', email: '', phone: '', userId: '', topics: '', notes: '', active: true });
+  const [f, setF] = useState({ name: '', email: '', phone: '', officePhone: '', userId: '', topics: '', notes: '', active: true, public: true, showWhatsapp: false });
   const load = async () => {
     setList(await api<OfficerRow[]>('GET', '/safety/officers').catch(() => []));
     setUsers((await api<{ users: { id: string; name: string; username?: string }[] }>('GET', '/flow/refs').catch(() => ({ users: [] }))).users);
     setTopics(await api<string[]>('GET', '/safety/officer-topics').catch(() => []));
   };
   useEffect(() => { void load(); }, []);
-  const start = (o?: OfficerRow) => { setEditId(o?.id ?? ''); setF({ name: o?.name ?? '', email: o?.email ?? '', phone: o?.phone ?? '', userId: o?.userId ?? '', topics: o?.topics.join('\n') ?? '', notes: o?.notes ?? '', active: o?.active ?? true }); setMsg(null); };
+  const start = (o?: OfficerRow) => { setEditId(o?.id ?? ''); setF({ name: o?.name ?? '', email: o?.email ?? '', phone: o?.phone ?? '', officePhone: o?.officePhone ?? '', public: o?.public ?? true, showWhatsapp: o?.showWhatsapp ?? false, userId: o?.userId ?? '', topics: o?.topics.join('\n') ?? '', notes: o?.notes ?? '', active: o?.active ?? true }); setMsg(null); };
   const addTopic = (t: string) => setF((x) => (x.topics.split('\n').map((v) => v.trim()).includes(t) ? x : { ...x, topics: x.topics.trim() ? `${x.topics.trim()}\n${t}` : t }));
   async function submit(e: FormEvent) {
     e.preventDefault(); setMsg(null);
-    const body = { name: f.name.trim(), email: f.email.trim(), phone: f.phone.trim(), userId: f.userId || null, topics: f.topics.split(/[\n,;]/).map((x) => x.trim()).filter(Boolean), notes: f.notes.trim(), active: f.active };
+    const body = { name: f.name.trim(), email: f.email.trim(), phone: f.phone.trim(), officePhone: f.officePhone.trim() || null, public: f.public, showWhatsapp: f.showWhatsapp, userId: f.userId || null, topics: f.topics.split(/[\n,;]/).map((x) => x.trim()).filter(Boolean), notes: f.notes.trim(), active: f.active };
     try {
       if (editId) await api('PUT', `/safety/officers/${editId}`, body); else await api('POST', '/safety/officers', body);
       setEditId(null); setMsg({ ok: true, text: 'נשמר.' }); await load();
@@ -336,7 +336,7 @@ function Officers({ canEdit, me }: { canEdit: boolean; me: Me | null }) {
       const res = await fetch('/safety/officers/import', { method: 'POST', credentials: 'same-origin', body: fd });
       const j = (await res.json().catch(() => ({}))) as { error?: string; created?: number; updated?: number; unlinked?: number; skipped?: { row: number; reason: string }[] };
       if (!res.ok) throw new ApiError(res.status, j.error ?? 'error');
-      const why: Record<string, string> = { missing_name: 'חסר שם', bad_phone: 'מספר ווצאפ לא תקין', bad_email: 'אימייל לא תקין' };
+      const why: Record<string, string> = { missing_name: 'חסר שם', bad_phone: 'מספר ווצאפ לא תקין', bad_office_phone: 'טלפון משרדי לא תקין', bad_email: 'אימייל לא תקין' };
       const sk = j.skipped ?? [];
       setMsg({ ok: sk.length === 0 && !j.unlinked, text: `יובא: ${j.created} חדשים, ${j.updated} עודכנו.${j.unlinked ? ` ל-${j.unlinked} לא נמצא חשבון פעיל לפי האימייל שצוין, והם נשמרו בלי חשבון.` : ''}${sk.length ? ` דולגו ${sk.length} שורות: ${sk.slice(0, 8).map((x) => `שורה ${x.row} (${why[x.reason] ?? x.reason})`).join(', ')}.` : ''}` });
       (e.target as HTMLFormElement).reset(); await load();
@@ -349,11 +349,12 @@ function Officers({ canEdit, me }: { canEdit: boolean; me: Me | null }) {
       {list.length === 0 ? <p className="empty">עוד לא הוגדרו ממונים.</p> : (
         <table>
           <caption className="sr-only">ממונים ונושאים</caption>
-          <thead><tr><th scope="col">שם</th><th scope="col">אימייל</th><th scope="col">ווצאפ</th><th scope="col">חשבון במערכת</th><th scope="col">נושאים</th>{canEdit && <th scope="col">פעולות</th>}</tr></thead>
+          <thead><tr><th scope="col">שם</th><th scope="col">אימייל</th><th scope="col">טלפון משרדי</th><th scope="col">ווצאפ</th><th scope="col">חשבון במערכת</th><th scope="col">נושאים</th>{canEdit && <th scope="col">פעולות</th>}</tr></thead>
           <tbody>{list.map((o) => (
             <tr key={o.id}>
               <th scope="row">{o.name}{!o.active && <span className="badge stopped">לא פעיל</span>}</th>
               <td dir="ltr">{o.email ?? ''}</td>
+              <td dir="ltr">{o.officePhone ?? ''}{!o.public && <span className="badge stopped" dir="rtl"> לא מוצג ללקוחות</span>}</td>
               <td dir="ltr">{o.phone ? <a href={`https://wa.me/${o.phone}`} target="_blank" rel="noopener noreferrer">{o.phone}<span className="sr-only"> (נפתח בלשונית חדשה)</span></a> : ''}</td>
               <td>{o.userId ? `${o.userName ?? ''}${o.userActive ? '' : ' (לא פעיל)'}` : 'אין'}</td>
               <td>{o.topics.join(', ')}</td>
@@ -368,6 +369,7 @@ function Officers({ canEdit, me }: { canEdit: boolean; me: Me | null }) {
           <div className="field"><label htmlFor="of-n">שם</label><input id="of-n" required maxLength={100} value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} /></div>
           <div className="row">
             <div className="field"><label htmlFor="of-e">אימייל</label><input id="of-e" type="email" dir="ltr" maxLength={254} value={f.email} onChange={(e) => setF({ ...f, email: e.target.value })} /></div>
+            <div className="field"><label htmlFor="of-op">טלפון משרדי</label><input id="of-op" dir="ltr" inputMode="tel" maxLength={40} placeholder="04-829-0000 שלוחה 12" value={f.officePhone} onChange={(e) => setF({ ...f, officePhone: e.target.value })} /></div>
             <div className="field"><label htmlFor="of-p">ווצאפ</label><input id="of-p" dir="ltr" inputMode="tel" maxLength={30} placeholder="050-123-4567" value={f.phone} onChange={(e) => setF({ ...f, phone: e.target.value })} /></div>
           </div>
           <div className="field"><label htmlFor="of-u">חשבון במערכת (אופציונלי: השיחות ישויכו אליו)</label>
@@ -376,6 +378,10 @@ function Officers({ canEdit, me }: { canEdit: boolean; me: Me | null }) {
             <textarea id="of-t" required rows={4} value={f.topics} onChange={(e) => setF({ ...f, topics: e.target.value })} aria-describedby="of-t-h" />
             <p id="of-t-h" className="hint">אפשר להקליד נושא חדש, או ללחוץ על אחד מהמוכרים כדי להוסיף אותו:</p>
             <div className="chips" role="group" aria-label="נושאים מוכרים">{topics.slice(0, 40).map((t) => <button type="button" key={t} className="chip" onClick={() => addTopic(t)}>{t}</button>)}</div></div>
+          <fieldset><legend>מה בטי עונה ללקוחות ששואלים "מי הממונה על…?"</legend>
+            <label style={{ fontWeight: 400, display: 'block' }}><input type="checkbox" style={{ width: 'auto', minHeight: 'auto' }} checked={f.public} onChange={(e) => setF({ ...f, public: e.target.checked })} /> להציג את הממונה: שם, טלפון משרדי ואימייל</label>
+            <label style={{ fontWeight: 400, display: 'block' }}><input type="checkbox" style={{ width: 'auto', minHeight: 'auto' }} disabled={!f.public} checked={f.showWhatsapp} onChange={(e) => setF({ ...f, showWhatsapp: e.target.checked })} /> להציג גם את מספר הווצאפ (רק אם הממונה הסכים: זה בדרך כלל נייד אישי)</label>
+          </fieldset>
           <div className="field"><label htmlFor="of-no">הערות (פנימי)</label><input id="of-no" maxLength={300} value={f.notes} onChange={(e) => setF({ ...f, notes: e.target.value })} /></div>
           <div className="field"><label><input type="checkbox" style={{ width: 'auto', minHeight: 'auto' }} checked={f.active} onChange={(e) => setF({ ...f, active: e.target.checked })} /> פעיל (ממונה לא פעיל לא מקבל שיחות ולא מוצג ללקוחות)</label></div>
           <div className="row"><button className="primary" type="submit">שמירה</button><button type="button" onClick={() => setEditId(null)}>ביטול</button></div>

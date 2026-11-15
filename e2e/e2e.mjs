@@ -443,11 +443,12 @@ check('safety board: a responsibility area is added', true);
 await axe('safety board: management');
 await page.evaluate(() => document.querySelectorAll('details.card').forEach((d) => { d.open = true; }));
 await page.click('button:has-text("הוספת ממונה")');
-await page.fill('#of-n', 'ממונה לדוגמה'); await page.fill('#of-e', 'officer@example.org'); await page.fill('#of-p', '050-123-4567');
+await page.fill('#of-n', 'ממונה לדוגמה'); await page.fill('#of-e', 'officer@example.org'); await page.fill('#of-p', '050-123-4567'); await page.fill('#of-op', '04-829-0000 שלוחה 12');
 await page.click('#of-t ~ .chips >> text=לייזרים');
 await axe('safety board: officers form');
 await page.click('form:has(#of-n) button:has-text("שמירה")');
 await page.waitForSelector('th:has-text("ממונה לדוגמה")');
+check('officers: the office phone is saved and shown', (await page.textContent('tr:has(th:has-text("ממונה לדוגמה"))')).includes('04-829-0000 שלוחה 12'));
 // one click: an account for every officer without one, same first password for all
 await page.click('button:has-text("יצירת חשבונות לממונים בלי חשבון")');
 await page.waitForSelector('section[aria-labelledby="oa-h"] li:has-text("officer@example.org")');

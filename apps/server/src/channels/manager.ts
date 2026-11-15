@@ -39,6 +39,7 @@ import { saveUsername } from './username-store.js';
 import { isSensitive, pickGif, type GifMoment } from '../bot-gifs.js';
 import { isEmergency } from '../emergency.js';
 import { isWaitingQuestion } from '../waiting.js';
+import { officerReply } from '../safety/whoIs.js';
 import { hoursSummary } from '../canned.js';
 import { staffMessage } from '../staff/assistant.js';
 import { detect, sanitizeFileName } from '../media/validate.js';
@@ -922,7 +923,7 @@ export class ChannelManager {
     text = withoutBotName(text, persona.name);
     rawText = withoutBotName(rawText, persona.name);
     // "מי את?" / "את בוט?" / "מה שלומך?": the bot answers as itself, then picks up the question it was waiting for
-    const own = identityReply(text, persona) ?? smallTalkReply(text);
+    const own = identityReply(text, persona) ?? smallTalkReply(text) ?? await officerReply(this.db, text).catch(() => null);
     if (own) {
       const st = c.flow_state as FlowState | null;
       const flow = bot.mode === 'flow' ? await loadFlow(this.db) : null;

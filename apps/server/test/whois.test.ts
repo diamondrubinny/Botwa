@@ -1,0 +1,70 @@
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { createDb } from '../src/db.js';
+import { TEMPLATE_TAGS } from '../src/flow/safetyTemplate.js';
+import { migrate } from '../src/migrate.js';
+import { cleanOfficePhone } from '../src/safety/officers.js';
+import { officerReply, topicsIn } from '../src/safety/whoIs.js';
+
+describe('which topic a question names', () => {
+  const topics = [...TEMPLATE_TAGS];
+  it('fire, gases, lasers, chemicals, height… in the customers\' own words', () => {
+    expect(topicsIn('מי הממונה על בטיחות אש?', topics)).toEqual(expect.arrayContaining(['גילוי אש', 'מתזים']));
+    expect(topicsIn('מה הטלפון של ממונה הגזים', topics)).toEqual(expect.arrayContaining(['גזים דחוסים', 'גפ״ם']));
+    expect(topicsIn('למי פונים בנושא לייזרים?', topics)).toEqual(['לייזרים']);
+    expect(topicsIn('מי אחראי על חומרים מסוכנים', topics)).toEqual(expect.arrayContaining(['חומ״ס']));
+    expect(topicsIn('מי הממונה על סולמות', topics)).toEqual(expect.arrayContaining(['סולמות']));
+    expect(topicsIn('ממונה מעליות', topics)).toEqual(['מעליות/מעלונים']);
+    expect(topicsIn('מי הממונה', topics)).toEqual([]);
+  });
+  it('an office phone as written, with an extension', () => {
+    expect(cleanOfficePhone('04-829-3000 שלוחה 12')).toBe('04-829-3000 שלוחה 12');
+    expect(cleanOfficePhone('+972 4 829 3000')).toBe('+972 4 829 3000');
+    expect(cleanOfficePhone('')).toBeNull();
+    expect(cleanOfficePhone('123')).toBe(false);
+    expect(cleanOfficePhone('<script>')).toBe(false);
+  });
+});
+
+describe('Betty answers who the officer is', () => {
+  const db = createDb(process.env.TEST_DATABASE_URL ?? 'postgres://postgres@localhost:5432/botwa_test');
+  beforeAll(async () => {
+    await db.query('DROP SCHEMA public CASCADE; CREATE SCHEMA public;');
+    await migrate(db);
+    const add = async (name: string, topics: string[], o: { office?: string; email?: string; phone?: string; wa?: boolean; pub?: boolean; active?: boolean } = {}) => {
+      const id = (await db.query('INSERT INTO officers (name, email, phone, office_phone, public, show_whatsapp, active) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id',
+        [name, o.email ?? null, o.phone ?? null, o.office ?? null, o.pub ?? true, o.wa ?? false, o.active ?? true])).rows[0].id;
+      for (const t of topics) await db.query('INSERT INTO officer_topics (officer_id, topic) VALUES ($1,$2)', [id, t]);
+    };
+    await add('יוסי אש', ['גילוי אש', 'מתזים'], { office: '04-829-1111', email: 'fire@uni.ac.il', phone: '972501111111' });
+    await add('רינה גז', ['גזים דחוסים'], { office: '04-829-2222', phone: '972502222222', wa: true });
+    await add('ממונה חסוי', ['לייזרים'], { office: '04-829-3333', pub: false });
+    await add('לא פעיל', ['חשמל'], { office: '04-829-4444', active: false });
+    await add('דנה בלי פרטים', ['אסבסט']);
+  });
+  afterAll(async () => { await db.end(); });
+
+  it('name, office phone and e-mail; WhatsApp only when allowed', async () => {
+    const fire = (await officerReply(db, 'מי הממונה על בטיחות אש ומה הטלפון המשרדי שלו?'))!;
+    expect(fire).toContain('יוסי אש');
+    expect(fire).toContain('☎️ טלפון משרדי: 04-829-1111');
+    expect(fire).toContain('fire@uni.ac.il');
+    expect(fire).not.toContain('972501111111');                     // a personal mobile is not given out
+    const gas = (await officerReply(db, 'מה הטלפון של ממונה הגזים?'))!;
+    expect(gas).toContain('רינה גז');
+    expect(gas).toContain('https://wa.me/972502222222');            // this officer allowed it
+    expect(await officerReply(db, 'מי אחראי על אסבסט')).toContain('דנה בלי פרטים (אפשר לכתוב כאן, ונעביר את הפנייה)');
+  });
+  it('hidden or inactive officers are not given; no topic: the topics there are; other messages: nothing', async () => {
+    expect(await officerReply(db, 'מי הממונה על לייזרים?')).toContain('על איזה נושא');      // the laser officer is hidden from customers
+    expect(await officerReply(db, 'מי הממונה על לייזרים?')).not.toContain('ממונה חסוי');
+    const elec = (await officerReply(db, 'טלפון של ממונה חשמל'))!;                       // the electricity officer is inactive
+    expect(elec).toContain('על איזה נושא');
+    expect(elec).not.toContain('חשמל');
+    const which = (await officerReply(db, 'מי הממונה?'))!;
+    expect(which).toContain('על איזה נושא? יש לנו ממונים בנושאים:');
+    expect(which).toContain('גילוי אש');
+    expect(which).not.toContain('לייזרים');
+    expect(await officerReply(db, 'מה שעות הפעילות?')).toBeNull();
+    expect(await officerReply(db, 'שלום')).toBeNull();
+  });
+});

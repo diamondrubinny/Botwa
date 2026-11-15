@@ -129,4 +129,13 @@ describe('Betty adds a GIF at pleasant moments', () => {
     expect(r.texts[0]).not.toContain('במה אפשר לעזור');
     expect((await db.query(`SELECT c.bot_state FROM conversations c JOIN contacts ct ON ct.id = c.contact_id WHERE ct.external_id = 'w1@s.whatsapp.net'`)).rows[0].bot_state).toBe(st);
   });
+  it('"מי הממונה על בטיחות אש?": Betty answers from the officers list (office phone, not the private WhatsApp)', async () => {
+    const id = (await db.query(`INSERT INTO officers (name, office_phone, phone) VALUES ('יוסי כהן', '04-829-1111', '972501111111') RETURNING id`)).rows[0].id;
+    await db.query(`INSERT INTO officer_topics (officer_id, topic) VALUES ($1, 'גילוי אש')`, [id]);
+    const r = await say('o1@s.whatsapp.net', 'מי הממונה על בטיחות אש?');
+    expect(r.texts).toHaveLength(1);
+    expect(r.texts[0]).toContain('יוסי כהן');
+    expect(r.texts[0]).toContain('04-829-1111');
+    expect(r.texts[0]).not.toContain('972501111111');
+  });
 });
