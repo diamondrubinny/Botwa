@@ -108,8 +108,11 @@ const DEFAULT_LABELS: Record<string, string> = { name: 'שם', phone: 'טלפו�
  * A menu as text. "0. נציג אנושי" only on menus that pick a topic: a menu that records an answer (status, faculty…) is part of
  * the identification, where "a person" is not one of the answers (writing "נציג" still hands over).
  */
+/** A message that only thanks or agrees: no reason to open the menu again. */
+const THANKS_ONLY = /^(תודה|תודה רבה|תודה לך|תודה רבה לך|תנקס|סבבה|אחלה|מעולה|יופי|מצוין|אוקיי|אוקי|ok|okay|thanks|thank you|thx|great|perfect|👍|🙏|❤️)[!. ]*$/i;
+export const FREE_TEXT_HINT = 'אפשר לבחור מספר, או לכתוב במילים במה מדובר.';
 const menuText = (n: Extract<FlowNode, { type: 'menu' }>, humanOption: boolean, humanLabel = 'נציג אנושי', hint = '') =>
-  `${n.text}${hint ? `\n\n${hint}` : ''}\n\n${[...n.options.map((o, i) => `${i + 1}. ${o.label}`), ...(humanOption && !n.save ? [`0. ${humanLabel}`] : [])].join('\n')}`;
+  `${n.text}${n.kbOnFreeText && !n.save && n.options.length >= 3 ? `\n${FREE_TEXT_HINT}` : ''}${hint ? `\n\n${hint}` : ''}\n\n${[...n.options.map((o, i) => `${i + 1}. ${o.label}`), ...(humanOption && !n.save ? [`0. ${humanLabel}`] : [])].join('\n')}`;
 
 function validate(kind: string, raw: string): string | null {
   const t = raw.trim();
@@ -130,6 +133,11 @@ const kindOf = (n: Extract<FlowNode, { type: 'question' }>) => n.kind ?? (['name
 export async function runFlow(flow: Flow, prev: FlowState | null, input: FlowInput | string | null, ctx: FlowContext, humanLabel?: string): Promise<FlowResult> {
   const inp: FlowInput = input !== null && typeof input === 'object' ? input : { text: input };
   const nodes = new Map(flow.nodes.map((n) => [n.id, n]));
+  /** the identification details (the ones a "remember" step keeps): each is saved for next time as soon as it is given */
+  const identity = new Set(flow.nodes.flatMap((n) => (n.type === 'remember' ? n.vars : [])));
+  const keep = (k: string | undefined, v: string) => { if (k && identity.has(k)) effects.push({ kind: 'profile', vars: { [k]: v } }); };
+  /** given in an earlier conversation (and not changed since): not asked again */
+  const knownBefore = (k: string | undefined) => !!k && identity.has(k) && !!ctx.profile?.[k] && state.vars[k] === ctx.profile[k];
   const now = ctx.now ?? Date.now();
   let state: FlowState = prev ? { ...prev, vars: { ...prev.vars } } : { ...NEW_FLOW_STATE, vars: {} };
   if (state.done && state.endedAt && now - state.endedAt > RESTART_AFTER_MS) state = { ...NEW_FLOW_STATE, vars: {} };
@@ -168,7 +176,15 @@ export async function runFlow(flow: Flow, prev: FlowState | null, input: FlowInp
   const finished = (): FlowResult => { summary(); return { replies, state: { ...state, node: null, list: undefined, done: true, endedAt: now }, effects }; };
 
   // a flow that finished on its own (not handed to a person): "תפריט" opens the main menu again at once
-  if (state.done && state.endedAt && inp.text && isMenuRequest(normalize(inp.text))) state = { ...NEW_FLOW_STATE, vars: { ...state.vars }, node: '__menu__' };
+  if (state.done && state.endedAt && inp.text && inp.text.trim()) {
+    // a flow that ended on its own (an answer was given, no person took over): the customer writes again. A greeting or "תפריט"
+    // shows the main menu; anything else (a number, a description in their own words) is read as the answer to that menu
+    const tx = normalize(inp.text);
+    const main = mainMenuOf(flow);
+    if (THANKS_ONLY.test(tx)) { /* "תודה", "סבבה": the conversation is over, nothing to add (the thanks gets a heart) */ }
+    else if (isMenuRequest(tx) || GREETINGS.has(tx) || !main) state = { ...NEW_FLOW_STATE, vars: { ...state.vars }, node: '__menu__' };
+    else state = { ...NEW_FLOW_STATE, vars: { ...state.vars }, node: main };
+  }
   if (state.done) return { replies: [], state, effects: [] }; // a person (or the end node) has the conversation
 
   const hasText = inp.text !== null && inp.text.trim() !== '';
@@ -234,7 +250,7 @@ export async function runFlow(flow: Flow, prev: FlowState | null, input: FlowInp
       if (idx !== null && idx >= 0 && idx < w.options.length) {
         if (typedPick && state.freeText?.node === w.id) effects.push({ kind: 'learn_option', node: w.id, label: w.options[idx]!.label, text: state.freeText.text });
         state = { ...state, invalid: 0, freeText: undefined };
-        if (w.save) state = { ...state, vars: { ...state.vars, [w.save]: w.options[idx]!.label } };
+        if (w.save) { state = { ...state, vars: { ...state.vars, [w.save]: w.options[idx]!.label } }; keep(w.save, w.options[idx]!.label); }
         cursor = w.options[idx]!.next;
         if (!cursor) return finished();
       } else {
@@ -278,6 +294,7 @@ export async function runFlow(flow: Flow, prev: FlowState | null, input: FlowInp
           state = { ...state, invalid: 0 }; // give up on this answer and move on
         } else {
           state = { ...state, invalid: 0, vars: { ...state.vars, [w.save]: v } };
+          keep(w.save, v);
           if (kindOf(w) === 'name') effects.push({ kind: 'name', value: v });
         }
       }
@@ -395,6 +412,10 @@ export async function runFlow(flow: Flow, prev: FlowState | null, input: FlowInp
           if (!cursor) return finished();
           break;
         }
+        if (n.save && knownBefore(n.save)) {   // an identification menu answered last time (status): not asked again
+          const o = n.options.find((x) => x.label === state.vars[n.save!]);
+          if (o?.next) { cursor = o.next; break; }
+        }
         { const h = histFor(n.id); replies.push(menuText(n, ctx.humanOption, humanLabel, hintFor(h))); return { replies, state: { ...state, node: n.id, invalid: 0, history: h }, effects, menu: true }; }
       }
       // questions stay short (a hint under every question of a form is noise); "back" still works there
@@ -402,10 +423,12 @@ export async function runFlow(flow: Flow, prev: FlowState | null, input: FlowInp
         const already = n.type === 'question' && n.kind && n.kind !== 'text' ? ctx.known?.[n.kind] : undefined;
         if (n.type === 'question' && already && !state.vars[n.save]) {   // given already (website chat form): taken, not asked again
           state = { ...state, vars: { ...state.vars, [n.save]: already } };
+          keep(n.save, already);
           cursor = n.next;
           if (!cursor) return finished();
           break;
         }
+        if (n.type === 'question' && knownBefore(n.save)) { cursor = n.next; if (!cursor) return finished(); break; }   // answered last time
         replies.push(n.text); return { replies, state: { ...state, node: n.id, invalid: 0, history: histFor(n.id) }, effects };
       }
       case 'list': replies.push(n.text); return { replies, state: { ...state, node: n.id, invalid: 0, list: { items: [], phase: 'item' }, history: histFor(n.id) }, effects };

@@ -355,6 +355,35 @@ describe('the safety unit template', () => {
   const byId = new Map(t.nodes.map((n) => [n.id, n]));
   const U = '77777777-7777-4777-8777-777777777777';
 
+  it('remembers: each identification detail is kept as soon as it is given; next time only what is missing is asked', async () => {
+    let r = await runFlow(t, null, 'שלום', ctx());
+    expect(r.replies.join('\n')).toContain('שם מלא:');
+    r = await runFlow(t, r.state, 'רונית כהן', ctx());
+    expect(r.effects).toContainEqual({ kind: 'profile', vars: { fullName: 'רונית כהן' } });   // kept at once, not only at the end
+    // she stopped there; next time: not asked her name again, straight to the building
+    const back = await runFlow(t, null, 'שלום', ctx({ profile: { fullName: 'רונית כהן' } }));
+    expect(back.replies.join('\n')).not.toContain('שם מלא:');
+    expect(back.replies.join('\n')).toContain('שם הבניין');
+  });
+
+  it('a customer known from before: welcome back and the topics menu, which says a description in words is fine', async () => {
+    const r = await runFlow(t, null, 'שלום', ctx({ profile: { fullName: 'רונית כהן', faculty: 'כימיה', status: 'משתלם' } }));
+    expect(r.replies[0]).toContain('טוב לראות אותך שוב');
+    expect(r.replies[1]).toContain('ברצוני לקבל מידע / לדווח על:');
+    expect(r.replies[1]).toContain('אפשר לבחור מספר, או לכתוב במילים במה מדובר.');
+  });
+
+  it('after an answer, writing again is never ignored: a description goes to its topic, a greeting shows the menu, thanks stays quiet', async () => {
+    const known = { fullName: 'רונית כהן', faculty: 'כימיה', status: 'משתלם' };
+    let r = await runFlow(t, null, 'שלום', ctx({ profile: known }));
+    r = await runFlow(t, r.state, '1', ctx({ profile: known }));                       // chemical waste: an information answer, the flow ends
+    expect(r.state.done).toBe(true);
+    const again = await runFlow(t, r.state, 'רציתי לדווח על מפגע במעבדה', ctx({ profile: known, matchOption: async (x, o) => matchOptionLexical(x, o) }));
+    expect(again.replies.join('\n')).toContain('שלחו תמונה של המפגע');
+    expect((await runFlow(t, r.state, 'היי', ctx({ profile: known }))).replies.join('\n')).toContain('ברצוני לקבל מידע');
+    expect((await runFlow(t, r.state, 'תודה רבה', ctx({ profile: known }))).replies).toEqual([]);
+  });
+
   it('the PI / head of unit may be skipped', async () => {
     const pi = byId.get('q_pi') as Extract<(typeof t.nodes)[number], { type: 'question' }>;
     expect(pi.text).toContain('ראש יחידה');
@@ -438,7 +467,11 @@ describe('the safety unit template', () => {
     r = await run(r.state, '1');                                                                 // waste form
     expect(r.replies[0]).toContain('פינוי פסולת כימית');
     expect(r.replies[0]).toContain('פנו ליחידת הבטיחות');                                      // no link given: the customer is told to ask the unit
-    expect(r.replies[1]).toContain('1. שאלתא'.slice(0, 0) + 'שאילתא בנושא פינוי פסולת כימית');       // back at the topics
+    expect(r.replies).toHaveLength(1);                                                          // the answer stays last: no menu under it
+    expect(r.replies[0]).toContain('לנושא נוסף אפשר לכתוב אותו כאן במילים');
+    expect(r.state.done).toBe(true);
+    r = await run(r.state, 'תפריט');                                                             // the next topic
+    expect(r.replies.join('\n')).toContain('שאילתא בנושא פינוי פסולת כימית');
     r = await run(r.state, '5');                                                                 // chemicals
     r = await run(r.state, 'אצטון');
     r = await run(r.state, 'כן');
@@ -930,6 +963,7 @@ describe('migration 063: the bot names itself and greets known customers', () =>
       const old = JSON.parse(JSON.stringify(buildSafetyFlow(() => '11111111-1111-4111-8111-111111111111'))) as { nodes: { id: string; yes?: string; next?: string; text?: string }[] };
       old.nodes = old.nodes.filter((n) => n.id !== 'welcome_back' && n.id !== 'id_saved');
       old.nodes.find((n) => n.id === 'start')!.yes = 'topics';
+      (old.nodes.find((n) => n.id === 'start') as unknown as { check: { name: string } }).check.name = 'fullName';   // as it was then
       old.nodes.find((n) => n.id === 'remember')!.next = 'topics';
       const intro = old.nodes.find((n) => n.id === 'id_intro')!;
       intro.text = intro.text!.replace('שלום, כאן {בוט} מיחידת הבטיחות 👋', 'שלום, כאן הבוט של יחידת הבטיחות.');

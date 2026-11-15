@@ -25,13 +25,18 @@ export const ID_SAVED_TEXT = 'תודה {שם פרטי}! שמרתי את הפרט
 /** The opening line of the identification as it was before the bot introduced itself by name (for upgrading saved flows). */
 export const OLD_ID_INTRO_START = 'שלום, כאן הבוט של יחידת הבטיחות.';
 
+/** Under an information answer: how to go on (instead of the whole menu again). */
+export const MORE_TOPICS = 'לנושא נוסף אפשר לכתוב אותו כאן במילים, או "תפריט" לתפריט הראשי.';
+
 export function buildSafetyFlow(tag: (name: string) => string, links: TemplateLinks = {}): Flow {
   const nodes: FlowNode[] = [];
   const add = (n: FlowNode) => { nodes.push(n); return n.id; };
   const HANDOFF_TEXT = 'הפנייה התקבלה והועברה לטיפול. נחזור אליך בהקדם.';
 
   // ---- identification (skipped when we already know the customer) ----
-  add({ id: 'start', type: 'condition', label: 'מוכר מפעם קודמת?', check: { kind: 'has', name: 'fullName' }, yes: 'welcome_back', no: 'id_intro' });
+  // known from before = finished the identification (its last answer is the status); details given are kept one by one, so someone
+  // who stopped half-way is asked only what is still missing
+  add({ id: 'start', type: 'condition', label: 'מוכר מפעם קודמת?', check: { kind: 'has', name: 'status' }, yes: 'welcome_back', no: 'id_intro' });
   add({ id: 'welcome_back', type: 'message', label: 'ברוכים השבים', text: WELCOME_BACK_TEXT, next: 'topics' });
   add({ id: 'id_intro', type: 'message', label: 'הזדהות', text: 'שלום, כאן {בוט} מיחידת הבטיחות 👋 כדי שנוכל לטפל בפנייה נשאל כמה פרטים (פעם אחת בלבד).\nהפרטים (שם, בניין, חדר, פקולטה, שם ה-PI וסטטוס) ותוכן הפנייה, כולל תמונות וקבצים, נשמרים בשרתי היחידה ונגישים לאנשי הצוות המטפלים בלבד, לצורך טיפול בפנייה.' + (links.privacy ? ` מדיניות הפרטיות: ${links.privacy}` : ''), next: 'q_name' });
   add({ id: 'q_name', type: 'question', kbAside: true, label: 'שם מלא', text: 'שם מלא:', save: 'fullName', kind: 'name', optional: false, retryText: 'נא לכתוב שם מלא.', next: 'q_building' });
@@ -71,7 +76,9 @@ export function buildSafetyFlow(tag: (name: string) => string, links: TemplateLi
   });
 
   // ---- information only: links to the unit's forms ----
-  const linkTopic = (id: string, text: string) => add({ id, type: 'message', label: id, text, next: 'topics' });
+  // an information topic ends with its answer (and one line on going on): the menu is not sent again under it, which pushed the
+  // answer out of sight. The customer's next message opens the menu, or goes straight to the topic they describe.
+  const linkTopic = (id: string, text: string) => add({ id, type: 'message', label: id, text: `${text}\n\n${MORE_TOPICS}` });
   const where = (url?: string) => (url ? `\n${url}` : '\nלקבלת הטופס פנו ליחידת הבטיחות.');
   linkTopic('waste', `פינוי פסולת כימית מתבצע באמצעות הטופס של היחידה.${where(links.waste)}`);
   linkTopic('accident', `דיווח על תאונה או אירוע "כמעט-ונפגע" מתבצע בטופס של היחידה.${where(links.accident)}\nבמקרה חירום יש להתקשר מיד לגורמי החירום.`);
