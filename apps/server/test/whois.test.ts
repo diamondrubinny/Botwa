@@ -11,6 +11,8 @@ describe('which topic a question names', () => {
     expect(topicsIn('מי הממונה על בטיחות אש?', topics)).toEqual(expect.arrayContaining(['גילוי אש', 'מתזים']));
     expect(topicsIn('מה הטלפון של ממונה הגזים', topics)).toEqual(expect.arrayContaining(['גזים דחוסים', 'גפ״ם']));
     expect(topicsIn('למי פונים בנושא לייזרים?', topics)).toEqual(['לייזרים']);
+    expect(topicsIn('מי ממונה בטיחות ליזר', topics)).toEqual(['לייזרים']);          // spelled without the double yod
+    expect(topicsIn('ממונה בטיחות לייזר', topics)).toEqual(['לייזרים']);
     expect(topicsIn('מי אחראי על חומרים מסוכנים', topics)).toEqual(expect.arrayContaining(['חומ״ס']));
     expect(topicsIn('מי הממונה על סולמות', topics)).toEqual(expect.arrayContaining(['סולמות']));
     expect(topicsIn('ממונה מעליות', topics)).toEqual(['מעליות/מעלונים']);

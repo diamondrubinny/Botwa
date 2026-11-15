@@ -21,11 +21,11 @@ describe('Betty for managers on WhatsApp', () => {
     constructor(c: AdapterContext) { ctxA = c; }
     async start() { ctxA.events.onStatus('connected'); }
     async stop() {} async logout() {}
-    async sendText(to: string, text: string) { out.push({ to, text }); return { externalMessageId: `o${out.length}` }; }
+    async sendText(to: string, text: string) { out.push({ to, text }); return { externalMessageId: `o${++sentN}` }; }
   }
   const cookies: Record<string, string> = {};
   const ids: Record<string, string> = {};
-  let ip = 0, mid = 0;
+  let ip = 0, mid = 0, sentN = 0;
   const call = (who: string, method: 'GET' | 'POST' | 'DELETE', url: string, payload?: unknown) =>
     app.inject({ method, url, payload: payload as never, remoteAddress: `10.85.${Math.floor(++ip / 250)}.${ip % 250}`, headers: { origin: ORIGIN, cookie: cookies[who]! } });
   const say = async (from: string, text: string) => {
@@ -128,5 +128,15 @@ describe('Betty for managers on WhatsApp', () => {
     const c3 = (await db.query(`SELECT c.id FROM conversations c JOIN contacts ct ON ct.id = c.contact_id WHERE ct.external_id = '9725000003@s.whatsapp.net'`)).rows[0].id;
     await db.query(`INSERT INTO messages (conversation_id, direction, body, auto) VALUES ($1, 'out', 'בודק עכשיו', false)`, [c3]);
     expect(await say('9725000003@s.whatsapp.net', 'מתי חוזרים אלי')).not.toContain('הפנייה שלך');
+  });
+  it('"מי ממונה בטיחות ליזר" while the inquiry is with the team: the officer\'s details, unless a person is answering now', async () => {
+    const o = (await db.query(`INSERT INTO officers (name, office_phone) VALUES ('רונית לייזר-בטיחות', '04-829-2222') RETURNING id`)).rows[0].id;
+    await db.query(`INSERT INTO officer_topics (officer_id, topic) VALUES ($1, 'לייזרים')`, [o]);
+    const a = await say('9725000001@s.whatsapp.net', 'מי ממונה בטיחות ליזר');                     // with Dana, nobody answering right now
+    expect(a).toContain('👷 לייזרים:');
+    expect(a).toContain('04-829-2222');
+    expect((await db.query(`SELECT count(*)::int AS n FROM messages WHERE automation = 'officer_info'`)).rows[0].n).toBe(1);
+    expect(await say('9725000003@s.whatsapp.net', 'מי ממונה בטיחות ליזר')).toBe('');            // a person answered a moment ago: quiet
+    expect(await say('9725000004@s.whatsapp.net', 'שלום')).not.toContain('👷');                 // other messages: nothing new
   });
 });

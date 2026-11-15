@@ -10,7 +10,7 @@ const ASK = /(ממונה|ממונת|ממוני|אחראי|אחראית|מי מט
 const ALIASES: [RegExp, string[]][] = [
   [/^(אש|שריפ|שרפ|דליק|כיבוי|מטפ|ספרינקלר|עשן|כבאות)/, ['אש', 'מתזים', 'כיבוי', 'כבאות']],
   [/^(גז|גזים|גפמ|גפ"ם|גפ״ם|בלון|בלונים|צילינדר|חמצן|חנקן)/, ['גז', 'גפ']],
-  [/^(לייזר|לייזרים)/, ['לייזר']],
+  [/^(לייזר|ליזר)/, ['לייזר', 'ליזר']],
   [/^(קרינה|רדיו|רנטגן|מייננת)/, ['קרינה']],
   [/^(כימי|כימיקל|חומס|חומ"ס|חומ״ס|מסוכנ|פסולת)/, ['כימ', 'חומ']],
   [/^(חשמל)/, ['חשמל']],
@@ -30,8 +30,10 @@ const ALIASES: [RegExp, string[]][] = [
   [/^(תאורה)/, ['תאורה']],
 ];
 const STOP = new Set(['ממונה', 'ממונת', 'ממוני', 'על', 'של', 'מי', 'מה', 'את', 'הטלפון', 'טלפון', 'מספר', 'בנושא', 'נושא', 'בטיחות', 'הבטיחות', 'למי', 'פונים', 'לפנות', 'אחראי', 'אחראית', 'איך', 'אפשר', 'שלו', 'שלה', 'המשרד', 'משרדי', 'המשרדי', 'מייל', 'אימייל', 'פרטי', 'קשר']);
-const stem = (w: string) => w.replace(/^[והבלמשכ](?=[א-ת]{3,})/, '').replace(/(ים|ות)$/, '');
-const words = (s: string) => s.toLowerCase().replace(/[?!.,:;()"״׳'/\\-]/g, ' ').split(/\s+/).filter(Boolean);
+/** Hebrew spelled with or without extra letters ("ליזר" / "לייזר", "כימיקלים" / "כימיקאלים"): doubled yod and vav count once. */
+const plain = (s: string) => s.replace(/יי/g, 'י').replace(/וו/g, 'ו');
+const stem = (w: string) => plain(w).replace(/^[והבלמשכ](?=[א-ת]{3,})/, '').replace(/(ים|ות)$/, '');
+const words = (s: string) => plain(s.toLowerCase()).replace(/[?!.,:;()"״׳'/\\-]/g, ' ').split(/\s+/).filter(Boolean);
 
 export interface PublicOfficer { name: string; officePhone: string | null; email: string | null; phone: string | null; showWhatsapp: boolean; topics: string[] }
 
@@ -41,8 +43,8 @@ export function topicsIn(text: string, topics: string[]): string[] {
   const qs = new Set(q.map(stem));
   const hints = q.flatMap((w) => ALIASES.filter(([re]) => re.test(w) || re.test(stem(w))).flatMap(([, t]) => t));
   return topics.filter((topic) => {
-    const tl = topic.toLowerCase();
-    if (hints.some((h) => tl.includes(h))) return true;
+    const tl = plain(topic.toLowerCase());
+    if (hints.some((h) => tl.includes(plain(h)))) return true;
     return words(topic).filter((w) => w.length >= 3 && !STOP.has(w)).some((w) => qs.has(stem(w)));
   });
 }

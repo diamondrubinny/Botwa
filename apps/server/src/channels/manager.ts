@@ -406,7 +406,10 @@ export class ChannelManager {
           // "מתי חוזרים אליי?" while the inquiry is with the team: where it stands, instead of silence (the team is notified as usual)
           const waited = !!r.messageId && !stop && !m.media && !isCommentContact(m.externalContactId) && isWaitingQuestion(m.text)
             && await this.waitingStatus(channelId, r.conversationId, m.externalContactId).catch(() => false);
-          if (waited) {
+          // "מי הממונה על לייזרים?" while the inquiry is with the team: the officer's public details, unless a person is answering now
+          const informed = !waited && !!r.messageId && !stop && !m.media && !isCommentContact(m.externalContactId)
+            && await this.officerWhileWaiting(channelId, r.conversationId, m.externalContactId, m.text).catch(() => false);
+          if (waited || informed) {
             // nothing more: no bot and no away notice for this message
           } else if (r.messageId && stop) {
             // customer said stop: no bot, no away reply - a person decides what happens next
@@ -1063,6 +1066,21 @@ export class ChannelManager {
     ].join('\n');
     const sent = await this.sendText(channelId, ext, text, { background: true });
     const ins = await this.db.query(`INSERT INTO messages (conversation_id, direction, body, external_id, auto, automation) VALUES ($1,'out',$2,$3,true,'waiting_status') ON CONFLICT DO NOTHING RETURNING id`, [convId, text, sent.externalMessageId ?? null]);
+    if (ins.rows[0]) { this.notifyMessage(channelId, convId, ins.rows[0].id); this.hookMessage('message.sent', convId, ins.rows[0].id); }
+    return true;
+  }
+
+  /** An officer question in a conversation that is with the team (where the bot is silent): answered from the officers list. */
+  async officerWhileWaiting(channelId: string, convId: string, ext: string, text: string | null | undefined): Promise<boolean> {
+    const c = (await this.db.query(
+      `SELECT c.assigned_to, c.bot_state,
+              EXISTS (SELECT 1 FROM messages m WHERE m.conversation_id = c.id AND m.direction = 'out' AND NOT m.auto AND m.created_at > now() - interval '10 minutes') AS answered
+         FROM conversations c WHERE c.id = $1`, [convId])).rows[0];
+    if (!c || (!c.assigned_to && c.bot_state !== 'human') || c.answered) return false;
+    const reply = await officerReply(this.db, text);
+    if (!reply) return false;
+    const sent = await this.sendText(channelId, ext, reply, { background: true });
+    const ins = await this.db.query(`INSERT INTO messages (conversation_id, direction, body, external_id, auto, automation) VALUES ($1,'out',$2,$3,true,'officer_info') ON CONFLICT DO NOTHING RETURNING id`, [convId, reply, sent.externalMessageId ?? null]);
     if (ins.rows[0]) { this.notifyMessage(channelId, convId, ins.rows[0].id); this.hookMessage('message.sent', convId, ins.rows[0].id); }
     return true;
   }
