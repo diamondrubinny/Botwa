@@ -82,6 +82,11 @@
     return svg;
   }
 
+  function textDir(t) {
+    var he = (t.match(/[\u0590-\u05FF\u0600-\u06FF]/g) || []).length, en = (t.match(/[A-Za-z]/g) || []).length;
+    if (!he && !en) return document.documentElement.dir || 'rtl';
+    return he > 0 && he * 3 >= en ? 'rtl' : 'ltr';
+  }
   function addMessage(m) {
     if (shown[m.seq]) return; shown[m.seq] = true; after = Math.max(after, m.seq);
     var mine = m.direction === 'in';
@@ -92,8 +97,9 @@
     if (face) whoEl.appendChild(face);
     whoEl.appendChild(document.createTextNode(who));
     box.appendChild(whoEl);
-    // each message takes its own direction: an English question in a Hebrew chat keeps its full stop at the end
-    var body = h('div', { class: 'text', dir: 'auto' }); linkify(m.text, body); box.appendChild(body);
+    // each message takes its own direction by the majority of its letters (not its first character, which may be an emoji, a
+    // number, a name or a link): every line of a Hebrew message stays on the right, of an English one on the left
+    var body = h('div', { class: 'text', dir: textDir(m.text || '') }); linkify(m.text, body); box.appendChild(body);
     els.log.appendChild(box);
     if (mine) mineBySeq[m.seq] = box;
     els.log.scrollTop = els.log.scrollHeight;

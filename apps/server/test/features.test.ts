@@ -121,6 +121,7 @@ describe('tags, settings, audit, away reply, waiting time', () => {
   });
 
   it('tags: curated by supervisors, applied by staff with access, filterable, case-insensitive unique', async () => {
+    await db.query(`DELETE FROM tags WHERE name = 'English'`);   // the test customers write in English: that tag is automatic, not curated
     expect((await call('POST', '/tags', 'a1@t.io', { name: 'x' })).statusCode).toBe(403);
     const vip = (await call('POST', '/tags', 'sup@t.io', { name: 'VIP' })).json();
     expect((await call('POST', '/tags', 'sup@t.io', { name: 'vip' })).statusCode).toBe(409);

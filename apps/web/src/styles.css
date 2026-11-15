@@ -605,7 +605,7 @@ hr { border: 0; border-top: 1px solid var(--border); margin: 1.25rem 0; }
 :root[data-contrast='high'] .kpi::before, :root[data-contrast='high'] .stat-grid > *::before { background: #fff; }
 
 /* mixed-direction text: each message lays out by its own language (English in a Hebrew panel, numbers, e-mail addresses) */
-.msg-text { text-align: start; unicode-bidi: plaintext; }
+.msg-text { text-align: start; unicode-bidi: isolate; }
 
 /* ---------- Illustrations (components/Illustration.tsx): coloured by these classes, so they follow the palette and dark mode ---------- */
 .illustration { display: block; max-width: 100%; height: auto; }

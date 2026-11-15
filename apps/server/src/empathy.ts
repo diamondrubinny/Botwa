@@ -26,13 +26,16 @@ function norm(text: string): string {
 }
 const has = (t: string, w: string) => new RegExp(`\\s[והשכ]?${w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?=\\s)`).test(t);
 
+/** The same feelings in English. */
+const WORRIED_EN = /\b(stressed|stressful|scared|afraid|frightened|terrified|worried|anxious|panic(king)?|freaking out|nervous|i don'?t know what to do|what do i do now)\b/i;
+const UPSET_EN = /\b(no ?one (is )?(answering|replying|answers|replies)|nobody (is )?(answering|replying|answers|replies|gets back)|(been )?waiting (for )?(hours|ages|so long|forever)|still no (answer|reply)|frustrat(ed|ing)|annoy(ed|ing)|unacceptable|ridiculous|fed up|angry|furious|disappointed)\b/i;
 export function detectDistress(text: string | null | undefined): Distress | null {
   if (!text || text.length > 600) return null;
   if (detectHazard(text)) return 'hazard';
   // the technical senses are taken out first; what is left decides
   const t = norm(text).replace(new RegExp(TECHNICAL.source, 'g'), ' ');
-  if (WORRIED.some((w) => has(t, w))) return 'worried';
-  if (UPSET.some((w) => has(t, w))) return 'upset';
+  if (WORRIED.some((w) => has(t, w)) || WORRIED_EN.test(t)) return 'worried';
+  if (UPSET.some((w) => has(t, w)) || UPSET_EN.test(t)) return 'upset';
   return null;
 }
 
@@ -41,32 +44,51 @@ export function detectDistress(text: string | null | undefined): Distress | null
  * people (emergency.ts handles those), but it must reach the officer at once, with first safety advice for the topic.
  * Questions about hazards in general ("מה נחשב עבודה מסוכנת?", "מי הממונה על מפגעים?") are not reports.
  */
+const HAZARD_EN = /\b(hazard|danger|dangerous|unsafe|not safe|leak|leaking|exposed wires?|short circuit|sparks|sparking)\b/i;
+const QUESTION_EN = /^\s(what|how|who|where|when|which|is|are|do|does|can|could|should|would)\s/i;
 const HAZARD = /(^|\s)(ה|ו|ש|ב)?(סכנה|סכנת|מפגע|מפגעים|בסכנה|מסוכן|מסוכנת|לא בטוח|לא בטוחה|לא בטיחותי|לא בטיחותית|דליפה|דולף|דולפת|נזילה|קצר חשמלי|חוט חשוף|חוטים חשופים)(?=\s)/;
 const QUESTION = /^\s(מה|איך|האם|מי|איפה|כמה|למה|אילו|איזה|איזו|באיזה|מתי|ממתי|מהו|מהי|מהם)\s/;
 const NOT_REPORT = /חומרים מסוכנים|חומ"ס|פסולת מסוכנת|עבודה מסוכנת|עבודות מסוכנות|סקר סיכונים|הערכת סיכונים|ניהול סיכונים/;
 export function detectHazard(text: string | null | undefined): boolean {
   if (!text || text.length > 400) return false;
   const t = norm(text).replace(/([א-ת])\1+/g, '$1');   // "ססכנה" (a letter typed twice) is still "סכנה"
-  if (!HAZARD.test(t)) return false;
+  const en = HAZARD_EN.test(t);
+  if (!HAZARD.test(t) && !en) return false;
   if (QUESTION.test(t) && !/(יש|כאן|פה|עכשיו|כרגע|אצלנו|בחדר|במעבדה)/.test(t)) return false;
+  if (en && QUESTION_EN.test(t) && !/\b(here|now|there is|there's|in (the|my|our) (lab|room|building))\b/i.test(t)) return false;
+  if (en && /hazardous (materials?|waste|substances?)|hazard (assessment|survey)|risk assessment/i.test(t) && !/\b(leak|spill|now|here)\b/i.test(t)) return false;
   if (NOT_REPORT.test(t) && !/(סכנה|מפגע|דולף|נזילה|עכשיו|כרגע)/.test(t)) return false;
   return true;
 }
 
 /** First advice by topic: general, widely accepted safety steps only, always "if it is safe". */
-const ADVICE: [RegExp, string][] = [
-  [/לייזר|ליזר|קרן/, 'לא להסתכל לכיוון הקרן או להחזרות שלה. אם אפשר לעשות זאת בבטחה, לכבות את הלייזר או לחסום את הקרן, ולהרחיק אנשים מהאזור. אם הייתה חשיפה של העיניים, לפנות מיד לבדיקה רפואית.'],
-  [/אסבסט/, 'לא לגעת, לא לנקות ולא לטאטא. לצאת מהחדר, לסגור אותו ולא לאפשר כניסה עד שהממונה יגיע.'],
-  [/חשמל|חוט|שקע|לוח|קצר|ניצוץ|ניצוצות/, 'לא לגעת בציוד או בחוטים. לנתק את החשמל רק אם אפשר לעשות זאת בבטחה, ולהרחיק אנשים מהמקום.'],
-  [/כימ|חומר|נשפך|שפך|דליפ|דולף|נזיל|ריח/, 'להתרחק מהחומר ולא לגעת בו בלי ציוד מגן. לאוורר אם זה בטוח, ולהרחיק אנשים מהאזור.'],
-  [/קרינה|רדיו|מקור/, 'להתרחק מהמקור, לצמצם את הזמן בקרבתו ולהרחיק אנשים מהאזור.'],
-  [/גובה|סולם|פיגום|מעקה|גג|מדף|נופל|ליפול|קורס/, 'לסמן את המקום, להרחיק אנשים ולא להשתמש בציוד או במבנה עד שייבדקו.'],
-  [/גז|בלון|צילינדר/, 'לא להפעיל מתגים או אש בקרבת המקום, לאוורר אם זה בטוח ולהתרחק.'],
-  [/ביולוג|דם|דגימ/, 'לא לגעת, לסמן את המקום ולהרחיק אנשים עד שהממונה יגיע.'],
+export const ADVICE: [RegExp, string][] = [
+  [/לייזר|ליזר|קרן|laser|beam/i, 'לא להסתכל לכיוון הקרן או להחזרות שלה. אם אפשר לעשות זאת בבטחה, לכבות את הלייזר או לחסום את הקרן, ולהרחיק אנשים מהאזור. אם הייתה חשיפה של העיניים, לפנות מיד לבדיקה רפואית.'],
+  [/אסבסט|asbestos/i, 'לא לגעת, לא לנקות ולא לטאטא. לצאת מהחדר, לסגור אותו ולא לאפשר כניסה עד שהממונה יגיע.'],
+  [/חשמל|חוט|שקע|לוח|קצר|ניצוץ|ניצוצות|electric|wire|socket|spark|short circuit/i, 'לא לגעת בציוד או בחוטים. לנתק את החשמל רק אם אפשר לעשות זאת בבטחה, ולהרחיק אנשים מהמקום.'],
+  [/chemical|spill|leak|smell|כימ|חומר|נשפך|שפך|דליפ|דולף|נזיל|ריח/, 'להתרחק מהחומר ולא לגעת בו בלי ציוד מגן. לאוורר אם זה בטוח, ולהרחיק אנשים מהאזור.'],
+  [/קרינה|רדיו|מקור|radiation|radioactive|source/i, 'להתרחק מהמקור, לצמצם את הזמן בקרבתו ולהרחיק אנשים מהאזור.'],
+  [/height|ladder|scaffold|railing|roof|shelf|fall|collaps|גובה|סולם|פיגום|מעקה|גג|מדף|נופל|ליפול|קורס/, 'לסמן את המקום, להרחיק אנשים ולא להשתמש בציוד או במבנה עד שייבדקו.'],
+  [/גז|בלון|צילינדר|\bgas\b|cylinder/i, 'לא להפעיל מתגים או אש בקרבת המקום, לאוורר אם זה בטוח ולהתרחק.'],
+  [/ביולוג|דם|דגימ|bio|blood|sample/i, 'לא לגעת, לסמן את המקום ולהרחיק אנשים עד שהממונה יגיע.'],
 ];
+/** The same advice in English, in the same order. */
+export const ADVICE_EN = [
+  "Do not look towards the beam or its reflections. If it is safe to do so, switch the laser off or block the beam, and keep people away from the area. If anyone's eyes were exposed, get a medical check at once.",
+  'Do not touch, clean or sweep it. Leave the room, close it and keep everyone out until the officer arrives.',
+  'Do not touch the equipment or the wires. Switch off the power only if it is safe to do so, and keep people away.',
+  'Keep away from the substance and do not touch it without protective equipment. Ventilate if it is safe, and keep people away from the area.',
+  'Keep away from the source, limit the time near it and keep people away from the area.',
+  'Mark the spot, keep people away and do not use the equipment or structure until it has been checked.',
+  'Do not operate switches or use any flame near the spot; ventilate if it is safe and move away.',
+  'Do not touch it; mark the spot and keep people away until the officer arrives.',
+];
+export const ADVICE_DEFAULT = 'אם יש סכנה מיידית, להתרחק מהמקום ולהרחיק אחרים, ולא לטפל במפגע לבד.';
+export const ADVICE_DEFAULT_EN = 'If there is immediate danger, move away and keep others away, and do not deal with the hazard on your own.';
+
 export function hazardAdvice(text: string): string {
   const t = text.toLowerCase();
-  return ADVICE.find(([re]) => re.test(t))?.[1] ?? 'אם יש סכנה מיידית, להתרחק מהמקום ולהרחיק אחרים, ולא לטפל במפגע לבד.';
+  return ADVICE.find(([re]) => re.test(t))?.[1] ?? ADVICE_DEFAULT;
 }
 
 export interface ComfortContext { who: string | null; topic?: string | null; closed: boolean; hours?: string; movedNow: boolean }

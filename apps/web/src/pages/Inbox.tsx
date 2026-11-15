@@ -52,6 +52,9 @@ function AttachmentView({ a }: { a: Attachment }) {
   return <a href={`/attachments/${a.id}`} download={name}>הורדת קובץ: {name} ({fmtSize(a.size)})</a>;
 }
 
+/** A message's direction by the majority of its letters (an emoji, number, name or link at the start does not decide it). */
+const textDir = (t: string): 'rtl' | 'ltr' => { const he = (t.match(/[\u0590-\u05FF]/g) ?? []).length, en = (t.match(/[A-Za-z]/g) ?? []).length; return !en || (he > 0 && he * 3 >= en) ? 'rtl' : 'ltr'; };
+
 export function Inbox({ me }: { me: Me }) {
   const isManager = can(me, 'inbox.view_all');
   const canAssignOthers = can(me, 'conversations.assign_others');
@@ -580,7 +583,7 @@ export function Inbox({ me }: { me: Me }) {
                 {msgs.map((m) => (
                   <div key={m.id} className={`msg ${m.direction}${m.auto ? ' auto' : ''}`}>
                     {m.attachment && <AttachmentView a={m.attachment} />}
-                    {m.body && <div className="msg-text" dir="auto">{m.body}</div>}
+                    {m.body && <div className="msg-text" dir={textDir(m.body)}>{m.body}</div>}
                     {m.replyMode && <span className={`mchip reply-${m.replyMode}`}>{m.replyMode === 'public' ? 'נענה בפומבי' : 'נענה בפרטי'}</span>}
                     {m.direction === 'in' && !sel.blocked && <ReactionControl msgId={m.id} current={m.ourReaction} by={m.ourReactionBy} onSet={async (emoji) => {
                       try {

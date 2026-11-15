@@ -6,6 +6,7 @@ import { loadBusinessHours } from './routes/settings.js';
 import { sendBlock, type AccessibleConversation } from './access.js';
 import { loadSending } from './channels/sender.js';
 import { FOLLOW_UP_AFTER, followUpText } from './empathy.js';
+import { localize } from './i18n/translate.js';
 import { hoursSummary } from './canned.js';
 import { autoAssign } from './routing.js';
 
@@ -99,7 +100,9 @@ export async function sendAutomatic(db: Db, out: AutoSender, conv: ConvRow, body
   if (!body.trim() || /@(fb|ig)comment$/.test(conv.external_id)) return false;
   if (await sendBlock(db, conv, (await loadSending(db)).replyWindowHours)) return false;
   const hours = await loadBusinessHours(db);
-  const textOut = renderCanned(body, { customerName: conv.contact_name, agentName: conv.agent_name ?? 'הצוות', agentTitle: conv.agent_title, agentPhone: conv.agent_phone, hours, channelLabel: conv.channel_label });
+  // in the conversation's language (an English conversation gets the English wording; variables are filled in after)
+  const lang = (await db.query('SELECT lang FROM conversations WHERE id = $1', [conv.id])).rows[0]?.lang;
+  const textOut = renderCanned(await localize(db, lang, body), { customerName: conv.contact_name, agentName: conv.agent_name ?? 'הצוות', agentTitle: conv.agent_title, agentPhone: conv.agent_phone, hours, channelLabel: conv.channel_label });
   try {
     const sent = await out.sendText(conv.channel_id, conv.external_id, textOut, { background: true });
     const ins = await db.query(`INSERT INTO messages (conversation_id, direction, body, external_id, auto, automation) VALUES ($1,'out',$2,$3,true,$4) RETURNING id`, [conv.id, textOut, sent.externalMessageId ?? null, kind]);

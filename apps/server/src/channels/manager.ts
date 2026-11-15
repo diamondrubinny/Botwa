@@ -41,6 +41,8 @@ import { isEmergency } from '../emergency.js';
 import { isWaitingQuestion } from '../waiting.js';
 import { officerReply, officerUserFor } from '../safety/whoIs.js';
 import { comfortText, detectDistress, stillHereText, type Distress } from '../empathy.js';
+import { detectLang, withDirectionMarks, type Lang } from '../i18n/lang.js';
+import { dictionary, fromEnglish, localize } from '../i18n/translate.js';
 import { factReply } from '../safety/facts.js';
 import { hoursSummary } from '../canned.js';
 import { staffMessage } from '../staff/assistant.js';
@@ -362,6 +364,8 @@ export class ChannelManager {
             void sendAlert(this.cfg, `🚫 לקוח נחסם אוטומטית עקב הצפת הודעות (יותר מ-${this.cfg.FLOOD_LIMIT} ב-2 דקות).`, { contactId: r.contactId });
           }
           if (r.blocked) return; // blocked contact: stored as evidence, nothing else happens (no files, bot, away reply, routing, notification)
+          // the customer's language (Hebrew or English): Betty answers in it, and the conversation shows it as a tag
+          if (r.messageId && !m.media && m.text && !isCommentContact(m.externalContactId)) await this.noteLanguage(r.conversationId, m.text).catch(() => undefined);
           // a form filled inside WhatsApp: handled by the forms module (signed PDF), never by the bot
           if (m.flowReply && r.messageId) {
             await this.onFlowReply?.({ channelId, conversationId: r.conversationId, externalContactId: m.externalContactId, messageId: r.messageId, responseJson: m.flowReply.responseJson }).catch(() => undefined);
@@ -546,7 +550,10 @@ export class ChannelManager {
       settings,
       async () => {
         if (settings.typing && a.typing) await a.typing(externalContactId, Math.min(4000, 400 + text.length * 30)).catch(() => undefined);
-        return a.sendText(externalContactId, text);
+        // apps that align each line by its first letter (WhatsApp, Telegram, SMS, Messenger): invisible marks keep each line the
+        // message's way; the website chat and e-mail lay out the direction themselves
+        const t = this.types.get(channelId);
+        return a.sendText(externalContactId, t === 'webchat' || t === 'email' ? text : withDirectionMarks(text));
       },
       { maxWaitMs: opts.background ? 45_000 : 8_000 },
     );
@@ -798,24 +805,52 @@ export class ChannelManager {
     return { ...u, settings };
   }
 
-  private async botSay(channelId: string, convId: string, ext: string, text: string): Promise<void> {
+  /** The conversation's language (Hebrew unless the customer writes in English). */
+  async langOf(convId: string): Promise<Lang> {
+    return ((await this.db.query('SELECT lang FROM conversations WHERE id = $1', [convId]).catch(() => ({ rows: [] as { lang: string }[] }))).rows[0]?.lang === 'en' ? 'en' : 'he');
+  }
+  /** A message of Betty's in the conversation's language (so the stored copy is exactly what the customer got). */
+  async say(convId: string, text: string): Promise<string> { return localize(this.db, await this.langOf(convId), text); }
+
+  /** The customer wrote in Hebrew or in English: remember it on the conversation; an English one gets an "English" tag the team sees. */
+  async noteLanguage(convId: string, text: string): Promise<Lang | null> {
+    const lang = detectLang(text);
+    if (!lang) return null;
+    const r = await this.db.query(`UPDATE conversations SET lang = $2 WHERE id = $1 AND lang IS DISTINCT FROM $2 RETURNING id`, [convId, lang]);
+    if (!r.rowCount) return lang;
+    // Hebrew is the default: only an English conversation gets a tag ("English"); writing in Hebrew again takes it off
+    if (lang === 'en') {
+      await this.db.query(`INSERT INTO tags (name) SELECT 'English' WHERE NOT EXISTS (SELECT 1 FROM tags WHERE lower(name) = 'english')`).catch(() => undefined);
+      await this.db.query(`INSERT INTO conversation_tags (conversation_id, tag_id) SELECT $1, id FROM tags WHERE lower(name) = 'english' ON CONFLICT DO NOTHING`, [convId]);
+    } else {
+      await this.db.query(`DELETE FROM conversation_tags WHERE conversation_id = $1 AND tag_id IN (SELECT id FROM tags WHERE lower(name) = 'english')`, [convId]);
+    }
+    return lang;
+  }
+
+  private async botSay(channelId: string, convId: string, ext: string, textIn: string): Promise<void> {
+    const text = await this.say(convId, textIn);
     const sent = await this.sendText(channelId, ext, text, { background: true });
     const ins = await this.db.query(`INSERT INTO messages (conversation_id, direction, body, external_id, auto) VALUES ($1,'out',$2,$3,true) ON CONFLICT DO NOTHING RETURNING id`, [convId, text, sent.externalMessageId ?? null]);
     if (ins.rows[0]) { this.notifyMessage(channelId, convId, ins.rows[0].id); this.hookMessage('message.sent', convId, ins.rows[0].id); }
   }
 
   /** Who the bot is (its persona name) and what we know to call the customer: the name they gave the bot, else their profile name. */
-  private async botTextContext(convId: string, nameHint?: string): Promise<BotTextContext> {
-    const [persona, row] = await Promise.all([
+  private async botTextContext(convId: string, nameHint?: string, lang: Lang = 'he'): Promise<BotTextContext> {
+    const [persona0, row] = await Promise.all([
       loadPersona(this.db).catch(() => null),
       this.db.query(`SELECT ct.profile->>'fullName' AS full_name, ct.display_name FROM conversations c JOIN contacts ct ON ct.id = c.contact_id WHERE c.id = $1`, [convId]).then((r) => r.rows[0]).catch(() => undefined),
     ]);
+    // in English, the bot's name as translated ("בטי" → "Betty")
+    const persona = persona0 && lang === 'en' ? { ...persona0, name: (await dictionary(this.db)).exact.get(persona0.name?.trim() ?? '') ?? persona0.name } : persona0;
     return { botName: persona?.name, fullName: cleanName(nameHint) || cleanName(row?.full_name) || cleanName(row?.display_name) };
   }
 
   /** The bot's replies of one step; when the last is its menu and the channel can show buttons or a list, send the menu that way (the text is kept in the conversation either way). */
   private async botSayAll(channelId: string, convId: string, ext: string, bot: BotConfig, rawReplies: string[], menu: boolean | undefined, nameHint?: string): Promise<void> {
-    const replies = rawReplies.some((r) => r.includes('{')) ? await this.botTextContext(convId, nameHint).then((c) => rawReplies.map((r) => renderBotText(r, c))) : rawReplies;
+    const lang = await this.langOf(convId);
+    const localized = lang === 'en' ? await Promise.all(rawReplies.map((r) => localize(this.db, lang, r))) : rawReplies;
+    const replies = localized.some((r) => r.includes('{')) ? await this.botTextContext(convId, nameHint, lang).then((c) => localized.map((r) => renderBotText(r, c))) : localized;
     for (let i = 0; i < replies.length; i++) {
       const reply = replies[i]!;
       if (menu && i === replies.length - 1 && bot.interactiveMenus) {
@@ -922,9 +957,11 @@ export class ChannelManager {
   private async runBot(channelId: string, convId: string, ext: string, bot: BotConfig, rawText: string | null, hasMedia = false, inboundId?: string, thanked = ''): Promise<void> {
     const rx = this.reactor(channelId, ext, inboundId, bot, thanked);
     let text: string | null = hasMedia ? null : rawText;
-    const { rows } = await this.db.query('SELECT bot_state, bot_invalid, bot_item, assigned_to, flow_state FROM conversations WHERE id = $1', [convId]);
+    const { rows } = await this.db.query('SELECT bot_state, bot_invalid, bot_item, assigned_to, flow_state, lang FROM conversations WHERE id = $1', [convId]);
     const c = rows[0];
     if (!c || c.assigned_to) return; // a person already owns this conversation
+    // English commands and option names are read as the Hebrew ones the flow knows ("menu" → "תפריט", "Lasers" → "לייזרים")
+    if (c.lang === 'en' && text) { text = await fromEnglish(this.db, text); rawText = text; }
     if (c.bot_state === 'human') return; // handed over (or stopped by the loop guard): silent, no reactions either, until a person closes it
     if (text !== null && text.trim() === '[unsupported message type]') text = null;
 
@@ -947,11 +984,15 @@ export class ChannelManager {
     const persona = (await loadPersona(this.db).catch(() => null)) ?? { name: '', role: '' };
     text = withoutBotName(text, persona.name);
     rawText = withoutBotName(rawText, persona.name);
+    if (c.lang === 'en') {   // "Betty, are you there?": her English name is not part of the question either
+      const en = (await dictionary(this.db)).exact.get(persona.name?.trim() ?? '');
+      if (en) { text = withoutBotName(text, en); rawText = withoutBotName(rawText, en); }
+    }
     // "מי את?" / "את בוט?" / "מה שלומך?": the bot answers as itself, then picks up the question it was waiting for
     const told = async () => {
-      const r = (await this.db.query(`SELECT body FROM messages WHERE conversation_id = $1 AND direction = 'out' AND body LIKE '💡 הידעת?%' ORDER BY created_at DESC LIMIT 30`, [convId])).rows.map((x) => x.body as string);
+      const r = (await this.db.query(`SELECT body FROM messages WHERE conversation_id = $1 AND direction = 'out' AND (body LIKE '💡 הידעת?%' OR body LIKE '💡 Did you know?%') ORDER BY created_at DESC LIMIT 30`, [convId])).rows.map((x) => x.body as string);
       const last = (await this.db.query(`SELECT body FROM messages WHERE conversation_id = $1 AND direction = 'out' ORDER BY created_at DESC LIMIT 1`, [convId])).rows[0]?.body as string | undefined;
-      return { r, lastWasFact: !!last?.startsWith('💡 הידעת?') };
+      return { r, lastWasFact: !!last && (last.startsWith('💡 הידעת?') || last.startsWith('💡 Did you know?')) };
     };
     const own = identityReply(text, persona) ?? smallTalkReply(text, persona.name) ?? await officerReply(this.db, text).catch(() => null)
       ?? await told().then(({ r, lastWasFact }) => factReply(text, r, lastWasFact)).catch(() => null);
@@ -1053,8 +1094,9 @@ export class ChannelManager {
   async emergency(channelId: string, convId: string, ext: string, messageId: string, text: string): Promise<void> {
     const recent = (await this.db.query(`SELECT 1 FROM messages WHERE conversation_id = $1 AND automation = 'emergency' AND created_at > now() - interval '10 minutes' LIMIT 1`, [convId])).rowCount;
     if (!recent) {
-      const sent = await this.sendText(channelId, ext, text, { background: true }).catch(() => ({} as { externalMessageId?: string }));
-      const ins = await this.db.query(`INSERT INTO messages (conversation_id, direction, body, external_id, auto, automation) VALUES ($1,'out',$2,$3,true,'emergency') ON CONFLICT DO NOTHING RETURNING id`, [convId, text, sent.externalMessageId ?? null]);
+      const textL = await this.say(convId, text);
+      const sent = await this.sendText(channelId, ext, textL, { background: true }).catch(() => ({} as { externalMessageId?: string }));
+      const ins = await this.db.query(`INSERT INTO messages (conversation_id, direction, body, external_id, auto, automation) VALUES ($1,'out',$2,$3,true,'emergency') ON CONFLICT DO NOTHING RETURNING id`, [convId, textL, sent.externalMessageId ?? null]);
       if (ins.rows[0]) { this.notifyMessage(channelId, convId, ins.rows[0].id); this.hookMessage('message.sent', convId, ins.rows[0].id); }
     }
     await this.setOurReaction(messageId, '🚨', null).catch(() => undefined);
@@ -1105,8 +1147,9 @@ export class ChannelManager {
       if (lately) return true;
       const who = (await this.db.query(`SELECT COALESCE(u.name_he, u.name) AS who FROM conversations c JOIN users u ON u.id = c.assigned_to WHERE c.id = $1`, [convId])).rows[0]?.who as string | undefined;
       const body = stillHereText(who ?? null);
-      const sent = await this.sendText(channelId, ext, body, { background: true }).catch(() => ({} as { externalMessageId?: string }));
-      const ins = await this.db.query(`INSERT INTO messages (conversation_id, direction, body, external_id, auto, automation) VALUES ($1,'out',$2,$3,true,'comfort_follow') ON CONFLICT DO NOTHING RETURNING id`, [convId, body, sent.externalMessageId ?? null]);
+      const bodyL = await this.say(convId, body);
+      const sent = await this.sendText(channelId, ext, bodyL, { background: true }).catch(() => ({} as { externalMessageId?: string }));
+      const ins = await this.db.query(`INSERT INTO messages (conversation_id, direction, body, external_id, auto, automation) VALUES ($1,'out',$2,$3,true,'comfort_follow') ON CONFLICT DO NOTHING RETURNING id`, [convId, bodyL, sent.externalMessageId ?? null]);
       if (ins.rows[0]) { this.notifyMessage(channelId, convId, ins.rows[0].id); this.hookMessage('message.sent', convId, ins.rows[0].id); }
       if (this.alertBudget()) void sendAlert(this.cfg, `💛 הלקוח כתב שוב ועדיין מחכה למענה${who ? ` (אצל ${who})` : ''}.`, { conversationId: convId });
       return true;
@@ -1130,8 +1173,9 @@ export class ChannelManager {
     const hours = await loadBusinessHours(this.db);
     const closed = hours.enabled && !isOpen(hours, new Date());
     const body = comfortText(level, { who: who ?? null, topic: topic ? `האחראי/ת על ${topic}` : null, closed, hours: closed ? hoursSummary(hours) : undefined, movedNow }, text);
-    const sent = await this.sendText(channelId, ext, body, { background: true }).catch(() => ({} as { externalMessageId?: string }));
-    const ins = await this.db.query(`INSERT INTO messages (conversation_id, direction, body, external_id, auto, automation) VALUES ($1,'out',$2,$3,true,'comfort') ON CONFLICT DO NOTHING RETURNING id`, [convId, body, sent.externalMessageId ?? null]);
+    const bodyL = await this.say(convId, body);
+    const sent = await this.sendText(channelId, ext, bodyL, { background: true }).catch(() => ({} as { externalMessageId?: string }));
+    const ins = await this.db.query(`INSERT INTO messages (conversation_id, direction, body, external_id, auto, automation) VALUES ($1,'out',$2,$3,true,'comfort') ON CONFLICT DO NOTHING RETURNING id`, [convId, bodyL, sent.externalMessageId ?? null]);
     if (ins.rows[0]) { this.notifyMessage(channelId, convId, ins.rows[0].id); this.hookMessage('message.sent', convId, ins.rows[0].id); }
     await this.setOurReaction(messageId, level === 'hazard' ? '⚠️' : '💛', null).catch(() => undefined);
     await this.db.query(`INSERT INTO conversation_notes (conversation_id, body) VALUES ($1, $2)`, [convId, `💛 הלקוח ${feeling}. בטי הכירה בזה, ${movedNow ? 'העבירה את הפנייה לטיפול אנושי ' : ''}ותשלח עדכוני ליווי עד שמישהו מהצוות יענה. מומלץ לחזור אליו בהקדם.`]);
@@ -1165,8 +1209,9 @@ export class ChannelManager {
       closed ? `כרגע אנחנו מחוץ לשעות הפעילות (${hoursSummary(hours)}), ונחזור אליך בהקדם בשעות הפעילות.` : 'נחזור אליך בהקדם האפשרי. אפשר לכתוב כאן כל פרט נוסף, והוא יתווסף לפנייה.',
       'אם זה מצב חירום, התקשרו מיד למד"א 101 או לכבאות והצלה 102.',
     ].join('\n');
-    const sent = await this.sendText(channelId, ext, text, { background: true });
-    const ins = await this.db.query(`INSERT INTO messages (conversation_id, direction, body, external_id, auto, automation) VALUES ($1,'out',$2,$3,true,'waiting_status') ON CONFLICT DO NOTHING RETURNING id`, [convId, text, sent.externalMessageId ?? null]);
+    const textL = await this.say(convId, text);
+    const sent = await this.sendText(channelId, ext, textL, { background: true });
+    const ins = await this.db.query(`INSERT INTO messages (conversation_id, direction, body, external_id, auto, automation) VALUES ($1,'out',$2,$3,true,'waiting_status') ON CONFLICT DO NOTHING RETURNING id`, [convId, textL, sent.externalMessageId ?? null]);
     if (ins.rows[0]) { this.notifyMessage(channelId, convId, ins.rows[0].id); this.hookMessage('message.sent', convId, ins.rows[0].id); }
     return true;
   }
@@ -1180,8 +1225,9 @@ export class ChannelManager {
     if (!c || (!c.assigned_to && c.bot_state !== 'human') || c.answered) return false;
     const reply = await officerReply(this.db, text);
     if (!reply) return false;
-    const sent = await this.sendText(channelId, ext, reply, { background: true });
-    const ins = await this.db.query(`INSERT INTO messages (conversation_id, direction, body, external_id, auto, automation) VALUES ($1,'out',$2,$3,true,'officer_info') ON CONFLICT DO NOTHING RETURNING id`, [convId, reply, sent.externalMessageId ?? null]);
+    const replyL = await this.say(convId, reply);
+    const sent = await this.sendText(channelId, ext, replyL, { background: true });
+    const ins = await this.db.query(`INSERT INTO messages (conversation_id, direction, body, external_id, auto, automation) VALUES ($1,'out',$2,$3,true,'officer_info') ON CONFLICT DO NOTHING RETURNING id`, [convId, replyL, sent.externalMessageId ?? null]);
     if (ins.rows[0]) { this.notifyMessage(channelId, convId, ins.rows[0].id); this.hookMessage('message.sent', convId, ins.rows[0].id); }
     return true;
   }
@@ -1299,10 +1345,11 @@ export class ChannelManager {
     );
     if (!claim.rowCount) return;
     try {
-      const sent = await this.sendText(channelId, externalContactId, hours.awayMessage, { background: true });
+      const away = await this.say(conversationId, hours.awayMessage);
+      const sent = await this.sendText(channelId, externalContactId, away, { background: true });
       const ins = await this.db.query(
         `INSERT INTO messages (conversation_id, direction, body, external_id, auto) VALUES ($1,'out',$2,$3,true) RETURNING id`,
-        [conversationId, hours.awayMessage, sent.externalMessageId ?? null],
+        [conversationId, away, sent.externalMessageId ?? null],
       );
       this.emit({ channelId, type: 'message', conversationId, messageId: ins.rows[0].id });
     } catch {

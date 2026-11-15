@@ -5,6 +5,7 @@ import type { Db } from '../db.js';
  * (Safety > officers and topics): name, office phone and e-mail. Only officers marked as public; their WhatsApp (often a personal
  * mobile) only when allowed for that officer. Asked about contact but no topic recognised: the topics there are officers for.
  */
+const ASK_EN = /\b(officer|in charge|responsible|who handles|who deals|contact (for|of)|phone (number )?(of|for)|email (of|for))\b/i;
 const ASK = /(ממונה|ממונת|ממוני|אחראי|אחראית|מי מטפל|מי מטפלת|למי (לפנות|פונים|אפשר לפנות)|טלפון|מספר (ה)?טלפון|פרטי (ה)?קשר|איך (משיגים|יוצרים קשר|מגיעים ל)|מייל|אימייל|מי (ה)?ממונה)/;
 /** Customer words → words that appear in topic names (so "שריפה" finds "גילוי אש" and "מתזים"). */
 const ALIASES: [RegExp, string[]][] = [
@@ -28,6 +29,14 @@ const ALIASES: [RegExp, string[]][] = [
   [/^(חלל|מוקף)/, ['חלל']],
   [/^(מפגע|מפגעים)/, ['מפגע']],
   [/^(תאורה)/, ['תאורה']],
+  // English words → the Hebrew topic names
+  [/^(lasers?)$/i, ['לייזר']], [/^(asbestos)$/i, ['אסבסט']], [/^(radiation|radioactive|x-?rays?)$/i, ['קרינה']],
+  [/^(fire|fires|extinguishers?|sprinklers?|smoke)$/i, ['אש', 'מתזים', 'כיבוי', 'כבאות']], [/^(gas|gases|cylinders?|lpg)$/i, ['גז', 'גפ']],
+  [/^(chemicals?|chemistry|hazmat|waste)$/i, ['כימ', 'חומ']], [/^(electric(al|ity)?)$/i, ['חשמל']],
+  [/^(heights?|ladders?|scaffold(s|ing)?|roofs?|railings?)$/i, ['גובה', 'סולמ', 'פיגומ', 'מעק']], [/^(elevators?|lifts?)$/i, ['מעלי', 'מעלו']],
+  [/^(bio(safety|logical)?)$/i, ['biosafety', 'ביולוג']], [/^(noise)$/i, ['רעש']], [/^(cranes?|forklifts?|lifting)$/i, ['הרמה', 'עגורנ']],
+  [/^(pressure|boilers?)$/i, ['לחץ', 'דוד']], [/^(training|courses?)$/i, ['הדרכ']], [/^(hygiene|monitoring)$/i, ['גיהות', 'ניטור']],
+  [/^(hazards?)$/i, ['מפגע']], [/^(machines?|machinery|guarding)$/i, ['מכונ', 'מיגון']], [/^(lighting)$/i, ['תאורה']],
 ];
 const STOP = new Set(['ממונה', 'ממונת', 'ממוני', 'על', 'של', 'מי', 'מה', 'את', 'הטלפון', 'טלפון', 'מספר', 'בנושא', 'נושא', 'בטיחות', 'הבטיחות', 'למי', 'פונים', 'לפנות', 'אחראי', 'אחראית', 'איך', 'אפשר', 'שלו', 'שלה', 'המשרד', 'משרדי', 'המשרדי', 'מייל', 'אימייל', 'פרטי', 'קשר']);
 /** Hebrew spelled with or without extra letters ("ליזר" / "לייזר", "כימיקלים" / "כימיקאלים"): doubled yod and vav count once. */
@@ -88,7 +97,7 @@ export function formatOfficers(found: { topic: string; officers: PublicOfficer[]
 export async function officerReply(db: Db, text: string | null | undefined): Promise<string | null> {
   if (!text || text.length > 160) return null;
   text = fixOfficerTypos(text);
-  if (!ASK.test(text)) return null;
+  if (!ASK.test(text) && !ASK_EN.test(text)) return null;
   const rows = (await db.query(
     `SELECT o.name, o.office_phone AS "officePhone", o.email, o.phone, o.show_whatsapp AS "showWhatsapp", array_agg(t.topic ORDER BY t.topic) AS topics
        FROM officers o JOIN officer_topics t ON t.officer_id = o.id WHERE o.active AND o.public GROUP BY o.id ORDER BY o.sort, o.created_at`)).rows as PublicOfficer[];
@@ -97,7 +106,7 @@ export async function officerReply(db: Db, text: string | null | undefined): Pro
   const hit = topicsIn(text, all).slice(0, 3);
   if (!hit.length) {
     // asked about a person in charge, no topic recognised: only when it is clearly about officers
-    if (!/(ממונה|ממונת|ממוני|אחראי|אחראית)/.test(text)) return null;
+    if (!/(ממונה|ממונת|ממוני|אחראי|אחראית)/.test(text) && !/\b(officer|in charge|responsible)\b/i.test(text)) return null;
     return `על איזה נושא? יש לנו ממונים בנושאים: ${all.slice(0, 25).join(', ')}.\nכתבו למשל: "מי הממונה על ${all[0]}?"`;
   }
   return formatOfficers(hit.map((topic) => ({ topic, officers: rows.filter((r) => r.topics.includes(topic)) })));

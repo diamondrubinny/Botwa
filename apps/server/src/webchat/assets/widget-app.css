@@ -50,7 +50,7 @@ form.composer textarea { flex: 1; resize: none; max-height: 110px; min-height: 4
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 
 /* right-to-left and mixed text */
-.msg .text { text-align: start; unicode-bidi: plaintext; }
+.msg .text { text-align: start; unicode-bidi: isolate; }
 .sug li { text-align: start; unicode-bidi: plaintext; }
 form.composer textarea { text-align: start; unicode-bidi: plaintext; }
 .field input[dir=ltr] { text-align: left; }

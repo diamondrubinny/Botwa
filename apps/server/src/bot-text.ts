@@ -49,10 +49,12 @@ const WHO = /(^|\s)(מי את|מי אתה|מה שמך|מה השם שלך|איך 
 /** "את/אתה …" may ask about anything that the bot is; "זה/זאת …" only about being a machine (so "זה אמיתי ש…?" is a real question) */
 const BOT_YOU = /(^|\s)(את|אתה)\s+(בוט|רובוט|מכונה|מחשב|בינה מלאכותית|ai|צ'?אטבוט|אמיתי|אמיתית|בן אדם|בת אדם|נציג אמיתי|נציגה אמיתית)(\s|$)/i;
 const BOT_IT = /(^|\s)(זה|זאת|אני (מדבר|מדברת) עם|(מדבר|מדברת) עם)\s+(בוט|רובוט|מכונה|בינה מלאכותית|ai|צ'?אטבוט|בן אדם|נציג אמיתי)(\s|$)/i;
-const ONLY = new Set(['מי זה', 'מי זאת', 'בוט', 'רובוט']);
+/** The same questions in English. */
+const WHO_EN = /^(who are you|who is this|what('?s| is) your name|who am i (talking|speaking|chatting|writing) (to|with)|are you (a |an )?(bot|robot|machine|ai|human|real( person)?|person|chatbot)|is this (a )?(bot|robot|real person|human))$/;
+const ONLY = new Set(['מי זה', 'מי זאת', 'בוט', 'bot', 'רובוט']);
 export function identityReply(text: string | null | undefined, persona: { name?: string | null; role?: string | null }): string | null {
   const t = (text ?? '').toLowerCase().replace(/[?!.,״"׳:;()\u200e\u200f]/g, ' ').replace(/\s+/g, ' ').trim();
-  if (!t || t.split(' ').length > 7 || !(ONLY.has(t) || WHO.test(t) || BOT_YOU.test(t) || BOT_IT.test(t))) return null;
+  if (!t || t.split(' ').length > 7 || !(ONLY.has(t) || WHO.test(t) || BOT_YOU.test(t) || BOT_IT.test(t) || WHO_EN.test(t))) return null;
   const name = (persona.name ?? '').trim();
   const role = (persona.role ?? '').trim();
   const me = name ? `אני ${name}${role ? `, ${role}` : ', הבוט של השירות'}` : `אני ${role || 'הבוט של השירות'}`;
@@ -75,10 +77,13 @@ export function withoutBotName(text: string | null, name: string | null | undefi
 const HOW = /^(ו?מה שלומך|מה שלומכם|מה נשמע|מה נשמע איתך|מה קורה|מה קורה איתך|מה העניינים|מה איתך|איך את|איך אתה|איך הולך|איך היום שלך|מה המצב|מה מצבך|הכל טוב|הכול טוב|הכל בסדר|הכול בסדר)( איתך| אצלך| היום)?$/;
 /** "את כאן?", "יש מישהו?", "הלו?", or just the bot's name: Betty is here (never taken as an answer to the question she asked). */
 const HERE = /^(את|אתה|עדיין|את עדיין|אתה עדיין) (כאן|פה|שם|איתי|איתנו|זמינה|זמין|ערה|ער|מחוברת|מחובר|שומעת|שומע|קוראת|קורא)$|^(יש|יש פה|יש כאן|יש שם)? ?מישהו( כאן| פה| שם)?$|^(הלו+|הללו|הי+|היי+)$|^(את|אתה) עונה( לי)?$/;
+const HOW_EN = /^(hi |hello |hey )?(how are you( doing| today)?|how('?s| is) it going|how are things|what'?s up|how do you do)$/;
+const HERE_EN = /^(hi |hello |hey )?(are you (there|here|still there|still here|online|with me|awake|listening)|(is )?(any ?one|any ?body|someone|somebody) (there|here)|you there|still there)$/;
 export function smallTalkReply(text: string | null | undefined, botName?: string | null): string | null {
-  const t = (text ?? '').toLowerCase().replace(/[?!.,״"׳:;()\u200e\u200f\u{1F300}-\u{1FAFF}\u2600-\u27BF]/gu, ' ').replace(/^(היי|הי|שלום|אהלן|בוקר טוב|ערב טוב|צהריים טובים)\s+/, '').replace(/\s+/g, ' ').trim();
+  const t = (text ?? '').toLowerCase().replace(/[?!.,״"׳:;()\u200e\u200f\u{1F300}-\u{1FAFF}\u2600-\u27BF]/gu, ' ').replace(/^(היי|הי|שלום|אהלן|בוקר טוב|ערב טוב|צהריים טובים|hi|hello|hey)\s+/, '').replace(/\s+/g, ' ').trim();
   if (!t) return /^\s*[?？]+\s*$/.test(text ?? '') ? 'כן, אני כאן איתך 😊' : null;   // a lone "?" (or "בטי?"): are you there?
-  if (HOW.test(t)) return 'תודה ששאלת, הכול טוב אצלי 😊 במה אפשר לעזור?';
+  if (HOW.test(t) || HOW_EN.test(t)) return 'תודה ששאלת, הכול טוב אצלי 😊 במה אפשר לעזור?';
+  if (HERE_EN.test(t)) return 'כן, אני כאן איתך 😊';
   const name = (botName ?? '').trim().toLowerCase();
   if ((HERE.test(t) && !/^(הי+|היי+)$/.test(t)) || (name && t.replace(/^(ו|ה)/, '') === name)) return 'כן, אני כאן איתך 😊';
   return null;
