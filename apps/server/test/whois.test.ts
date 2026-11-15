@@ -3,7 +3,7 @@ import { createDb } from '../src/db.js';
 import { TEMPLATE_TAGS } from '../src/flow/safetyTemplate.js';
 import { migrate } from '../src/migrate.js';
 import { cleanOfficePhone } from '../src/safety/officers.js';
-import { officerReply, topicsIn } from '../src/safety/whoIs.js';
+import { fixOfficerTypos, officerReply, topicsIn } from '../src/safety/whoIs.js';
 
 describe('which topic a question names', () => {
   const topics = [...TEMPLATE_TAGS];
@@ -17,6 +17,12 @@ describe('which topic a question names', () => {
     expect(topicsIn('מי הממונה על סולמות', topics)).toEqual(expect.arrayContaining(['סולמות']));
     expect(topicsIn('ממונה מעליות', topics)).toEqual(['מעליות/מעלונים']);
     expect(topicsIn('מי הממונה', topics)).toEqual([]);
+  });
+  it('typos of "ממונה" are still a question about the officer; other words one letter away are not', () => {
+    expect(fixOfficerTypos('מי מומנה בטיחות אסבסט')).toBe('מי ממונה בטיחות אסבסט');
+    expect(fixOfficerTypos('מי הממונא על אש')).toBe('מי הממונה על אש');
+    expect(fixOfficerTypos('מי ממונה על גזים')).toBe('מי ממונה על גזים');
+    for (const t of ['קיבלתי ממנה טופס', 'מונה המים', 'שמונה בערב', 'תמונה של אסבסט', 'יש לי אמונה']) expect(fixOfficerTypos(t), t).toBe(t);
   });
   it('an office phone as written, with an extension', () => {
     expect(cleanOfficePhone('04-829-3000 שלוחה 12')).toBe('04-829-3000 שלוחה 12');

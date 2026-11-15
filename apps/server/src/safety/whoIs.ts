@@ -35,6 +35,31 @@ const plain = (s: string) => s.replace(/יי/g, 'י').replace(/וו/g, 'ו');
 const stem = (w: string) => plain(w).replace(/^[והבלמשכ](?=[א-ת]{3,})/, '').replace(/(ים|ות)$/, '');
 const words = (s: string) => plain(s.toLowerCase()).replace(/[?!.,:;()"״׳'/\\-]/g, ' ').split(/\s+/).filter(Boolean);
 
+/** One letter added, missing, changed or swapped. */
+function near(a: string, b: string): boolean {
+  if (Math.abs(a.length - b.length) > 1 || a === b) return a === b;
+  const d: number[][] = Array.from({ length: a.length + 1 }, (_, i) => [i, ...Array(b.length).fill(0)]);
+  for (let j = 1; j <= b.length; j++) d[0]![j] = j;
+  for (let i = 1; i <= a.length; i++) for (let j = 1; j <= b.length; j++) {
+    d[i]![j] = Math.min(d[i - 1]![j]! + 1, d[i]![j - 1]! + 1, d[i - 1]![j - 1]! + (a[i - 1] === b[j - 1] ? 0 : 1));
+    if (i > 1 && j > 1 && a[i - 1] === b[j - 2] && a[i - 2] === b[j - 1]) d[i]![j] = Math.min(d[i]![j]!, d[i - 2]![j - 2]! + 1);
+  }
+  return d[a.length]![b.length]! <= 1;
+}
+/** Real words one letter away from "ממונה" that mean something else ("from her", "a meter", "counts"). */
+const NOT_OFFICER = new Set(['ממנה', 'מונה', 'מנה', 'ממונן', 'שמונה', 'תמונה', 'אמונה', 'ממומן', 'ממונע']);
+/** Typos of "ממונה" ("מומנה", "ממונא", "מימונה") read as "ממונה", so the question is still recognised. */
+export function fixOfficerTypos(text: string): string {
+  return text.replace(/[א-ת"״]+/g, (w) => {
+    const m = /^([והלש]?)(.+)$/.exec(w)!;
+    for (const core of [w, m[2]!]) {
+      if (core.length < 4 || core.length > 6 || NOT_OFFICER.has(core) || NOT_OFFICER.has(w)) continue;
+      if (near(core, 'ממונה') || near(core, 'ממונת') || near(core, 'ממוני')) return `${core === w ? '' : m[1]}ממונה`;
+    }
+    return w;
+  });
+}
+
 export interface PublicOfficer { name: string; officePhone: string | null; email: string | null; phone: string | null; showWhatsapp: boolean; topics: string[] }
 
 /** The topics a question names, from the topics officers exist for. */
@@ -61,7 +86,9 @@ export function formatOfficers(found: { topic: string; officers: PublicOfficer[]
 
 /** Betty's answer to a question about who is responsible for a topic, or null when the message is not such a question. */
 export async function officerReply(db: Db, text: string | null | undefined): Promise<string | null> {
-  if (!text || text.length > 160 || !ASK.test(text)) return null;
+  if (!text || text.length > 160) return null;
+  text = fixOfficerTypos(text);
+  if (!ASK.test(text)) return null;
   const rows = (await db.query(
     `SELECT o.name, o.office_phone AS "officePhone", o.email, o.phone, o.show_whatsapp AS "showWhatsapp", array_agg(t.topic ORDER BY t.topic) AS topics
        FROM officers o JOIN officer_topics t ON t.officer_id = o.id WHERE o.active AND o.public GROUP BY o.id ORDER BY o.sort, o.created_at`)).rows as PublicOfficer[];
