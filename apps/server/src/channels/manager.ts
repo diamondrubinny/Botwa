@@ -40,7 +40,7 @@ import { isSensitive, pickGif, type GifMoment } from '../bot-gifs.js';
 import { isEmergency } from '../emergency.js';
 import { isWaitingQuestion } from '../waiting.js';
 import { officerReply, officerUserFor } from '../safety/whoIs.js';
-import { comfortText, detectDistress, type Distress } from '../empathy.js';
+import { comfortText, detectDistress, stillHereText, type Distress } from '../empathy.js';
 import { factReply } from '../safety/facts.js';
 import { hoursSummary } from '../canned.js';
 import { staffMessage } from '../staff/assistant.js';
@@ -392,7 +392,19 @@ export class ChannelManager {
             return;
           }
           // a stressed or upset customer: the feeling acknowledged, a person at once, and Betty stays until a person answers
-          const distress = r.messageId && !stop && !m.media && (bot?.empathy?.enabled ?? true) && !isCommentContact(m.externalContactId) ? detectDistress(m.text) : null;
+          let distress = r.messageId && !stop && !m.media && (bot?.empathy?.enabled ?? true) && !isCommentContact(m.externalContactId) ? detectDistress(m.text) : null;
+          // the same message three times in a row in half an hour, with no answer at all in between: the customer feels unheard
+          // (answers to the bot's questions, like "דלג" twice, always have the bot's messages in between)
+          if (!distress && r.messageId && !stop && !m.media && (bot?.empathy?.enabled ?? true) && !isCommentContact(m.externalContactId) && (m.text ?? '').trim().length >= 2) {
+            const last = (await this.db.query(
+              `SELECT body, created_at FROM messages WHERE conversation_id = $1 AND direction = 'in' ORDER BY created_at DESC LIMIT 3`, [r.conversationId])).rows as { body: string | null; created_at: Date }[];
+            const same = last.length === 3 && last.every((x) => (x.body ?? '').trim().toLowerCase() === (m.text ?? '').trim().toLowerCase())
+              && Date.now() - new Date(last[2]!.created_at).getTime() < 30 * 60_000;
+            if (same) {
+              const answered = (await this.db.query(`SELECT 1 FROM messages WHERE conversation_id = $1 AND direction = 'out' AND automation IS NULL AND created_at > $2 LIMIT 1`, [r.conversationId, last[2]!.created_at])).rowCount;
+              if (!answered) distress = 'upset';
+            }
+          }
           if (distress && r.messageId && await this.comfort(channelId, r.conversationId, m.externalContactId, r.messageId, m.text ?? '', distress).catch(() => false)) {
             this.emit({ channelId, type: 'message', conversationId: r.conversationId, messageId: r.messageId });
             this.onInbound?.(r.conversationId);
@@ -1073,12 +1085,23 @@ export class ChannelManager {
               EXISTS (SELECT 1 FROM messages m WHERE m.conversation_id = c.id AND m.automation = 'comfort' AND m.created_at > now() - interval '15 minutes') AS recent
          FROM conversations c WHERE c.id = $1`, [convId])).rows[0];
     if (!c) return false;
-    const feeling = level === 'worried' ? 'נשמע/ת לחוץ/ה או מודאג/ת' : 'נשמע/ת מתוסכל/ת מההמתנה';
+    const feeling = level === 'hazard' ? 'מדווח/ת על מפגע או סכנה' : level === 'worried' ? 'נשמע/ת לחוץ/ה או מודאג/ת' : 'נשמע/ת מתוסכל/ת מההמתנה';
     if (c.answered) {
       await this.db.query(`INSERT INTO conversation_notes (conversation_id, body) VALUES ($1, $2)`, [convId, `💛 הלקוח ${feeling}. כדאי להכיר בזה בתשובה ולומר מה הצעד הבא ומתי.`]);
       return false;   // a person is in the conversation: they answer, as usual
     }
-    if (c.recent) return false;
+    if (c.recent) {
+      // writing again while nobody answered yet: never silence. A short "received, still on it" at most every 5 minutes
+      const lately = (await this.db.query(`SELECT 1 FROM messages WHERE conversation_id = $1 AND automation IN ('comfort', 'comfort_follow') AND created_at > now() - interval '5 minutes' LIMIT 1`, [convId])).rowCount;
+      if (lately) return true;
+      const who = (await this.db.query(`SELECT COALESCE(u.name_he, u.name) AS who FROM conversations c JOIN users u ON u.id = c.assigned_to WHERE c.id = $1`, [convId])).rows[0]?.who as string | undefined;
+      const body = stillHereText(who ?? null);
+      const sent = await this.sendText(channelId, ext, body, { background: true }).catch(() => ({} as { externalMessageId?: string }));
+      const ins = await this.db.query(`INSERT INTO messages (conversation_id, direction, body, external_id, auto, automation) VALUES ($1,'out',$2,$3,true,'comfort_follow') ON CONFLICT DO NOTHING RETURNING id`, [convId, body, sent.externalMessageId ?? null]);
+      if (ins.rows[0]) { this.notifyMessage(channelId, convId, ins.rows[0].id); this.hookMessage('message.sent', convId, ins.rows[0].id); }
+      void sendAlert(this.cfg, `💛 הלקוח כתב שוב ועדיין מחכה למענה${who ? ` (אצל ${who})` : ''}.`, { conversationId: convId });
+      return true;
+    }
     // a person now: the officer for the topic named (if they have an account), else whoever holds it, else normal routing
     let movedNow = false;
     let topic: string | null = null;
@@ -1097,11 +1120,11 @@ export class ChannelManager {
     const who = (await this.db.query(`SELECT COALESCE(u.name_he, u.name) AS who FROM conversations c JOIN users u ON u.id = c.assigned_to WHERE c.id = $1`, [convId])).rows[0]?.who as string | undefined;
     const hours = await loadBusinessHours(this.db);
     const closed = hours.enabled && !isOpen(hours, new Date());
-    const body = comfortText(level, { who: who ?? null, topic: topic ? `האחראי/ת על ${topic}` : null, closed, hours: closed ? hoursSummary(hours) : undefined, movedNow });
+    const body = comfortText(level, { who: who ?? null, topic: topic ? `האחראי/ת על ${topic}` : null, closed, hours: closed ? hoursSummary(hours) : undefined, movedNow }, text);
     const sent = await this.sendText(channelId, ext, body, { background: true }).catch(() => ({} as { externalMessageId?: string }));
     const ins = await this.db.query(`INSERT INTO messages (conversation_id, direction, body, external_id, auto, automation) VALUES ($1,'out',$2,$3,true,'comfort') ON CONFLICT DO NOTHING RETURNING id`, [convId, body, sent.externalMessageId ?? null]);
     if (ins.rows[0]) { this.notifyMessage(channelId, convId, ins.rows[0].id); this.hookMessage('message.sent', convId, ins.rows[0].id); }
-    await this.setOurReaction(messageId, '💛', null).catch(() => undefined);
+    await this.setOurReaction(messageId, level === 'hazard' ? '⚠️' : '💛', null).catch(() => undefined);
     await this.db.query(`INSERT INTO conversation_notes (conversation_id, body) VALUES ($1, $2)`, [convId, `💛 הלקוח ${feeling}. בטי הכירה בזה, ${movedNow ? 'העבירה את הפנייה לטיפול אנושי ' : ''}ותשלח עדכוני ליווי עד שמישהו מהצוות יענה. מומלץ לחזור אליו בהקדם.`]);
     await this.db.query(`INSERT INTO tags (name) SELECT 'זקוק לליווי' WHERE NOT EXISTS (SELECT 1 FROM tags WHERE lower(name) = 'זקוק לליווי')`).catch(() => undefined);
     const tag = (await this.db.query(`SELECT id FROM tags WHERE lower(name) = 'זקוק לליווי' LIMIT 1`)).rows[0]?.id as string | undefined;

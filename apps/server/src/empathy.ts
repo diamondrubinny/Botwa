@@ -4,7 +4,7 @@
  * known) and stays with the customer until a person answers (follow-ups at 5, 15 and 30 minutes, see runComfort).
  * An emergency is handled before this (emergency.ts). Texts are written without gendered verbs about the customer or the handler.
  */
-export type Distress = 'worried' | 'upset';
+export type Distress = 'worried' | 'upset' | 'hazard';
 
 const WORRIED = [
   'לחוץ', 'לחוצה', 'לחוצים', 'לחוצות', 'אני בלחץ', 'ממש בלחץ', 'בלחץ נוראי', 'בלחץ רציני', 'נכנסתי ללחץ', 'מלחיץ', 'מלחיצה', 'נלחצתי', 'נלחץ', 'נלחצת',
@@ -28,6 +28,7 @@ const has = (t: string, w: string) => new RegExp(`\\s[והשכ]?${w.replace(/[.*
 
 export function detectDistress(text: string | null | undefined): Distress | null {
   if (!text || text.length > 600) return null;
+  if (detectHazard(text)) return 'hazard';
   // the technical senses are taken out first; what is left decides
   const t = norm(text).replace(new RegExp(TECHNICAL.source, 'g'), ' ');
   if (WORRIED.some((w) => has(t, w))) return 'worried';
@@ -35,12 +36,52 @@ export function detectDistress(text: string | null | undefined): Distress | null
   return null;
 }
 
+/**
+ * A report of a hazard happening here ("סכנה לייזר", "יש מפגע חשמלי בחדר", "המדף לא בטוח"): not an emergency with injured
+ * people (emergency.ts handles those), but it must reach the officer at once, with first safety advice for the topic.
+ * Questions about hazards in general ("מה נחשב עבודה מסוכנת?", "מי הממונה על מפגעים?") are not reports.
+ */
+const HAZARD = /(^|\s)(ה|ו|ש|ב)?(סכנה|סכנת|מפגע|מפגעים|בסכנה|מסוכן|מסוכנת|לא בטוח|לא בטוחה|לא בטיחותי|לא בטיחותית|דליפה|דולף|דולפת|נזילה|קצר חשמלי|חוט חשוף|חוטים חשופים)(?=\s)/;
+const QUESTION = /^\s(מה|איך|האם|מי|איפה|כמה|למה|אילו|איזה|איזו|באיזה|מתי|ממתי|מהו|מהי|מהם)\s/;
+const NOT_REPORT = /חומרים מסוכנים|חומ"ס|פסולת מסוכנת|עבודה מסוכנת|עבודות מסוכנות|סקר סיכונים|הערכת סיכונים|ניהול סיכונים/;
+export function detectHazard(text: string | null | undefined): boolean {
+  if (!text || text.length > 400) return false;
+  const t = norm(text).replace(/([א-ת])\1+/g, '$1');   // "ססכנה" (a letter typed twice) is still "סכנה"
+  if (!HAZARD.test(t)) return false;
+  if (QUESTION.test(t) && !/(יש|כאן|פה|עכשיו|כרגע|אצלנו|בחדר|במעבדה)/.test(t)) return false;
+  if (NOT_REPORT.test(t) && !/(סכנה|מפגע|דולף|נזילה|עכשיו|כרגע)/.test(t)) return false;
+  return true;
+}
+
+/** First advice by topic: general, widely accepted safety steps only, always "if it is safe". */
+const ADVICE: [RegExp, string][] = [
+  [/לייזר|ליזר|קרן/, 'לא להסתכל לכיוון הקרן או להחזרות שלה. אם אפשר לעשות זאת בבטחה, לכבות את הלייזר או לחסום את הקרן, ולהרחיק אנשים מהאזור. אם הייתה חשיפה של העיניים, לפנות מיד לבדיקה רפואית.'],
+  [/אסבסט/, 'לא לגעת, לא לנקות ולא לטאטא. לצאת מהחדר, לסגור אותו ולא לאפשר כניסה עד שהממונה יגיע.'],
+  [/חשמל|חוט|שקע|לוח|קצר|ניצוץ|ניצוצות/, 'לא לגעת בציוד או בחוטים. לנתק את החשמל רק אם אפשר לעשות זאת בבטחה, ולהרחיק אנשים מהמקום.'],
+  [/כימ|חומר|נשפך|שפך|דליפ|דולף|נזיל|ריח/, 'להתרחק מהחומר ולא לגעת בו בלי ציוד מגן. לאוורר אם זה בטוח, ולהרחיק אנשים מהאזור.'],
+  [/קרינה|רדיו|מקור/, 'להתרחק מהמקור, לצמצם את הזמן בקרבתו ולהרחיק אנשים מהאזור.'],
+  [/גובה|סולם|פיגום|מעקה|גג|מדף|נופל|ליפול|קורס/, 'לסמן את המקום, להרחיק אנשים ולא להשתמש בציוד או במבנה עד שייבדקו.'],
+  [/גז|בלון|צילינדר/, 'לא להפעיל מתגים או אש בקרבת המקום, לאוורר אם זה בטוח ולהתרחק.'],
+  [/ביולוג|דם|דגימ/, 'לא לגעת, לסמן את המקום ולהרחיק אנשים עד שהממונה יגיע.'],
+];
+export function hazardAdvice(text: string): string {
+  const t = text.toLowerCase();
+  return ADVICE.find(([re]) => re.test(t))?.[1] ?? 'אם יש סכנה מיידית, להתרחק מהמקום ולהרחיק אחרים, ולא לטפל במפגע לבד.';
+}
+
 export interface ComfortContext { who: string | null; topic?: string | null; closed: boolean; hours?: string; movedNow: boolean }
 
 const SAFETY_LINE = 'בכל סכנה מיידית, התקשרו מיד למד"א 101 או לכבאות והצלה 102.';
 
 /** The first answer: the feeling acknowledged, who handles it now, what to send meanwhile, and what to do in danger. */
-export function comfortText(level: Distress, c: ComfortContext): string {
+export function comfortText(level: Distress, c: ComfortContext, text = ''): string {
+  if (level === 'hazard') {
+    const whoLine = c.who
+      ? `העברתי את הדיווח בדחיפות אל ${c.who}${c.topic ? `, ${c.topic}` : ''}.`
+      : 'העברתי את הדיווח בדחיפות לצוות היחידה.';
+    const when = c.closed ? `כרגע אנחנו מחוץ לשעות הפעילות${c.hours ? ` (${c.hours})` : ''}, ולכן אם יש סכנה ממשית עכשיו, אל תחכו לנו.` : '';
+    return ['⚠️ תודה שדיווחת, זה חשוב.', `בינתיים: ${hazardAdvice(text)}`, whoLine, when, 'כדי שנגיע מהר, כתבו כאן איפה בדיוק (בניין וחדר) ומה רואים.', SAFETY_LINE].filter(Boolean).join('\n');
+  }
   const open = level === 'worried'
     ? 'מובן לגמרי שזה מלחיץ, ואני כאן איתך. 💛'
     : 'סליחה על ההמתנה, ומובן לגמרי שזה מתסכל. אני כאן איתך עד שיחזרו אליך. 🙏';
@@ -62,3 +103,8 @@ export function followUpText(step: 1 | 2 | 3, c: { who: string | null; closed: b
 
 /** Minutes after the first comforting message at which each follow-up is due. */
 export const FOLLOW_UP_AFTER = [5, 15, 30] as const;
+
+/** A short answer when the customer writes again while Betty is already with them and nobody has answered yet. */
+export function stillHereText(who: string | null): string {
+  return `קיבלתי 🙏 הפנייה כבר אצל ${who ?? 'צוות היחידה'} בטיפול מהיר, ועדכנתי שוב. אפשר להוסיף כאן כל פרט.\n${SAFETY_LINE}`;
+}

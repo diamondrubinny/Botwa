@@ -6,7 +6,7 @@ import { ChannelManager } from '../src/channels/manager.js';
 import type { AdapterContext, AdapterFactory, ChannelAdapter } from '../src/channels/types.js';
 import { loadConfig } from '../src/config.js';
 import { createDb } from '../src/db.js';
-import { comfortText, detectDistress, followUpText } from '../src/empathy.js';
+import { comfortText, detectDistress, detectHazard, followUpText, hazardAdvice } from '../src/empathy.js';
 import { migrate } from '../src/migrate.js';
 import { isWaitingQuestion } from '../src/waiting.js';
 
@@ -15,7 +15,15 @@ describe('recognising stress', () => {
     for (const t of ['אני ממש לחוצה', 'אני מפחד שמשהו לא בסדר', 'לא יודעת מה לעשות', 'נבהלתי מהרעש במעבדה', 'זה מלחיץ אותי']) expect(detectDistress(t), t).toBe('worried');
     for (const t of ['כבר שעה אני מחכה!!', 'אף אחד לא עונה לי', 'זה ממש מתסכל', 'נמאס לי, זה לא מקובל']) expect(detectDistress(t), t).toBe('upset');
     for (const t of ['איך מאחסנים בלון גז בלחץ?', 'מה לחץ העבודה של הדוד', 'מי דואג לציוד המגן?', 'מתח גבוה בלוח החשמל', 'מספר חדר 305', 'תודה רבה']) expect(detectDistress(t), t).toBeNull();
-    expect(detectDistress('גז בלחץ דולף ואני ממש לחוץ')).toBe('worried');
+    expect(detectDistress('גז בלחץ דולף ואני ממש לחוץ')).toBe('hazard');          // a leak reported: the hazard answer
+    expect(detectDistress('בלון גז בלחץ ואני ממש לחוץ')).toBe('worried');
+  });
+  it('a hazard report, not a question about hazards', () => {
+    for (const t of ['סכנה לייזר', 'ססכנה לייזר ', 'יש מפגע חשמלי בחדר 305', 'המדף במעבדה לא בטוח', 'חוט חשוף ליד הכיור', 'יש נזילה של חומר מתחת לשולחן']) expect(detectHazard(t), t).toBe(true);
+    for (const t of ['מה נחשב עבודה מסוכנת?', 'מי הממונה על מפגעים?', 'איך מאחסנים חומרים מסוכנים', 'אני צריך סקר סיכונים', 'מספר חדר 305']) expect(detectHazard(t), t).toBe(false);
+    expect(detectDistress('סכנה לייזר')).toBe('hazard');
+    expect(hazardAdvice('סכנה לייזר')).toContain('לא להסתכל לכיוון הקרן');
+    expect(hazardAdvice('יש אסבסט בחדר')).toContain('לא לטאטא');
   });
   it('texts: the feeling, who handles it, what to send, danger numbers; working hours told honestly', () => {
     const a = comfortText('worried', { who: 'אריה', topic: 'האחראי/ת על אסבסט', closed: false, movedNow: true });
@@ -87,6 +95,31 @@ describe('Betty stays with a stressed customer until a person answers', () => {
     await db.query(`INSERT INTO messages (conversation_id, direction, body, auto) VALUES ($1, 'out', 'שלום, אני מטפל בזה עכשיו', false)`, [c.id]);
     expect(await runComfort(db, mgr, at(16))).toEqual({ sent: 0, ended: 1 });
     expect((await conv(ext)).comfort_since).toBeNull();
+  });
+
+  it('"סכנה לייזר": first advice for lasers, urgent to the laser officer; writing again is never met with silence', async () => {
+    const o = (await db.query(`INSERT INTO officers (name, user_id) VALUES ('אריה כהן', $1) RETURNING id`, [officer])).rows[0].id;
+    await db.query(`INSERT INTO officer_topics (officer_id, topic) VALUES ($1, 'לייזרים')`, [o]);
+    const ext = '972500000779@s.whatsapp.net';
+    const a = await say(ext, 'סכנה לייזר');
+    expect(a).toContain('⚠️ תודה שדיווחת');
+    expect(a).toContain('לא להסתכל לכיוון הקרן');
+    expect(a).toContain('בניין וחדר');
+    const c = await conv(ext);
+    expect(c).toMatchObject({ assigned_to: officer, bot_state: 'human' });
+    expect(await say(ext, 'סכנה לייזר')).toBe('');                                   // the answer just went out: not again at once
+    await db.query(`UPDATE messages SET created_at = created_at - interval '6 minutes' WHERE conversation_id = $1 AND direction = 'out'`, [c.id]);
+    expect(await say(ext, 'סכנה לייזר')).toContain('קיבלתי 🙏 הפנייה כבר אצל אריה');
+  });
+
+  it('the same calm message three times with nobody answering: treated as feeling unheard', async () => {
+    const ext = '972500000780@s.whatsapp.net';
+    await say(ext, 'שלום');
+    const c = await conv(ext);
+    await db.query(`UPDATE conversations SET assigned_to = $2, bot_state = 'human' WHERE id = $1`, [c.id, officer]);
+    await say(ext, 'רציתי לברר על הדרכה');
+    await say(ext, 'רציתי לברר על הדרכה');
+    expect(await say(ext, 'רציתי לברר על הדרכה')).toContain('סליחה על ההמתנה');
   });
 
   it('a person answering right now: no automatic message, a note for them', async () => {
