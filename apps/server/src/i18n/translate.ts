@@ -135,6 +135,7 @@ const PAIRS: [string, string][] = [
   ['קרינה מייננת / בלתי מייננת', 'Ionising / non-ionising radiation'],
   ['לייזרים', 'Lasers'],
   ['אסבסט', 'Asbestos'],
+  ['בטיחות ביולוגית', 'Biosafety'],
   ['מערכות אש: גילוי / כיבוי', 'Fire systems: detection / suppression'],
   ['גיהות', 'Occupational hygiene'],
   ['הדרכות', 'Training'],

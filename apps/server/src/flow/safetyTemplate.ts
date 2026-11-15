@@ -46,7 +46,7 @@ export function buildSafetyFlow(tag: (name: string) => string, links: TemplateLi
   // ---- topics ----
   const T = {
     waste: 'שאילתא בנושא פינוי פסולת כימית', accident: 'דיווח תאונה / אירוע "כמעט-ונפגע"', event: 'קיום אירוע בקמפוס', offsite: 'ביצוע ניסוי מחוץ לקמפוס',
-    chem: 'שאלה בנושא חומ"ס', hazard: 'דיווח על מפגע', radiation: 'קרינה מייננת / בלתי מייננת', laser: 'לייזרים', asbestos: 'אסבסט', bio: 'Biosafety',
+    chem: 'שאלה בנושא חומ"ס', hazard: 'דיווח על מפגע', radiation: 'קרינה מייננת / בלתי מייננת', laser: 'לייזרים', asbestos: 'אסבסט', bio: 'בטיחות ביולוגית',
     fire: 'מערכות אש: גילוי / כיבוי', hygiene: 'גיהות', training: 'הדרכות', women: 'עבודת נשים', general: 'שאלה כללית / דיווח אחר',
   };
   add({
@@ -104,7 +104,7 @@ export function buildSafetyFlow(tag: (name: string) => string, links: TemplateLi
   report('rad', { label: 'קרינה', mediaText: 'שלחו תמונה של האזור או תארו בכתב את השאלה / הדיווח:', tags: ['קרינה מייננת'], to: 'מהנדס קרינה', areas: false, docs: true });
   report('las', { label: 'לייזרים', mediaText: 'שלחו תמונה של האזור או תארו בכתב את השאלה / הדיווח:', tags: ['לייזרים'], to: 'רמ"ד לייזרים', areas: false, docs: true });
   report('asb', { label: 'אסבסט', mediaText: 'שלחו תמונה של האזור או תארו בכתב את השאלה:', tags: ['אסבסט'], to: 'רמ"ד אסבסט', areas: false });
-  report('bio', { label: 'Biosafety', mediaText: 'שלחו תמונה של האזור או תארו בכתב את השאלה / הדיווח:', tags: ['Biosafety'], to: 'Biosafety Officer', areas: false, docs: true });
+  report('bio', { label: 'בטיחות ביולוגית', mediaText: 'שלחו תמונה של האזור או תארו בכתב את השאלה / הדיווח:', tags: ['Biosafety'], to: 'Biosafety Officer', areas: false, docs: true });
   report('fire', { label: 'מערכות אש', mediaText: 'שלחו תמונה של האזור או תארו בכתב את השאלה / הדיווח:', tags: ['גילוי אש', 'מתזים'], to: 'רמ"ד בטיחות אש', areas: false });
   report('hyg', { label: 'גיהות', mediaText: 'שלחו תמונה או תארו בכתב את השאלה / הדיווח:', tags: ['גיהות'], to: 'ממונה גיהות (להגדיר)', areas: true, place: true });
   report('gen', { label: 'שאלה כללית', mediaText: 'שלחו תמונה של האזור או תארו בכתב את השאלה / הדיווח:', tags: ['שאלה כללית'], to: 'הממונה לפי אזור', areas: true, docs: true });

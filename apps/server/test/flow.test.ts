@@ -970,3 +970,22 @@ describe('migration 077: the PI question of a saved template flow may be skipped
     await db.end();
   });
 });
+
+describe('migration 078: "Biosafety" in Hebrew in saved flows', () => {
+  it('menu option and node name become "בטיחות ביולוגית"; other options and the officer topic stay', async () => {
+    const db = createDb(process.env.TEST_DATABASE_URL ?? 'postgres://postgres@localhost:5432/botwa_test');
+    await db.query('DROP SCHEMA public CASCADE; CREATE SCHEMA public;');
+    await migrate(db);
+    const nodes = [
+      { id: 'topics', type: 'menu', text: 'ברצוני:', options: [{ label: 'לייזרים', next: 'x' }, { label: 'Biosafety', next: 'bio' }] },
+      { id: 'bio', type: 'handoff', label: 'Biosafety', text: '', officerTopic: 'Biosafety Officer' },
+    ];
+    await db.query(`INSERT INTO settings (key, value) VALUES ('flow', $1) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`, [{ start: 'topics', nodes }]);
+    await db.query(`DELETE FROM schema_migrations WHERE name LIKE '078%'`);
+    await migrate(db);
+    const v = (await db.query(`SELECT value FROM settings WHERE key = 'flow'`)).rows[0].value;
+    expect(v.nodes[0].options.map((o: { label: string }) => o.label)).toEqual(['לייזרים', 'בטיחות ביולוגית']);
+    expect(v.nodes[1]).toMatchObject({ label: 'בטיחות ביולוגית', officerTopic: 'Biosafety Officer' });
+    await db.end();
+  });
+});
