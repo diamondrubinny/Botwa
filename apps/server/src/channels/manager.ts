@@ -38,6 +38,8 @@ import { loadPersona } from '../routes/branding.js';
 import { saveUsername } from './username-store.js';
 import { isSensitive, pickGif, type GifMoment } from '../bot-gifs.js';
 import { isEmergency } from '../emergency.js';
+import { isWaitingQuestion } from '../waiting.js';
+import { hoursSummary } from '../canned.js';
 import { staffMessage } from '../staff/assistant.js';
 import { detect, sanitizeFileName } from '../media/validate.js';
 import { renderBotText, cleanName, identityReply, smallTalkReply, withoutBotName, type BotTextContext } from '../bot-text.js';
@@ -400,7 +402,12 @@ export class ChannelManager {
             this.hookConversation('conversation.status_changed', r.conversationId);
             return;
           }
-          if (r.messageId && stop) {
+          // "מתי חוזרים אליי?" while the inquiry is with the team: where it stands, instead of silence (the team is notified as usual)
+          const waited = !!r.messageId && !stop && !m.media && !isCommentContact(m.externalContactId) && isWaitingQuestion(m.text)
+            && await this.waitingStatus(channelId, r.conversationId, m.externalContactId).catch(() => false);
+          if (waited) {
+            // nothing more: no bot and no away notice for this message
+          } else if (r.messageId && stop) {
             // customer said stop: no bot, no away reply - a person decides what happens next
             if (r.needsRouting) await autoAssign(this.db, r.conversationId).catch(() => null);
           } else if (r.messageId && isCommentContact(m.externalContactId)) {
@@ -1029,6 +1036,34 @@ export class ChannelManager {
     if (to) this.onAssigned?.(convId, to);
     await audit(this.db, { action: 'conversation.emergency', target: convId, meta: { assignedTo: to } }).catch(() => undefined);
     void sendAlert(this.cfg, `🚨 פנייה דחופה (נראית כמו מצב חירום) התקבלה ב-${this.types.get(channelId) ?? 'ערוץ'}. ${to ? 'שויכה לנציג.' : 'לא שויכה: אין נציג זמין!'} יש לפתוח את השיחה ולחזור ללקוח מיד.`, { conversationId: convId });
+  }
+
+  /**
+   * The customer asks how their inquiry is going while it is with the team (assigned, or handed over and waiting): the inquiry
+   * number, who handles it (or that it waits for the next person), and the working hours when closed now. At most every 30
+   * minutes, and not when a person answered in the last 10 minutes. Returns false when the conversation is not with the team.
+   */
+  async waitingStatus(channelId: string, convId: string, ext: string): Promise<boolean> {
+    const c = (await this.db.query(
+      `SELECT c.assigned_to, c.bot_state, COALESCE(u.name_he, u.name) AS who, u.job_title,
+              (SELECT number FROM cases k WHERE k.conversation_id = c.id AND k.closed_at IS NULL ORDER BY opened_at DESC LIMIT 1) AS num,
+              EXISTS (SELECT 1 FROM messages m WHERE m.conversation_id = c.id AND m.automation = 'waiting_status' AND m.created_at > now() - interval '30 minutes') AS recent,
+              EXISTS (SELECT 1 FROM messages m WHERE m.conversation_id = c.id AND m.direction = 'out' AND NOT m.auto AND m.created_at > now() - interval '10 minutes') AS answered
+         FROM conversations c LEFT JOIN users u ON u.id = c.assigned_to WHERE c.id = $1`, [convId])).rows[0];
+    if (!c || (!c.assigned_to && c.bot_state !== 'human')) return false;
+    if (c.recent || c.answered) return true;   // already told, or a person is answering right now: stay quiet
+    const hours = await loadBusinessHours(this.db);
+    const closed = hours.enabled && !isOpen(hours, new Date());
+    const ref = c.num ? ` (מספר ${c.num})` : '';
+    const text = [
+      c.who ? `הפנייה שלך${ref} נמצאת בטיפול של ${c.who}${c.job_title ? `, ${c.job_title}` : ''}.` : `הפנייה שלך${ref} התקבלה ומחכה לנציג הפנוי הבא.`,
+      closed ? `כרגע אנחנו מחוץ לשעות הפעילות (${hoursSummary(hours)}), ונחזור אליך בהקדם בשעות הפעילות.` : 'נחזור אליך בהקדם האפשרי. אפשר לכתוב כאן כל פרט נוסף, והוא יתווסף לפנייה.',
+      'אם זה מצב חירום, התקשרו מיד למד"א 101 או לכבאות והצלה 102.',
+    ].join('\n');
+    const sent = await this.sendText(channelId, ext, text, { background: true });
+    const ins = await this.db.query(`INSERT INTO messages (conversation_id, direction, body, external_id, auto, automation) VALUES ($1,'out',$2,$3,true,'waiting_status') ON CONFLICT DO NOTHING RETURNING id`, [convId, text, sent.externalMessageId ?? null]);
+    if (ins.rows[0]) { this.notifyMessage(channelId, convId, ins.rows[0].id); this.hookMessage('message.sent', convId, ins.rows[0].id); }
+    return true;
   }
 
   /** Hand a bot conversation to a person: note, assignment (the named person if active, else normal routing), then the hand-over or away notice. */

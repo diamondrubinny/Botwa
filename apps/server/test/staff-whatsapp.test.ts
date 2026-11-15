@@ -117,4 +117,16 @@ describe('Betty for managers on WhatsApp', () => {
     expect(await say('9725666666@s.whatsapp.net', 'ניתוק')).toContain('הקישור הוסר');
     expect((await db.query('SELECT count(*)::int AS n FROM staff_links')).rows[0].n).toBe(0);
   });
+  it('a customer waiting for the team asks "מתי חוזרים אליי?": where the inquiry stands, at most every 30 minutes', async () => {
+    const withDana = await say('9725000001@s.whatsapp.net', 'מתי חוזרים אליי?');                // with Dana, waiting for our answer
+    expect(withDana).toMatch(/הפנייה שלך \(מספר \d+\) נמצאת בטיפול של דנה\./);
+    expect(withDana).toContain('נחזור אליך בהקדם');
+    expect(withDana).not.toContain('מחוץ לשעות');
+    expect(await say('9725000001@s.whatsapp.net', 'יש עדכון?')).not.toContain('הפנייה שלך');   // not again within 30 minutes
+    expect(await say('9725000004@s.whatsapp.net', 'מישהו שם?')).toContain('מחכה לנציג הפנוי הבא');
+    // a person answered a moment ago: stay quiet, the person is on it
+    const c3 = (await db.query(`SELECT c.id FROM conversations c JOIN contacts ct ON ct.id = c.contact_id WHERE ct.external_id = '9725000003@s.whatsapp.net'`)).rows[0].id;
+    await db.query(`INSERT INTO messages (conversation_id, direction, body, auto) VALUES ($1, 'out', 'בודק עכשיו', false)`, [c3]);
+    expect(await say('9725000003@s.whatsapp.net', 'מתי חוזרים אלי')).not.toContain('הפנייה שלך');
+  });
 });
