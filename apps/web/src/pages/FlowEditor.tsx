@@ -1,8 +1,38 @@
 import { PageTitle } from '../components/Illustration';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, createContext, useContext } from 'react';
 import { api, ApiError, can, personLabel, type Me } from '../api';
 import { autoLayout, FlowCanvas, type CanvasNode, type Pos } from '../components/FlowCanvas';
 import { errText } from '../strings';
+
+/**
+ * "In English" fields: the English wording of a text in the flow (for customers who write in English). Stored in the bot's one
+ * Hebrew → English dictionary (Bot > English translation), keyed by the Hebrew text; saved together with the flow.
+ */
+interface EnCtx { show: boolean; get: (he: string) => string; set: (he: string, en: string) => void; toggle: (v: boolean) => void }
+const EnContext = createContext<EnCtx>({ show: false, get: () => '', set: () => undefined, toggle: () => undefined });
+function EnToggle() {
+  const en = useContext(EnContext);
+  return <div className="field"><label><input type="checkbox" role="switch" style={{ width: 'auto', minHeight: 'auto' }} checked={en.show} onChange={(e) => en.toggle(e.target.checked)} /> גם באנגלית (ללקוחות שכותבים באנגלית)</label></div>;
+}
+const hasHebrew = (s: string) => /[\u05D0-\u05EA]/.test(s);
+function EnField({ he, id, rows = 1, maxLength = 1500 }: { he: string; id: string; rows?: number; maxLength?: number }) {
+  const en = useContext(EnContext);
+  const prev = useRef(he);
+  // the Hebrew text was edited: its English goes with it (unless the new text already has its own)
+  useEffect(() => {
+    if (prev.current !== he) { const old = en.get(prev.current); if (old && !en.get(he)) en.set(he, old); prev.current = he; }
+  }, [he]);  // eslint-disable-line react-hooks/exhaustive-deps
+  if (!en.show || !he.trim() || !hasHebrew(he)) return null;
+  const v = en.get(he);
+  return (
+    <div className="field en-field">
+      <label htmlFor={id}>באנגלית <span className="hint">(ללקוחות שכותבים באנגלית{v ? '' : '; ריק = יישלח בעברית'})</span></label>
+      {rows > 1 ? <textarea id={id} dir="ltr" lang="en" rows={rows} maxLength={maxLength} value={v} placeholder="English…" onChange={(e) => en.set(he, e.target.value)} />
+        : <input id={id} dir="ltr" lang="en" maxLength={maxLength} value={v} placeholder="English…" onChange={(e) => en.set(he, e.target.value)} />}
+    </div>
+  );
+}
+
 
 type Id = string | undefined;
 type Opt = { label: string; next?: string; examples: string[] };
@@ -88,6 +118,11 @@ export function FlowEditor({ me }: { me: Me }) {
   const [problems, setProblems] = useState<string[]>([]);
   const [unfin, setUnfin] = useState<string[]>([]);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  // English wording of the flow's texts (the bot's dictionary) and what was changed here, saved with the flow
+  const [enMap, setEnMap] = useState<Record<string, string>>({});
+  const [enEdits, setEnEdits] = useState<Record<string, string>>({});
+  const [showEn, setShowEn] = useState(() => { try { return localStorage.getItem('botwa.flow.en') === '1'; } catch { return false; } });
+  const enCtx: EnCtx = { show: showEn, get: (he) => (Object.hasOwn(enEdits, he) ? enEdits[he]! : enMap[he] ?? ''), set: (he, en) => setEnEdits((x) => ({ ...x, [he]: en })), toggle: (v) => { setShowEn(v); try { localStorage.setItem('botwa.flow.en', v ? '1' : '0'); } catch { /* private mode */ } } };
   const [open, setOpen] = useState<string | null>(null);
   const [tab, setTab] = useState<'edit' | 'test'>('edit');
   const [addType, setAddType] = useState<Node['type']>('message');
@@ -131,18 +166,28 @@ export function FlowEditor({ me }: { me: Me }) {
       const d = await api<{ mode: 'menu' | 'flow'; flow: Flow | null; problems: string[]; unfinished?: string[] }>('GET', '/flow').catch(() => null);
       if (d) { setMode(d.mode); setFlow(d.flow); setSaved(JSON.stringify(d.flow)); setProblems(d.problems); setUnfin(d.unfinished ?? []); }
       setRefs(await api<Refs>('GET', '/flow/refs').catch(() => ({ users: [], tags: [] })));
+      const tr = await api<{ items: { he: string; en: string }[] }>('GET', '/settings/translations').catch(() => null);
+      if (tr) setEnMap(Object.fromEntries(tr.items.filter((x) => x.en).map((x) => [x.he, x.en])));
       loaded.current = true;
     })();
   }, []);
 
-  const dirty = JSON.stringify(flow) !== saved;
+  const dirty = JSON.stringify(flow) !== saved || Object.keys(enEdits).length > 0;
   const fail = (e: unknown) => {
     if (e instanceof ApiError) { setProblems(e.problems ?? []); setMsg({ ok: false, text: errText(e.code) }); } else setMsg({ ok: false, text: errText('generic') });
   };
 
   async function save() {
     setMsg(null);
-    try { await api('PUT', '/flow', { flow }); setSaved(JSON.stringify(flow)); setProblems([]); setUnfin(flow ? flow.nodes.filter((n) => JSON.stringify(n).includes('[להשלים')).map((n) => n.id) : []); setMsg({ ok: true, text: 'התרשים נשמר.' }); } catch (e) { fail(e); }
+    try {
+      await api('PUT', '/flow', { flow });
+      if (Object.keys(enEdits).length) {
+        await api('PATCH', '/settings/translations', { entries: enEdits });
+        setEnMap((m) => { const n = { ...m }; for (const [k, v] of Object.entries(enEdits)) { if (v.trim()) n[k] = v.trim(); else delete n[k]; } return n; });
+        setEnEdits({});
+      }
+      setSaved(JSON.stringify(flow)); setProblems([]); setUnfin(flow ? flow.nodes.filter((n) => JSON.stringify(n).includes('[להשלים')).map((n) => n.id) : []); setMsg({ ok: true, text: 'התרשים נשמר.' });
+    } catch (e) { fail(e); }
   }
   async function fromMenu() {
     if (flow && !confirm('להחליף את התרשים הנוכחי בתרשים שנוצר מהתפריט הקיים?')) return;
@@ -297,7 +342,7 @@ export function FlowEditor({ me }: { me: Me }) {
                   {selNode ? (
                     <>
                       <h3 id="fs-h">{TYPE_LABEL[selNode.type]}{flow.start === selNode.id ? ' (התחלה)' : ''}</h3>
-                      <NodeForm key={selNode.id} n={selNode} flow={flow} refs={refs} canEdit={canEdit} upd={(p) => upd(selNode.id, p)} del={() => { del(selNode.id); setOpen(null); }} makeStart={() => change((f) => f && { ...f, start: selNode.id })} makeMain={() => change((f) => f && { ...f, mainMenu: selNode.id })} />
+                      <EnContext.Provider value={enCtx}><NodeForm key={selNode.id} n={selNode} flow={flow} refs={refs} canEdit={canEdit} upd={(p) => upd(selNode.id, p)} del={() => { del(selNode.id); setOpen(null); }} makeStart={() => change((f) => f && { ...f, start: selNode.id })} makeMain={() => change((f) => f && { ...f, mainMenu: selNode.id })} /></EnContext.Provider>
                     </>
                   ) : (
                     <>
@@ -387,9 +432,12 @@ function NodeForm({ n, flow, refs, canEdit, upd, del, makeStart, makeMain }: { n
   const dis = !canEdit;
   return (
     <fieldset disabled={dis} style={{ border: 0, padding: 0, margin: 0 }}>
+      <EnToggle />
       <div className="field"><label htmlFor={f('lb')}>שם בתרשים (אופציונלי)</label><input id={f('lb')} maxLength={60} value={n.label ?? ''} onChange={(e) => set({ label: e.target.value || undefined })} /></div>
       {'text' in n && n.type !== 'end' && n.type !== 'handoff' && <div className="field"><label htmlFor={f('tx')}>{n.type === 'menu' ? 'טקסט מעל התפריט' : 'ההודעה ללקוח'}</label><textarea id={f('tx')} rows={3} maxLength={1500} aria-describedby={f('txv')} value={n.text} onChange={(e) => set({ text: e.target.value })} /><p id={f('txv')} className="hint">משתנים: <code>{'{בוט}'}</code> שם הבוט, <code>{'{שם פרטי}'}</code> / <code>{'{שם}'}</code> של לקוח מוכר.</p></div>}
+      {'text' in n && n.type !== 'end' && n.type !== 'handoff' && <EnField he={n.text} id={f('txen')} rows={3} />}
       {(n.type === 'end' || n.type === 'handoff') && <div className="field"><label htmlFor={f('tx')}>{n.type === 'end' ? 'הודעת סיום' : 'הודעה לפני ההעברה (ריק = ההודעה הכללית של הבוט)'}</label><textarea id={f('tx')} rows={2} maxLength={500} value={n.text} onChange={(e) => set({ text: e.target.value })} /></div>}
+      {(n.type === 'end' || n.type === 'handoff') && <EnField he={n.text} id={f('txen')} rows={2} maxLength={500} />}
 
       {n.type === 'menu' && (
         <>
@@ -397,6 +445,7 @@ function NodeForm({ n, flow, refs, canEdit, upd, del, makeStart, makeMain }: { n
           {n.options.map((o, i) => (
             <div key={i} className="card" style={{ marginBottom: '.5rem' }}>
               <div className="field"><label htmlFor={f(`ol${i}`)}>אפשרות {i + 1}</label><input id={f(`ol${i}`)} required maxLength={60} value={o.label} onChange={(e) => set({ options: n.options.map((x, k) => (k === i ? { ...x, label: e.target.value } : x)) })} /></div>
+              <EnField he={o.label} id={f(`olen${i}`)} maxLength={60} />
               <div className="field"><label htmlFor={f(`oe${i}`)}>ניסוחים נוספים שלקוח עשוי לכתוב (שורה לכל ניסוח, אופציונלי)</label><textarea id={f(`oe${i}`)} rows={2} value={o.examples.join('\n')} onChange={(e) => set({ options: n.options.map((x, k) => (k === i ? { ...x, examples: e.target.value.split('\n').map((s) => s.trim()).filter(Boolean).slice(0, 8) } : x)) })} /></div>
               <TargetSelect id={f(`on${i}`)} label="ממשיך אל" value={o.next} flow={flow} onChange={(v) => set({ options: n.options.map((x, k) => (k === i ? { ...x, next: v } : x)) })} />
               <button type="button" className="danger" disabled={n.options.length <= 1} onClick={() => set({ options: n.options.filter((_, k) => k !== i) })}>הסרת אפשרות {i + 1}</button>
@@ -415,6 +464,7 @@ function NodeForm({ n, flow, refs, canEdit, upd, del, makeStart, makeMain }: { n
             <p className="hint">הפרט נבדק (אימייל/טלפון), נשמר כהערה פנימית בשיחה, ושם שנאסף משמש כשם איש הקשר.</p></div>
           <div className="field"><label><input type="checkbox" style={{ width: 'auto', minHeight: 'auto' }} checked={!!n.optional} onChange={(e) => set({ optional: e.target.checked })} /> אפשר לדלג (הלקוח כותב "דלג")</label></div>
           <div className="field"><label htmlFor={f('rt')}>הודעה כשהתשובה לא תקינה</label><input id={f('rt')} maxLength={300} value={n.retryText} onChange={(e) => set({ retryText: e.target.value })} /></div>
+          <EnField he={n.retryText} id={f('rten')} maxLength={300} />
         </>
       )}
       {n.type === 'media' && (
@@ -423,6 +473,7 @@ function NodeForm({ n, flow, refs, canEdit, upd, del, makeStart, makeMain }: { n
           <div className="field"><label><input type="checkbox" style={{ width: 'auto', minHeight: 'auto' }} checked={n.allowText} onChange={(e) => set({ allowText: e.target.checked })} /> מספיק גם תיאור בכתב (בלי קובץ)</label></div>
           <div className="field"><label><input type="checkbox" style={{ width: 'auto', minHeight: 'auto' }} checked={n.optional} onChange={(e) => set({ optional: e.target.checked })} /> אפשר לדלג</label></div>
           <div className="field"><label htmlFor={f('rt')}>הודעה כשלא התקבל קובץ או טקסט</label><input id={f('rt')} maxLength={300} value={n.retryText} onChange={(e) => set({ retryText: e.target.value })} /></div>
+          <EnField he={n.retryText} id={f('rten')} maxLength={300} />
           <p className="hint">קבצים עוברים סריקת וירוסים והסגר כמו בכל שיחה. מספר הקבצים נרשם בהערת הסיכום.</p>
         </>
       )}
@@ -432,6 +483,7 @@ function NodeForm({ n, flow, refs, canEdit, upd, del, makeStart, makeMain }: { n
           <div className="row">
             <div className="field"><label htmlFor={f('mx')}>מקסימום פריטים</label><input id={f('mx')} type="number" min={2} max={20} value={n.max} onChange={(e) => set({ max: Math.min(20, Math.max(2, Number(e.target.value) || 2)) })} /></div>
             <div className="field"><label htmlFor={f('mt')}>השאלה אחרי כל פריט</label><input id={f('mt')} maxLength={200} value={n.moreText} onChange={(e) => set({ moreText: e.target.value })} /></div>
+            <EnField he={n.moreText} id={f('mten')} maxLength={200} />
           </div>
           <div className="field"><label><input type="checkbox" style={{ width: 'auto', minHeight: 'auto' }} checked={n.optional} onChange={(e) => set({ optional: e.target.checked })} /> אפשר לדלג על הרשימה</label></div>
         </>

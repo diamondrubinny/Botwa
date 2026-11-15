@@ -915,3 +915,4 @@ dialog.gsearch { width: min(640px, calc(100vw - 1.5rem)); max-width: none; margi
 .spot { outline: 3px solid var(--accent); outline-offset: 4px; border-radius: var(--radius-sm); }
 @media (prefers-reduced-motion: no-preference) { :root:not([data-motion='off']) .spot { animation: spot 1.2s var(--ease) 2; } @keyframes spot { 50% { outline-color: transparent; } } }
 .gs-empty, .gs-foot { color: var(--muted); }
+.en-field { border-inline-start: 3px solid var(--border); padding-inline-start: .6rem; }

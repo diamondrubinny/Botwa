@@ -397,6 +397,16 @@ await page.keyboard.press('Enter');
 await page.waitForSelector('.flow-side fieldset');
 check('flow editor: a node opens from the keyboard in the side panel', true);
 await axe('flow editor: node form');
+// "in English": the English wording of the node's text, saved with the flow into the bot's dictionary
+await page.check('.flow-side input[role="switch"]');
+await page.waitForSelector('.flow-side .en-field textarea, .flow-side .en-field input');
+await page.locator('.flow-side .en-field').first().locator('textarea, input').first().fill('Hello from the flow editor');
+await axe('flow editor: node form in English');
+await page.click('button:text-is("שמירה")');
+await page.waitForFunction(() => /התרשים נשמר/.test(document.querySelector('main')?.textContent ?? ''));
+await page.waitForTimeout(300);
+{ const tr = await page.evaluate(async () => (await (await fetch('/settings/translations')).json()).items.filter((i) => i.en === 'Hello from the flow editor').length);
+  check('flow editor: the English field is saved into the translations', tr === 1); }
 // drag a node with the mouse: it moves (snapped to the grid) and keeps its place
 const nodeA2 = page.locator('svg.flow-svg g[data-node-id="a2"] rect.flow-box');
 await nodeA2.scrollIntoViewIfNeeded();

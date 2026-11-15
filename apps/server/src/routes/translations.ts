@@ -58,6 +58,22 @@ export function translationRoutes(app: FastifyInstance, db: Db) {
     return { items, missing: items.filter((i) => i.used && !i.en).length };
   });
 
+  // a few entries from the flow editor (its "in English" fields): merged into the unit's own; an empty value goes back to the
+  // built-in wording (or to none)
+  app.patch('/settings/translations', { preHandler: requireAuth(db, 'bot.manage'), config: { rateLimit: { max: 30, timeWindow: '1 minute' } } }, async (req, reply) => {
+    const b = z.object({ entries: z.record(z.string().trim().min(1).max(2000), z.string().trim().max(2000)) }).safeParse(req.body);
+    if (!b.success || Object.keys(b.data.entries).length > 500) return reply.code(400).send({ error: 'bad_request' });
+    const defs = defaultEntries();
+    const cur = await loadOverrides(db);
+    for (const [k, v] of Object.entries(b.data.entries)) {
+      if (!v || defs.get(k) === v) delete cur[k]; else cur[k] = v;
+    }
+    await db.query(`INSERT INTO settings (key, value) VALUES ('translations_en', $1) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()`, [{ entries: cur }]);
+    invalidateTranslations();
+    await audit(db, { actorId: req.user!.id, action: 'settings.translations', ip: req.ip, meta: { changed: Object.keys(b.data.entries).length, from: 'flow' } });
+    return { ok: true };
+  });
+
   app.put('/settings/translations', { preHandler: requireAuth(db, 'bot.manage'), config: { rateLimit: { max: 20, timeWindow: '1 minute' } } }, async (req, reply) => {
     const b = z.object({ entries: z.record(z.string().trim().min(1).max(2000), z.string().trim().max(2000)) }).safeParse(req.body);
     if (!b.success || Object.keys(b.data.entries).length > 3000) return reply.code(400).send({ error: 'bad_request' });

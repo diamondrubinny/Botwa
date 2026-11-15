@@ -113,4 +113,17 @@ describe('a conversation in English', () => {
     await say(ext, 'hello there, I have a question');
     expect(await say(ext, 'are you there?')).toContain('Yes, Betty is here');
   });
+
+  it('the flow editor saves a few entries at a time (merged); an empty value goes back to the built-in wording', async () => {
+    const patch = (entries: Record<string, string>) => app.inject({ method: 'PATCH', url: '/settings/translations', headers: { cookie, origin: ORIGIN }, payload: { entries } });
+    expect((await patch({ 'טקסט חדש מהעורך': 'New text from the editor', 'לייזרים': 'Laser safety' })).statusCode).toBe(200);
+    const get = async () => (await app.inject({ method: 'GET', url: '/settings/translations', headers: { cookie, origin: ORIGIN } })).json().items as { he: string; en: string; custom: boolean }[];
+    let items = await get();
+    expect(items.find((i) => i.he === 'טקסט חדש מהעורך')?.en).toBe('New text from the editor');
+    expect(items.find((i) => i.he === 'לייזרים')).toMatchObject({ en: 'Laser safety', custom: true });
+    expect(items.find((i) => i.he === 'כן, אני כאן איתך 😊')?.en).toBe('Yes, Betty is here 😊');   // the earlier change is kept (merged)
+    expect((await patch({ 'לייזרים': '' })).statusCode).toBe(200);
+    items = await get();
+    expect(items.find((i) => i.he === 'לייזרים')).toMatchObject({ en: 'Lasers', custom: false });
+  });
 });
