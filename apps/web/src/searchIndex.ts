@@ -53,6 +53,8 @@ export const SEARCH_INDEX: SearchEntry[] = [
   // safety
   { label: 'ממונים ונושאים (טלפון משרדי, ייבוא מאקסל)', where: 'לוח בטיחות', words: 'ממונים ממונה טלפון משרדי נושאים אחראי', page: 'safety', s: 'officers', allowed: P('safety.view') },
   { label: 'חשבונות לממונים בקליק', where: 'לוח בטיחות', words: 'חשבונות ממונים משתמשים סיסמה ראשונית', page: 'safety', s: 'officers', allowed: P('users.manage') },
+  { label: 'בדיקות תקופתיות ותזכורות', where: 'לוח בטיחות', words: 'בדיקות תקופתיות תזכורת מטפים בדיקה מועד אחראי', page: 'safety', s: 'insp-h', allowed: P('safety.view') },
+  { label: 'הבדיקות שלי', where: 'החשבון שלי', words: 'בדיקות שלי בוצע תזכורת', page: 'account', s: 'my-insp', allowed: any },
   { label: 'אזורי אחריות (בניינים וממונים)', where: 'לוח בטיחות', words: 'אזורי אחריות בניין מקום', page: 'safety', s: 'areas', allowed: P('safety.view') },
   // forms
   { label: 'תבניות טפסים וחתימה דיגיטלית', where: 'טפסים', words: 'טפסים תבנית חתימה pdf word', page: 'forms', tab: 'templates', s: 'ft-h', allowed: P('forms.manage') },

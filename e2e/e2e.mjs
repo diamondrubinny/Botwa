@@ -513,6 +513,19 @@ await page.waitForSelector('tr:has(th:has-text("ממונה לדוגמה")) td:ha
 check('officer accounts: created in one click and linked to the officer', true);
 check('safety board: an officer with topics is added', (await page.textContent('tr:has(th:has-text("ממונה לדוגמה"))')).includes('לייזרים') && (await page.getAttribute('tr:has(th:has-text("ממונה לדוגמה")) a[href^="https://wa.me/"]', 'href')) === 'https://wa.me/972501234567');
 await axe('safety board: officers');
+// periodic inspections: one is added, then marked done (the date moves on)
+await page.evaluate(() => { const d = document.querySelector('#insp'); if (d) d.open = true; });
+await page.click('button:has-text("+ בדיקה חדשה")');
+await page.fill('#in-t', 'בדיקת מטפים');
+await page.fill('#in-p', 'בניין 7');
+await page.click('#insp form button[type=submit]');
+await page.waitForSelector('#insp tr:has(th:has-text("בדיקת מטפים"))');
+check('safety board: a periodic inspection is added', true);
+await axe('safety board: periodic inspections');
+await page.click('#insp tr:has(th:has-text("בדיקת מטפים")) button:has-text("בוצע")');
+await page.click('#insp tr:has(th:has-text("בדיקת מטפים")) button:has-text("שמירת ביצוע")');
+await page.waitForFunction(() => /בעוד 18\d ימים/.test(document.querySelector('#insp tbody tr')?.textContent ?? ''));
+check('safety board: "done" moves the next date on', true);
 
 // branding: name, logo, colour (adapted for contrast), colours pulled from a site (internal addresses are refused)
 await page.click('aside.sidebar nav >> text=הגדרות');

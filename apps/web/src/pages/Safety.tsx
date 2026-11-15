@@ -1,3 +1,4 @@
+import { Inspections } from '../components/Inspections';
 import { OfficerAccounts } from '../components/OfficerAccounts';
 import { Loading } from '../components/Loading';
 import { EmptyState, PageTitle } from '../components/Illustration';
@@ -132,6 +133,7 @@ export function Safety({ me }: { me: Me }) {
       {manage && <Manage cats={cats} onChanged={loadCats} stats={stats} />}
       {can(me, 'bot.view') && <Officers canEdit={can(me, 'bot.manage')} me={can(me, 'bot.manage') && can(me, 'users.manage') ? me : null} />}
       {can(me, 'bot.view') && <Areas canEdit={can(me, 'bot.manage')} />}
+      <Inspections canEdit={can(me, 'bot.manage')} />
     </>
   );
 }

@@ -1,3 +1,4 @@
+import { MyInspections } from '../components/Inspections';
 import { IntroCard } from '../components/IntroCard';
 import { StaffWhatsApp } from '../components/StaffWhatsApp';
 import { PageTitle } from '../components/Illustration';
@@ -98,6 +99,7 @@ export function Account({ me, onChanged, onLogout }: { me: Me; onChanged: () => 
       )}
       <p>{me.name} · {me.email} · {me.roleName}{me.username ? <> · שם משתמש: <bdi dir="ltr">@{me.username}</bdi></> : null}</p>
       <IntroCard me={me} onChanged={onChanged} />
+      <MyInspections userId={me.id} />
       <StaffWhatsApp />
 
       <section className="card" aria-labelledby="av-h">

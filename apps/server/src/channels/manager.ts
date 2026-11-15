@@ -41,6 +41,7 @@ import { isSensitive, pickGif, type GifMoment } from '../bot-gifs.js';
 import { isEmergency } from '../emergency.js';
 import { isPastReportQuestion, isWaitingQuestion } from '../waiting.js';
 import { loadIncident } from '../incident.js';
+import { dueReminders, reminderText } from '../safety/inspections.js';
 import { officerReply, officerUserFor } from '../safety/whoIs.js';
 import { comfortText, detectDistress, stillHereText, type Distress } from '../empathy.js';
 import { detectLang, withDirectionMarks, type Lang } from '../i18n/lang.js';
@@ -148,6 +149,8 @@ export class ChannelManager {
 
   /** Set by the app: a conversation was given to a person (alert on their phone). */
   onAssigned?: (conversationId: string, userId: string, how?: 'assigned' | 'handover') => void;
+  /** a push to one person (a reminder) */
+  onNotifyUser?: (userId: string, title: string, url: string, tag: string) => void;
 
   /** Set by the app: called once when a waiting customer passes the SLA target. */
   onSlaBreach?: (conversationId: string) => void;
@@ -1186,6 +1189,24 @@ export class ChannelManager {
     await this.db.query(`UPDATE conversations c SET urgent_since = NULL WHERE c.urgent_since IS NOT NULL AND (c.status <> 'open'
         OR EXISTS (SELECT 1 FROM messages m WHERE m.conversation_id = c.id AND m.direction = 'out' AND NOT m.auto AND m.created_at > c.urgent_since))`);
     return n;
+  }
+
+  /**
+   * Periodic inspections due within a week or overdue: one reminder a day to the person responsible, as a push and, when they linked
+   * their WhatsApp to Betty, a message there (all their due inspections in one message).
+   */
+  async runInspectionReminders(): Promise<number> {
+    const due = await dueReminders(this.db);
+    const byUser = new Map<string, typeof due>();
+    for (const i of due) byUser.set(i.assignee, [...(byUser.get(i.assignee) ?? []), i]);
+    for (const [userId, list] of byUser) {
+      const overdue = list.filter((i) => i.daysLeft < 0).length;
+      this.onNotifyUser?.(userId, overdue ? `${overdue} בדיקות תקופתיות באיחור` : `${list.length} בדיקות תקופתיות מתקרבות`, '/#/account?s=my-insp', 'botwa-inspections');
+      const link = (await this.db.query('SELECT channel_id, external_id FROM staff_links WHERE user_id = $1 ORDER BY last_used_at DESC NULLS LAST LIMIT 1', [userId])).rows[0] as { channel_id: string; external_id: string } | undefined;
+      if (link) await this.sendText(link.channel_id, link.external_id, reminderText(list), { background: true }).catch(() => undefined);
+      await this.db.query('UPDATE inspections SET last_reminded_at = now() WHERE id = ANY($1::uuid[])', [list.map((i) => i.id)]);
+    }
+    return due.length;
   }
 
   alertTeam(text: string, extra: Record<string, unknown> = {}): void { if (this.alertBudget()) void sendAlert(this.cfg, text, extra); }

@@ -36,6 +36,7 @@ setInterval(() => void sendDueScheduled(db, mgr).catch((err) => app.log.error({ 
 setInterval(() => void mgr.checkSla().catch((err) => app.log.error({ err }, 'sla check failed')), 60_000).unref();
 setInterval(() => void runAutomations(db, mgr).catch((err) => app.log.error({ err }, 'automations failed')), 60_000).unref();
 setInterval(() => void mgr.runEscalations().catch((err) => app.log.error({ err }, 'escalation failed')), 60_000).unref();
+setInterval(() => void mgr.runInspectionReminders().catch((err) => app.log.error({ err }, 'inspection reminders failed')), 3600_000).unref();
 setInterval(() => void mgr.retryForwards().catch((err) => app.log.error({ err }, 'group forward retry failed')), 60_000).unref();
 setInterval(() => void mgr.catchUp().catch((err) => app.log.error({ err }, 'bot catch-up failed')), 60_000).unref();
 setInterval(() => void mgr.kb?.embedMissing().catch((err) => app.log.error({ err }, 'kb embed failed')), 600_000).unref();

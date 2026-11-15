@@ -125,6 +125,13 @@ export class PushService {
     await this.deliver(rows, { title: how === 'handover' ? 'שיחה הועברה אליך' : 'שיחה שויכה אליך', tag: `botwa-asg-${conversationId}`, url: PushService.convUrl(conversationId) }, 'high');
   }
 
+  /** A reminder for one person (a periodic inspection that is due). */
+  async notifyUser(userId: string, title: string, url: string, tag: string): Promise<void> {
+    if (!this.ready) return;
+    const { rows } = await this.db.query(`SELECT s.id, s.endpoint, s.p256dh, s.auth FROM push_subscriptions s JOIN users u ON u.id = s.user_id AND u.active WHERE s.user_id = $1`, [userId]);
+    await this.deliver(rows, { title, tag, url });
+  }
+
   /** "Send me a test alert": how many of this person's devices accepted it (0 = none registered or all failed). */
   async test(userId: string): Promise<number> {
     if (!this.ready) return 0;

@@ -26,7 +26,7 @@ describe('Betty for managers on WhatsApp', () => {
   const cookies: Record<string, string> = {};
   const ids: Record<string, string> = {};
   let ip = 0, mid = 0, sentN = 0;
-  const call = (who: string, method: 'GET' | 'POST' | 'DELETE', url: string, payload?: unknown) =>
+  const call = (who: string, method: 'GET' | 'POST' | 'DELETE' | 'PUT', url: string, payload?: unknown) =>
     app.inject({ method, url, payload: payload as never, remoteAddress: `10.85.${Math.floor(++ip / 250)}.${ip % 250}`, headers: { origin: ORIGIN, cookie: cookies[who]! } });
   const say = async (from: string, text: string) => {
     out.length = 0;
@@ -167,5 +167,30 @@ describe('Betty for managers on WhatsApp', () => {
     expect(a).toContain('אם הבעיה עדיין קיימת');
     // an inquiry still open (with Dana) is answered with where it stands
     expect(await say('9725000001@s.whatsapp.net', 'מה עם הדיווח שלי?')).not.toContain('הפנייה האחרונה שלך');
+  });
+
+  it('periodic inspections: managers create, a daily reminder to the person responsible (WhatsApp too), "done" moves the date, "8" lists them', async () => {
+    const { code } = (await call('boss@t.io', 'POST', '/me/whatsapp-links/code')).json();
+    await say('9725888888@s.whatsapp.net', code);                                          // the manager's WhatsApp, linked
+    const due = new Date(Date.now() + 3 * 86400000).toISOString().slice(0, 10);
+    expect((await call('dana@t.io', 'POST', '/inspections', { title: 'בדיקת מטפים', place: 'בניין 7', intervalDays: 182, nextDue: due, assignee: ids['dana@t.io'] })).statusCode).toBe(403);
+    const c = await call('boss@t.io', 'POST', '/inspections', { title: 'בדיקת מטפים', place: 'בניין 7', intervalDays: 182, nextDue: due, assignee: ids['boss@t.io'] });
+    expect(c.statusCode).toBe(201);
+    const id = c.json().id;
+    await call('boss@t.io', 'POST', '/inspections', { title: 'מקלחת חירום', place: 'מעבדה 3', intervalDays: 30, nextDue: '2020-01-01', assignee: ids['dana@t.io'] });
+    expect((await call('dana@t.io', 'GET', '/inspections')).json().map((i: { title: string }) => i.title)).toEqual(['מקלחת חירום']);   // an agent sees their own
+    out.length = 0;
+    expect(await mgr.runInspectionReminders()).toBe(2);
+    const toBoss = out.filter((o) => o.to === '9725888888@s.whatsapp.net').map((o) => o.text).join('\n');
+    expect(toBoss).toContain('🗓️ בדיקות תקופתיות באחריותך:');
+    expect(toBoss).toContain('בדיקת מטפים, בניין 7');
+    expect(await mgr.runInspectionReminders()).toBe(0);                                   // once a day
+    expect(await say('9725888888@s.whatsapp.net', '8')).toContain('⚠️ באיחור');           // Dana's emergency shower is overdue
+    expect((await call('dana@t.io', 'POST', `/inspections/${id}/done`, { note: 'x' })).statusCode).toBe(403);   // not hers
+    expect((await call('boss@t.io', 'POST', `/inspections/${id}/done`, { note: 'הכול תקין' })).statusCode).toBe(200);
+    const after = (await call('boss@t.io', 'GET', '/inspections')).json().find((i: { id: string }) => i.id === id);
+    expect(after.daysLeft).toBeGreaterThanOrEqual(181);
+    expect(after.lastDoneBy).toBe('מנהלת');
+    expect((await call('boss@t.io', 'GET', `/inspections/${id}/log`)).json()[0].note).toBe('הכול תקין');
   });
 });
