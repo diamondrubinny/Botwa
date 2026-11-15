@@ -21,13 +21,15 @@ BotwaChat.on('newMessage', e => console.log('לא נקראו:', e.unread)); // �
 ```
 
 ## זיהוי לקוח מחובר (אופציונלי)
-כדי שלקוח מחובר יראה את אותה שיחה מכל מכשיר, שרת האתר שלכם מחשב חתימה ומעביר אותה לוויגיט:
+כדי שלקוח מחובר יראה את אותה שיחה מכל מכשיר, שרת האתר שלכם מחשב חתימה ומעביר אותה לוויג׳ט. **מומלץ לחתום עם תוקף** (`exp`, בשניות מאז 1970, לכל היותר 7 ימים קדימה), כדי שחתימה שדלפה, למשל במחשב משותף או בלוג, תפסיק לעבוד מעצמה:
 ```js
-// בשרת האתר (Node). ב-PHP: hash_hmac('sha256', $customerId, $secret)
-const signature = crypto.createHmac('sha256', SECRET).update(String(customer.id)).digest('hex');
+// בשרת האתר (Node). ב-PHP: $exp = time() + 86400; hash_hmac('sha256', $customerId . '|' . $exp, $secret)
+const exp = Math.floor(Date.now() / 1000) + 24 * 3600;
+const signature = crypto.createHmac('sha256', SECRET).update(`${customer.id}|${exp}`).digest('hex');
 // בעמוד:
-window.botwaChatIdentity = { id: String(customer.id), signature, name: customer.name, email: customer.email };
+window.botwaChatIdentity = { id: String(customer.id), exp, signature, name: customer.name, email: customer.email };
 ```
+חתימה בלי תוקף (`HMAC(SECRET, id)` בלבד) עדיין מתקבלת, כדי שהטמעות קיימות ימשיכו לעבוד. התוסף לוורדפרס, מגרסה 1.1.0, חותם עם תוקף של יום אחד.
 `SECRET` נוצר ב"זיהוי לקוח מחובר ← יצירת סוד חדש" ומוצג פעם אחת. **לעולם אל תחשבו את החתימה בדפדפן.** בלי חתימה תקפה השם והאימייל הם רק מילוי מראש, והמזהה לא נחשב מאומת.
 
 ## אבטחה

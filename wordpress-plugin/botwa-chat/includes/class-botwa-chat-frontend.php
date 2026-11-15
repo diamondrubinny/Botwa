@@ -113,9 +113,12 @@ class Botwa_Chat_Frontend {
 		if ( ! preg_match( '/^[\w.-]{1,64}$/', $id ) ) {
 			return new WP_Error( 'botwa_bad_id', 'bad id', array( 'status' => 500 ) );
 		}
+		// signed with an expiry (one day): a signature that leaks stops working by itself
+		$exp = time() + DAY_IN_SECONDS;
 		return array(
 			'id'        => $id,
-			'signature' => hash_hmac( 'sha256', $id, $o['identity_secret'] ),
+			'exp'       => $exp,
+			'signature' => hash_hmac( 'sha256', $id . '|' . $exp, $o['identity_secret'] ),
 			'name'      => $user->display_name,
 			'email'     => $user->user_email,
 		);

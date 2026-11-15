@@ -1,3 +1,4 @@
+import type pg from 'pg';
 import type { FastifyInstance } from 'fastify';
 import { randomInt } from 'node:crypto';
 import { z } from 'zod';
@@ -24,6 +25,24 @@ export async function permissionsOfRole(db: Db, key: string): Promise<string[] |
 export async function mayUseRole(db: Db, actor: AuthUser, roleKey: string): Promise<boolean> {
   const perms = await permissionsOfRole(db, roleKey);
   return perms !== null && isSubset(perms, actor.permissions);
+}
+
+/**
+ * A change that removes an administrator, done under one lock with the check: two administrators demoting or deleting each other at
+ * the same moment cannot leave the system without any (the second waits, then sees there is no other one left). Returns false when
+ * it would leave none.
+ */
+async function withoutLastAdmin(db: Db, userId: string, change: (q: pg.PoolClient) => Promise<void>): Promise<boolean> {
+  const client = await db.connect();
+  try {
+    await client.query('BEGIN');
+    await client.query(`SELECT pg_advisory_xact_lock(hashtext('botwa:last-admin'))`);
+    const n = (await client.query(`SELECT count(*)::int AS n FROM users WHERE role = 'admin' AND active AND id <> $1`, [userId])).rows[0].n as number;
+    if (n === 0) { await client.query('ROLLBACK'); return false; }
+    await change(client);
+    await client.query('COMMIT');
+    return true;
+  } catch (e) { await client.query('ROLLBACK').catch(() => undefined); throw e; } finally { client.release(); }
 }
 
 async function activeAdmins(db: Db, exceptUserId?: string): Promise<number> {
@@ -168,15 +187,19 @@ export function userRoutes(app: FastifyInstance, db: Db, scan: (buf: Buffer) => 
     const losesAdmin = cur.role === 'admin' && (b.active === false || (b.role !== undefined && b.role !== 'admin'));
     if (losesAdmin && (await activeAdmins(db, id)) === 0) return reply.code(409).send({ error: 'last_admin' });
 
-    let rows;
+    let rows: Record<string, unknown>[] = [];
     try {
-      ({ rows } = await db.query(
-        `UPDATE users SET name = COALESCE($2, name), role = COALESCE($3, role), active = COALESCE($4, active), username = COALESCE($5, username),
-                job_title = CASE WHEN $6::boolean THEN NULLIF($7, '') ELSE job_title END,
-                name_he = CASE WHEN $8::boolean THEN NULLIF($9, '') ELSE name_he END, updated_at = now()
-          WHERE id = $1 RETURNING ${publicCols}`,
-        [id, b.name ?? null, b.role ?? null, b.active ?? null, b.username ?? null, b.jobTitle !== undefined, b.jobTitle ?? null, b.nameHe !== undefined, b.nameHe ?? null],
-      ));
+      const update = async (q: Pick<Db, 'query'>) => {
+        ({ rows } = await q.query(
+          `UPDATE users SET name = COALESCE($2, name), role = COALESCE($3, role), active = COALESCE($4, active), username = COALESCE($5, username),
+                  job_title = CASE WHEN $6::boolean THEN NULLIF($7, '') ELSE job_title END,
+                  name_he = CASE WHEN $8::boolean THEN NULLIF($9, '') ELSE name_he END, updated_at = now()
+            WHERE id = $1 RETURNING ${publicCols}`,
+          [id, b.name ?? null, b.role ?? null, b.active ?? null, b.username ?? null, b.jobTitle !== undefined, b.jobTitle ?? null, b.nameHe !== undefined, b.nameHe ?? null],
+        ));
+      };
+      if (losesAdmin) { if (!(await withoutLastAdmin(db, id, update))) return reply.code(409).send({ error: 'last_admin' }); }
+      else await update(db);
     } catch (e) {
       if ((e as { code?: string }).code === '23505') return reply.code(409).send({ error: 'username_taken' });
       throw e;
@@ -230,8 +253,9 @@ export function userRoutes(app: FastifyInstance, db: Db, scan: (buf: Buffer) => 
     if (!cur) return reply.code(404).send({ error: 'not_found' });
     if (b.data.email !== String(cur.email).toLowerCase()) return reply.code(400).send({ error: 'confirm_mismatch' });   // typed address must match: no deleting by a mistaken click
     if (!(await mayUseRole(db, actor, cur.role))) return reply.code(403).send({ error: 'role_exceeds_permissions' });
-    if (cur.role === 'admin' && cur.active && (await activeAdmins(db, p.data.id)) === 0) return reply.code(409).send({ error: 'last_admin' });
-    await db.query('DELETE FROM users WHERE id = $1', [p.data.id]);
+    if (cur.role === 'admin' && cur.active) {
+      if (!(await withoutLastAdmin(db, p.data.id, async (q) => { await q.query('DELETE FROM users WHERE id = $1', [p.data.id]); }))) return reply.code(409).send({ error: 'last_admin' });
+    } else await db.query('DELETE FROM users WHERE id = $1', [p.data.id]);
     await audit(db, { actorId: actor.id, action: 'user.delete', target: p.data.id, ip: req.ip, meta: { role: cur.role } });
     return { ok: true };
   });

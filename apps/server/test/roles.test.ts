@@ -128,6 +128,16 @@ describe('custom roles', () => {
     // with a second admin the first can be demoted
     await mkUser('admin2@t.io', 'admin');
     expect((await call('PATCH', `/users/${ids['admin@t.io']}`, 'god@t.io', { role: 'agent' })).statusCode).toBe(200);
+    // two administrators removed at the same moment: one of them stays (the check and the change happen under one lock)
+    await db.query(`UPDATE users SET active = false WHERE email = 'admin2@t.io'`);   // aside for a moment (its session stays for the next tests)
+    await mkUser('admin5@t.io', 'admin'); await mkUser('admin6@t.io', 'admin');
+    const both = await Promise.all([
+      call('PATCH', `/users/${ids['admin5@t.io']}`, 'god@t.io', { active: false }),
+      call('PATCH', `/users/${ids['admin6@t.io']}`, 'god@t.io', { active: false }),
+    ]);
+    expect(both.map((r) => r.statusCode).sort()).toEqual([200, 409]);
+    expect((await db.query(`SELECT count(*)::int AS n FROM users WHERE role = 'admin' AND active`)).rows[0].n).toBe(1);
+    await db.query(`UPDATE users SET active = true WHERE email = 'admin2@t.io'`);
   });
 
   it('roles in use cannot be deleted; role changes sign the user out', async () => {

@@ -1,7 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { buildApp } from '../src/app.js';
-import { EmailAdapter, isAutomatic, mailError, stripQuoted, type MailBox, type MailFactory, type MailSender } from '../src/channels/email.js';
+import { EmailAdapter, isAutomatic, mailError, senderUnverified, stripQuoted, type MailBox, type MailFactory, type MailSender } from '../src/channels/email.js';
 import { ChannelManager } from '../src/channels/manager.js';
 import type { AdapterContext, AuthStore, ChannelStatus, InboundMessage } from '../src/channels/types.js';
 import { loadConfig } from '../src/config.js';
@@ -36,6 +36,15 @@ const memStore = (): AuthStore => { const m = new Map<string, string>(); return 
 const CREDS = { imapHost: 'mail.shop.test', imapPort: 993, smtpHost: 'mail.shop.test', smtpPort: 465, username: 'support@shop.test', password: 'secret-pass', fromAddress: 'support@shop.test', fromName: 'שירות לקוחות', mailbox: 'INBOX' };
 
 describe('mail helpers', () => {
+  it('a sender the receiving server could not verify (DMARC fail, or SPF fail without DKIM) is flagged; no verdict, no flag', () => {
+    const h = (line: string) => ({ headerLines: [{ key: 'authentication-results', line: `Authentication-Results: ${line}` }] });
+    expect(senderUnverified(h('mx.google.com; dkim=none; spf=fail smtp.mailfrom=bank.test; dmarc=fail (p=REJECT)'))).toBe(true);
+    expect(senderUnverified(h('mx.test; spf=softfail smtp.mailfrom=x.test; dkim=none'))).toBe(true);
+    expect(senderUnverified(h('mx.test; spf=fail smtp.mailfrom=list.test; dkim=pass header.d=x.test; dmarc=pass'))).toBe(false);   // a mailing list
+    expect(senderUnverified(h('mx.test; spf=pass; dkim=pass; dmarc=pass'))).toBe(false);
+    expect(senderUnverified({ headerLines: [] })).toBe(false);
+  });
+
   it('keeps only the new part of a reply (English and Hebrew clients, quotes, signatures)', () => {
     expect(stripQuoted('Thanks, that worked!\n\nOn Tue, 10 Nov 2026 at 10:00, Support <support@shop.test> wrote:\n> old text\n> more')).toBe('Thanks, that worked!');
     expect(stripQuoted('תודה רבה!\n\nבתאריך יום ג׳, 10 בנוב׳ 2026 ב-10:00 מאת שירות <support@shop.test>‏ כתב:\n> ישן')).toBe('תודה רבה!');

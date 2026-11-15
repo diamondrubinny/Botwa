@@ -100,8 +100,8 @@
   window.BotwaChat = {
     __loaded: true,
     open: function () { setOpen(true); }, close: function () { setOpen(false); }, toggle: function () { setOpen(!state.open); },
-    /** Link the chat to a signed-in customer. `signature` = hex HMAC-SHA256(identity secret, id) computed on YOUR server, never in the browser. */
-    identify: function (identity) { state.identity = identity && typeof identity === 'object' ? { id: String(identity.id || ''), name: identity.name, email: identity.email, phone: identity.phone, signature: identity.signature } : null; post({ type: 'botwa:identity', identity: state.identity }); },
+    /** Link the chat to a signed-in customer. Computed on YOUR server, never in the browser: exp = Unix seconds (at most 7 days ahead), signature = hex HMAC-SHA256(identity secret, id + "|" + exp). (Older: HMAC of the id alone, without exp.) */
+    identify: function (identity) { state.identity = identity && typeof identity === 'object' ? { id: String(identity.id || ''), name: identity.name, email: identity.email, phone: identity.phone, signature: identity.signature, exp: identity.exp } : null; post({ type: 'botwa:identity', identity: state.identity }); },
     on: function (name, fn) { (listeners[name] = listeners[name] || []).push(fn); },
     destroy: function () { state.destroyed = true; [host, frameBox].forEach(function (n) { if (n && n.parentNode) n.parentNode.removeChild(n); }); emit('destroyed'); }
   };

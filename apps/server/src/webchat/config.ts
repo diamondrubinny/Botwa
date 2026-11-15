@@ -95,9 +95,17 @@ export const newIdentitySecret = () => randomBytes(32).toString('base64url');
 
 /** HMAC the host site's backend computes for a signed-in customer:  hex(HMAC-SHA256(secret, id)). */
 export const identitySignature = (secret: string, id: string): string => createHmac('sha256', secret).update(id).digest('hex');
-export function verifyIdentity(secret: string, id: string, signature: string): boolean {
+/**
+ * With an expiry (recommended): hex(HMAC-SHA256(secret, "id|exp")), exp = Unix seconds, at most 7 days ahead. A signature that
+ * leaks (a shared computer, a log) then stops working by itself. Without one (older integrations): HMAC(secret, id), still accepted.
+ */
+export const identitySignatureExp = (secret: string, id: string, exp: number): string => createHmac('sha256', secret).update(`${id}|${exp}`).digest('hex');
+export function verifyIdentity(secret: string, id: string, signature: string, exp?: number, now = Date.now()): boolean {
   if (!/^[\w.-]{1,64}$/.test(id) || !/^[0-9a-f]{64}$/.test(signature)) return false;
-  const want = Buffer.from(identitySignature(secret, id), 'hex'), got = Buffer.from(signature, 'hex');
+  if (exp !== undefined) {
+    if (!Number.isInteger(exp) || exp * 1000 <= now || exp * 1000 > now + 7 * 86_400_000) return false;
+  }
+  const want = Buffer.from(exp === undefined ? identitySignature(secret, id) : identitySignatureExp(secret, id, exp), 'hex'), got = Buffer.from(signature, 'hex');
   return want.length === got.length && timingSafeEqual(want, got);
 }
 

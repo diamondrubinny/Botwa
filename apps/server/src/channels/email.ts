@@ -86,6 +86,19 @@ export const realMail: MailFactory = {
 };
 
 /** Automatic mail that must never get an answer (RFC 3834 Auto-Submitted, Precedence, list mail, bounces). */
+export const UNVERIFIED_NOTE = '⚠️ שולח לא מאומת: בדיקת האימות של שרת הדואר (SPF/DMARC) נכשלה, וייתכן שהמייל לא נשלח מהכתובת הזו. אין למסור בו מידע אישי לפני בירור.';
+/**
+ * The receiving server's verdict on the sender (the topmost Authentication-Results header, the one our own provider added): a
+ * DMARC failure, or an SPF failure with no passing DKIM signature. No header: no verdict (not every provider adds one).
+ */
+export function senderUnverified(mail: Pick<ParsedMail, 'headerLines'>): boolean {
+  const line = (mail.headerLines ?? []).find((h) => h.key === 'authentication-results')?.line ?? '';
+  const v = line.replace(/^authentication-results:\s*/i, '').toLowerCase();
+  if (!v) return false;
+  if (/\bdmarc=fail\b/.test(v)) return true;
+  return /\bspf=(fail|softfail)\b/.test(v) && !/\bdkim=pass\b/.test(v);
+}
+
 export function isAutomatic(mail: Pick<ParsedMail, 'headers' | 'from'> & { headerLines?: ParsedMail['headerLines'] }, ownAddress: string): boolean {
   const h = mail.headers;
   const get = (k: string) => String(h.get(k) ?? '').toLowerCase();
@@ -220,7 +233,9 @@ export class EmailAdapter implements ChannelAdapter {
     const thread = await this.thread(contact);
     const newTopic = !!subject && baseSubject(subject) !== baseSubject(thread?.subject ?? '');
     const body = stripQuoted(mail.text ?? '');
-    const text = newTopic ? `נושא: ${baseSubject(subject)}\n\n${body}` : body;
+    // the receiving mail server says the sender could not be verified: the team sees a warning on the message (it may be forged)
+    const warn = senderUnverified(mail) ? `${UNVERIFIED_NOTE}\n\n` : '';
+    const text = `${warn}${newTopic ? `נושא: ${baseSubject(subject)}\n\n${body}` : body}`;
     const msgId = (mail.messageId ?? `<uid-${uid}@botwa>`).slice(0, 300);
     const refs = [...(thread?.refs ?? []), ...(Array.isArray(mail.references) ? mail.references : mail.references ? [mail.references] : []), msgId].slice(-10);
     await this.ctx.store.set(`t:${contact}`, JSON.stringify({ subject: subject || thread?.subject || '', messageId: msgId, refs } satisfies Thread));

@@ -26,3 +26,16 @@ describe('security regressions', () => {
     expect(safeLogUrl('/f/abcDEF123/info')).toBe('/f/[token]/info');
   });
 });
+
+describe('website chat identity with an expiry', () => {
+  it('a signature with exp is checked and stops working when it expires; the older form without exp still works', async () => {
+    const { identitySignature, identitySignatureExp, verifyIdentity } = await import('../src/webchat/config.js');
+    const secret = 'secretsecretsecretsecret1', now = Date.now(), exp = Math.floor(now / 1000) + 3600;
+    expect(verifyIdentity(secret, 'wp-42', identitySignatureExp(secret, 'wp-42', exp), exp, now)).toBe(true);
+    expect(verifyIdentity(secret, 'wp-42', identitySignatureExp(secret, 'wp-42', exp), exp, now + 2 * 3600_000)).toBe(false);   // expired
+    expect(verifyIdentity(secret, 'wp-42', identitySignatureExp(secret, 'wp-42', exp), exp + 60, now)).toBe(false);             // exp changed
+    const far = Math.floor(now / 1000) + 30 * 86400;
+    expect(verifyIdentity(secret, 'wp-42', identitySignatureExp(secret, 'wp-42', far), far, now)).toBe(false);                   // too far ahead
+    expect(verifyIdentity(secret, 'wp-42', identitySignature(secret, 'wp-42'))).toBe(true);                                     // older integrations
+  });
+});

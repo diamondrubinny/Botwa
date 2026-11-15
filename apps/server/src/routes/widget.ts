@@ -102,7 +102,7 @@ export function widgetRoutes(app: FastifyInstance, db: Db, mgr: ChannelManager, 
     (await db.query(`SELECT c.id FROM conversations c JOIN contacts ct ON ct.id = c.contact_id WHERE ct.channel_id = $1 AND ct.external_id = $2`, [channelId, contactId(v)])).rows[0]?.id as string | undefined;
 
   app.post('/widget/session', { config: { rateLimit: { max: 20, timeWindow: '1 minute' } } }, async (req, reply) => {
-    const b = z.object({ key: z.string().max(80), token: z.string().max(100).optional(), identity: z.object({ id: z.string().max(64), signature: z.string().max(128) }).passthrough().nullish() }).safeParse(req.body);
+    const b = z.object({ key: z.string().max(80), token: z.string().max(100).optional(), identity: z.object({ id: z.string().max(64), signature: z.string().max(128), exp: z.coerce.number().int().positive().optional() }).passthrough().nullish() }).safeParse(req.body);
     if (!b.success) return reply.code(400).send({ error: 'bad_request' });
     const s = await site(b.data.key);
     if (!s) return reply.code(404).send({ error: 'not_found' });
@@ -122,7 +122,7 @@ export function widgetRoutes(app: FastifyInstance, db: Db, mgr: ChannelManager, 
     }
     // verified identity: only a valid signature (computed by the host site's server with the identity secret) links the chat to a customer id
     const idn = b.data.identity;
-    if (idn && visitor && verifyIdentity(decrypt(s.secretEnc, cfg.ENCRYPTION_KEY), idn.id, idn.signature)) {
+    if (idn && visitor && verifyIdentity(decrypt(s.secretEnc, cfg.ENCRYPTION_KEY), idn.id, idn.signature, idn.exp)) {
       await db.query('UPDATE webchat_visitors SET identity_id = $2 WHERE id = $1', [visitor.id, idn.id]);
       visitor.identity_id = idn.id;
     }

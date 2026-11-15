@@ -70,6 +70,7 @@ function register_setting() {}
 function wp_add_privacy_policy_content() {}
 
 $fails = 0; $n = 0;
+if ( ! defined( 'DAY_IN_SECONDS' ) ) { define( 'DAY_IN_SECONDS', 86400 ); }
 function ok( $cond, $name ) { global $fails, $n; $n++; if ( ! $cond ) { $fails++; echo "FAIL $name\n"; } }
 function eq( $a, $b, $name ) { ok( $a === $b, $name . ' (got ' . var_export( $a, true ) . ')' ); }
 function reset_t() { $t = &$GLOBALS['t']; $t['opts'] = array(); $t['scripts'] = array(); $t['locals'] = array(); $t['errors'] = array(); $t['cap'] = false; $t['logged_in'] = false; $t['front'] = true; $t['admin'] = false; $t['filters'] = array(); $_SERVER['REQUEST_URI'] = '/'; }
@@ -137,7 +138,8 @@ reset_t(); set_opts( array_merge( $base, array( 'identity_enabled' => 1, 'identi
 $GLOBALS['t']['user'] = (object) array( 'ID' => 42, 'display_name' => 'Dana', 'user_email' => 'dana@example.com' );
 $who = Botwa_Chat_Frontend::identity();
 eq( $who['id'], 'wp-42', 'identity id' );
-eq( $who['signature'], hash_hmac( 'sha256', 'wp-42', 'secretsecretsecretsecret1' ), 'identity signature = HMAC-SHA256(secret, id) (same as the Botwa server expects)' );
+ok( $who['exp'] > time() && $who['exp'] <= time() + DAY_IN_SECONDS, 'identity carries an expiry of one day' );
+eq( $who['signature'], hash_hmac( 'sha256', 'wp-42|' . $who['exp'], 'secretsecretsecretsecret1' ), 'identity signature = HMAC-SHA256(secret, id|exp) (same as the Botwa server expects)' );
 ok( ! empty( $GLOBALS['t']['nocache'] ), 'identity answer is not cacheable' );
 add_filter( 'botwa_chat_identity_id', function () { return 'bad id!'; } ); ok( Botwa_Chat_Frontend::identity() instanceof WP_Error, 'a malformed id from a filter is refused' );
 reset_t(); set_opts( $base ); ok( Botwa_Chat_Frontend::identity() instanceof WP_Error, 'identity is unavailable when not enabled' );
