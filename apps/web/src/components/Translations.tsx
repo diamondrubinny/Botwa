@@ -7,7 +7,7 @@ import { errText } from '../strings';
  * with its English wording (built in, the unit's own, or none yet: those are sent in Hebrew). "{*}" stands for a part that
  * changes (a name, a number); variables like {שם} stay as they are.
  */
-interface Item { he: string; en: string; builtIn: string | null; custom: boolean; where: string; used: boolean }
+interface Item { he: string; en: string; builtIn: string | null; custom: boolean; where: string; used: boolean; suggest?: string | null }
 
 export function Translations({ canEdit }: { canEdit: boolean }) {
   const [items, setItems] = useState<Item[] | null>(null);
@@ -67,11 +67,12 @@ export function Translations({ canEdit }: { canEdit: boolean }) {
               {list.slice(0, limit).map((i, n) => (
                 <li key={i.he} className="tr-item" style={{ borderTop: '1px solid var(--border)', padding: '.6rem 0' }}>
                   <small className="hint">{i.where}{i.custom ? ' · תרגום שלכם' : i.builtIn ? ' · תרגום מובנה' : ''}</small>
-                  <p id={`tr-he-${n}`} dir="rtl" style={{ whiteSpace: 'pre-wrap', margin: '.2rem 0' }}>{i.he}</p>
+                  <p id={`tr-he-${n}`} dir="rtl" style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', margin: '.2rem 0' }}>{i.he}</p>
                   <label className="sr-only" htmlFor={`tr-en-${n}`}>התרגום לאנגלית של: {i.he.slice(0, 60)}</label>
-                  <textarea id={`tr-en-${n}`} dir="ltr" lang="en" rows={Math.min(6, Math.max(1, Math.ceil(i.he.length / 70)))} maxLength={2000} disabled={!canEdit}
+                  <textarea id={`tr-en-${n}`} dir="ltr" lang="en" style={{ overflowWrap: "anywhere" }} rows={Math.min(6, Math.max(1, Math.ceil(i.he.length / 70)))} maxLength={2000} disabled={!canEdit}
                     value={value(i)} placeholder="English…" aria-describedby={`tr-he-${n}`}
                     onChange={(e) => setEdits((x) => ({ ...x, [i.he]: e.target.value }))} />
+                  {canEdit && i.suggest && !value(i).trim() && <button type="button" className="ghost sm" onClick={() => setEdits((x) => ({ ...x, [i.he]: i.suggest! }))}>הצעת תרגום חלקית (להשלמה)<span className="sr-only"> – {i.he.slice(0, 40)}</span></button>}
                   {canEdit && i.builtIn && value(i) !== i.builtIn && <button type="button" className="ghost sm" onClick={() => setEdits((x) => ({ ...x, [i.he]: i.builtIn! }))}>חזרה לתרגום המובנה</button>}
                 </li>
               ))}

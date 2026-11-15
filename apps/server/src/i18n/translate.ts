@@ -297,3 +297,22 @@ export async function fromEnglish(db: Db, text: string): Promise<string> {
   for (const [he, en] of d.exact) if (en.toLowerCase() === lower && he.length <= 80) return he;   // an option's English label
   return text;
 }
+
+/**
+ * A starting point for the panel (never sent as is): the text translated as far as the dictionary goes, also sentence by sentence,
+ * with links, numbers and anything untranslatable kept. Null when nothing in it could be translated.
+ */
+export function suggestTranslation(text: string, d: Dictionary): string | null {
+  let any = false;
+  const out = text.split('\n').map((line) => {
+    if (!/[\u05D0-\u05EA]/.test(line)) return line;                       // a link, a number: as it is
+    const whole = translateWith(line, d);
+    if (whole !== line) { any = true; return whole; }
+    return line.split(/(?<=[.!?:])\s+/).map((sentence) => {
+      const t = translateWith(sentence, d);
+      if (t !== sentence) any = true;
+      return t;
+    }).join(' ');
+  }).join('\n');
+  return any ? out : null;
+}

@@ -7,7 +7,7 @@ import type { AdapterContext, AdapterFactory, ChannelAdapter } from '../src/chan
 import { loadConfig } from '../src/config.js';
 import { createDb } from '../src/db.js';
 import { detectLang, textDir, withDirectionMarks } from '../src/i18n/lang.js';
-import { buildDictionary, defaultEntries, translateWith } from '../src/i18n/translate.js';
+import { buildDictionary, defaultEntries, suggestTranslation, translateWith } from '../src/i18n/translate.js';
 import { migrate } from '../src/migrate.js';
 import { hashPassword } from '../src/password.js';
 
@@ -28,6 +28,9 @@ describe('language and direction', () => {
     expect(translateWith('ברצוני לקבל מידע / לדווח על:\n\n1. לייזרים\n0. נציג אנושי', d)).toBe("I'd like information on / to report:\n\n1. Lasers\n0. A person (agent)");
     expect(translateWith('הפנייה שלך (מספר 7) נמצאת בטיפול של דנה.', d)).toBe('Your request (number 7) is being handled by דנה.');
     expect(translateWith('משפט שאין לו תרגום', d)).toBe('משפט שאין לו תרגום');
+    // a suggestion for the panel: known sentences translated, the rest (and links, numbers) kept for a person to finish
+    expect(suggestTranslation('ניסוי מחוץ לקמפוס לפי נוהל 07-0124. לקבלת הטופס פנו ליחידת הבטיחות.', d)).toBe('ניסוי מחוץ לקמפוס לפי נוהל 07-0124. To get the form, contact the Safety Unit.');
+    expect(suggestTranslation('משפט שאין לו תרגום\nhttps://x.example/a', d)).toBeNull();
   });
 });
 

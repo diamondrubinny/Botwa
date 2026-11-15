@@ -6,7 +6,7 @@ import { loadAutomations } from '../automations.js';
 import { loadBot } from '../bot.js';
 import type { Db } from '../db.js';
 import { loadFlow } from '../flow/store.js';
-import { defaultEntries, invalidateTranslations, loadOverrides } from '../i18n/translate.js';
+import { buildDictionary, defaultEntries, invalidateTranslations, loadOverrides, suggestTranslation } from '../i18n/translate.js';
 import { loadBusinessHours } from './settings.js';
 
 /**
@@ -45,6 +45,7 @@ export function translationRoutes(app: FastifyInstance, db: Db) {
     const custom = await loadOverrides(db);
     const used = await sources(db);
     const keys = new Set<string>([...used.keys(), ...Object.keys(custom), ...defs.keys()]);
+    const dict = buildDictionary(new Map([...defs, ...Object.entries(custom).filter(([, v]) => v)]));
     const items = [...keys].map((text) => ({
       he: text,
       en: Object.hasOwn(custom, text) ? custom[text]! : defs.get(text) ?? '',
@@ -52,7 +53,7 @@ export function translationRoutes(app: FastifyInstance, db: Db) {
       custom: Object.hasOwn(custom, text),
       where: used.get(text) ?? (defs.has(text) ? 'הודעות מובנות של הבוט' : 'תרגום שנוסף'),
       used: used.has(text),
-    }));
+    })).map((i) => ({ ...i, suggest: !i.en && i.used ? suggestTranslation(i.he, dict) : null }));
     // what is in use and has no English first, then what is in use, then the rest
     items.sort((x, y) => Number(!!y.used && !y.en) - Number(!!x.used && !x.en) || Number(y.used) - Number(x.used) || x.where.localeCompare(y.where, 'he'));
     return { items, missing: items.filter((i) => i.used && !i.en).length };
