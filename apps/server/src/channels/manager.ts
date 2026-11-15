@@ -40,6 +40,7 @@ import { isSensitive, pickGif, type GifMoment } from '../bot-gifs.js';
 import { isEmergency } from '../emergency.js';
 import { isWaitingQuestion } from '../waiting.js';
 import { officerReply } from '../safety/whoIs.js';
+import { factReply } from '../safety/facts.js';
 import { hoursSummary } from '../canned.js';
 import { staffMessage } from '../staff/assistant.js';
 import { detect, sanitizeFileName } from '../media/validate.js';
@@ -926,7 +927,13 @@ export class ChannelManager {
     text = withoutBotName(text, persona.name);
     rawText = withoutBotName(rawText, persona.name);
     // "מי את?" / "את בוט?" / "מה שלומך?": the bot answers as itself, then picks up the question it was waiting for
-    const own = identityReply(text, persona) ?? smallTalkReply(text) ?? await officerReply(this.db, text).catch(() => null);
+    const told = async () => {
+      const r = (await this.db.query(`SELECT body FROM messages WHERE conversation_id = $1 AND direction = 'out' AND body LIKE '💡 הידעת?%' ORDER BY created_at DESC LIMIT 30`, [convId])).rows.map((x) => x.body as string);
+      const last = (await this.db.query(`SELECT body FROM messages WHERE conversation_id = $1 AND direction = 'out' ORDER BY created_at DESC LIMIT 1`, [convId])).rows[0]?.body as string | undefined;
+      return { r, lastWasFact: !!last?.startsWith('💡 הידעת?') };
+    };
+    const own = identityReply(text, persona) ?? smallTalkReply(text) ?? await officerReply(this.db, text).catch(() => null)
+      ?? await told().then(({ r, lastWasFact }) => factReply(text, r, lastWasFact)).catch(() => null);
     if (own) {
       const st = c.flow_state as FlowState | null;
       const flow = bot.mode === 'flow' ? await loadFlow(this.db) : null;
