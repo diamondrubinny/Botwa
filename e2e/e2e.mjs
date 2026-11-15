@@ -241,6 +241,8 @@ await page.waitForSelector('text=זמן תגובה ממוצע');
 const csvHref = await page.getAttribute('a[href*="export.csv?kind=agents"]', 'href');
 const csvRes = await page.request.get(BASE + csvHref);
 check('reports CSV export downloads', csvRes.ok() && (csvRes.headers()['content-type'] ?? '').includes('text/csv') && (await csvRes.text()).includes('messages_sent'));
+await page.waitForSelector('#sf-rep-h');
+check('reports: the safety and urgency section is there', await page.isVisible('#sf-rep-h'));
 await axe('reports');
 
 // settings + audit pages (admin)

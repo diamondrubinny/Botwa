@@ -1,6 +1,7 @@
 import { createHash, randomInt } from 'node:crypto';
 import { audit } from '../audit.js';
 import type { Db } from '../db.js';
+import { safetyReport, safetyReportText } from '../safety/report.js';
 import { permissionsOfRole } from '../routes/users.js';
 
 /**
@@ -85,6 +86,7 @@ const HELP = `אפשר לשאול אותי:
 4. ותיקות – 10 הקריאות שפתוחות הכי הרבה זמן
 5. דחוף – קריאות דחופות
 6. שלי – הקריאות אצלך
+7. בטיחות – חירום, מפגעים ולקוחות לחוצים בשבוע האחרון, וזמני המענה
 "ניתוק" – הפסקת הקישור של הווצאפ הזה.`;
 
 async function summary(db: Db): Promise<string> {
@@ -135,6 +137,7 @@ export async function answerManager(db: Db, userId: string, text: string): Promi
   if (t === '3' || /נושא/.test(t)) return byTopic(db);
   if (t === '4' || /ותיק|ישנ|רשימ|פתוחות|הכי הרבה זמן|ממתינ/.test(t)) return list(db, '', [], '⏳ הקריאות שפתוחות הכי הרבה זמן:', 'אין קריאות פתוחות.');
   if (t === '5' || /דחוף|חירום/.test(t)) return list(db, `AND EXISTS (SELECT 1 FROM conversation_tags x JOIN tags tg ON tg.id = x.tag_id WHERE x.conversation_id = c.id AND lower(tg.name) = 'דחוף')`, [], '🚨 קריאות דחופות:', 'אין קריאות דחופות פתוחות.');
+  if (t === '7' || /בטיחות|מפגע|שבוע|לחוצ/.test(t)) return safetyReportText(await safetyReport(db, 7));
   if (t === '6' || /שלי|אצלי/.test(t)) return list(db, 'AND c.assigned_to = $1', [userId], '📋 הקריאות אצלך:', 'אין קריאות פתוחות אצלך.');
   return `${await summary(db)}\n\n${HELP}`;
 }

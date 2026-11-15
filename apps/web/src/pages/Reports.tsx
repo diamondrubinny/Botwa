@@ -3,6 +3,7 @@ import { EmptyState, PageTitle } from '../components/Illustration';
 import { useState } from 'react';
 import { api } from '../api';
 import { usePoll } from '../hooks';
+import { SafetyReport } from '../components/SafetyReport';
 
 type Bucket = 'day' | 'week' | 'month';
 interface Summary {
@@ -104,6 +105,7 @@ export function Reports() {
       {failed && <p role="alert" className="error">טעינת הדוח נכשלה.</p>}
       {!data ? <Loading card lines={6} /> : (
         <>
+          <SafetyReport days={days} />
           <section className="card" aria-labelledby="sum-h">
             <h2 id="sum-h">סיכום</h2>
             <dl className="kpis">

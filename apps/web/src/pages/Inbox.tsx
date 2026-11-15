@@ -55,6 +55,10 @@ function AttachmentView({ a }: { a: Attachment }) {
 /** A message's direction by the majority of its letters (an emoji, number, name or link at the start does not decide it). */
 const textDir = (t: string): 'rtl' | 'ltr' => { const he = (t.match(/[\u0590-\u05FF]/g) ?? []).length, en = (t.match(/[A-Za-z]/g) ?? []).length; return !en || (he > 0 && he * 3 >= en) ? 'rtl' : 'ltr'; };
 
+/** Tags Betty puts on by herself, offered as one-click filters when they exist. */
+const QUICK_TAGS = ['דחוף', 'זקוק לליווי', 'English'];
+const QUICK_LABEL: Record<string, string> = { 'דחוף': '🚨 דחוף', 'זקוק לליווי': '💛 זקוק לליווי', 'English': 'English' };
+
 export function Inbox({ me }: { me: Me }) {
   const isManager = can(me, 'inbox.view_all');
   const canAssignOthers = can(me, 'conversations.assign_others');
@@ -334,6 +338,12 @@ export function Inbox({ me }: { me: Me }) {
           </div>
           {allTags.length > 0 && (
             <div className="filters-more">
+              {/* the tags Betty puts on by herself, one click away: urgent, a customer who needs support, English */}
+              {QUICK_TAGS.some((n) => allTags.some((t) => t.name.toLowerCase() === n.toLowerCase())) && (
+                <div className="chips" role="group" aria-label="סינון מהיר לפי תגית">
+                  {QUICK_TAGS.map((n) => { const t = allTags.find((x) => x.name.toLowerCase() === n.toLowerCase()); return t ? <button key={t.id} type="button" className="chip" aria-pressed={tagFilter === t.id} onClick={() => setTagFilter(tagFilter === t.id ? '' : t.id)}>{QUICK_LABEL[n] ?? t.name}</button> : null; })}
+                </div>
+              )}
               <label htmlFor="tgf" className="sr-only">סינון לפי תגית</label>
               <select id="tgf" value={tagFilter} onChange={(e) => setTagFilter(e.target.value)}>
                 <option value="">כל התגיות</option>

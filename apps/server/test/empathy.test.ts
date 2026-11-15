@@ -9,6 +9,7 @@ import { createDb } from '../src/db.js';
 import { comfortText, detectDistress, detectHazard, followUpText, hazardAdvice } from '../src/empathy.js';
 import { migrate } from '../src/migrate.js';
 import { isWaitingQuestion } from '../src/waiting.js';
+import { safetyReport, safetyReportText } from '../src/safety/report.js';
 
 describe('recognising stress', () => {
   it('worried, upset, or neither; the technical "לחץ" is not a feeling', () => {
@@ -130,5 +131,19 @@ describe('Betty stays with a stressed customer until a person answers', () => {
     await db.query(`INSERT INTO messages (conversation_id, direction, body, auto) VALUES ($1, 'out', 'בודק', false)`, [c.id]);
     expect(await say(ext, 'כבר שעה אני מחכה, זה מתסכל')).not.toContain('מובן לגמרי');
     expect((await db.query(`SELECT count(*)::int AS n FROM conversation_notes WHERE conversation_id = $1 AND body LIKE '💛%'`, [c.id])).rows[0].n).toBe(1);
+  });
+
+  it('the safety report: what was flagged and how fast a person answered; no names or message text', async () => {
+    const r = await safetyReport(db, 7);
+    const by = Object.fromEntries(r.rows.map((x) => [x.kind, x]));
+    expect(by.worried!.events).toBeGreaterThanOrEqual(1);
+    expect(by.worried!.answered).toBeGreaterThanOrEqual(1);          // the officer wrote after the first comforting message
+    expect(by.worried!.medianMinutes).not.toBeNull();
+    expect(by.hazard!.events).toBeGreaterThanOrEqual(1);
+    expect(r.topics.map((t) => t.name)).not.toContain('זקוק לליווי');   // the automatic tags are not topics
+    const text = safetyReportText(r);
+    expect(text).toContain('🛡️ בטיחות ודחיפות, 7 ימים אחרונים:');
+    expect(text).toContain('⚠️ דיווחי מפגע');
+    expect(text).not.toContain('972500000');
   });
 });
