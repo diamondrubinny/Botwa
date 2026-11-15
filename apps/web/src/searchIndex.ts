@@ -58,6 +58,7 @@ export const SEARCH_INDEX: SearchEntry[] = [
   { label: 'אזורי אחריות (בניינים וממונים)', where: 'לוח בטיחות', words: 'אזורי אחריות בניין מקום', page: 'safety', s: 'areas', allowed: P('safety.view') },
   // forms
   { label: 'תבניות טפסים וחתימה דיגיטלית', where: 'טפסים', words: 'טפסים תבנית חתימה pdf word', page: 'forms', tab: 'templates', s: 'ft-h', allowed: P('forms.manage') },
+  { label: 'טופס דיווח תאונה מובנה (שליחה בשיחה)', where: 'טפסים', words: 'תאונה כמעט ונפגע טופס דיווח אירוע', page: 'forms', tab: 'templates', s: 'acc-h', allowed: P('forms.manage') },
   { label: 'ייבוא טפסים מאתר', where: 'טפסים', words: 'ייבוא טפסים אתר יחידת הבטיחות', page: 'forms', tab: 'templates', s: 'fd-h', allowed: P('forms.manage') },
   { label: 'טפסים שנשלחו ושליחות לקבוצה', where: 'טפסים', words: 'טפסים שנשלחו נחתם תזכורת קבוצה', page: 'forms', tab: 'sent', s: 'fs-h', allowed: any },
   { label: 'בדיקת קובץ חתום', where: 'טפסים', words: 'אימות קובץ חתום טביעה sha', page: 'forms', tab: 'verify', s: 'fv-h', allowed: any },

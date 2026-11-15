@@ -30,6 +30,7 @@ export const NEW_FLOW_STATE: FlowState = { node: null, vars: {}, invalid: 0, don
 export type Effect =
   | { kind: 'handoff'; reason: 'requested' | 'flow' | 'unrecognized' | 'media'; userId?: string; text?: string; /** the person was chosen by the place the customer named */ viaArea?: boolean; officerTopic?: string; showContact?: boolean }
   | { kind: 'tag'; tagId: string }
+  | { kind: 'form'; templateId: string; days: number }
   | { kind: 'note'; text: string }
   | { kind: 'name'; value: string }
   | { kind: 'profile'; vars: Vars }
@@ -382,6 +383,7 @@ export async function runFlow(flow: Flow, prev: FlowState | null, input: FlowInp
       case 'message': replies.push(n.text); cursor = n.next; break;
       case 'referral': replies.push(`${n.text}\n\n${n.contactName}:\n${waLink(n.phone, n.message)}`); cursor = n.next; break;
       case 'tag': effects.push({ kind: 'tag', tagId: n.tagId }); cursor = n.next; break;
+      case 'form': if (n.text) replies.push(n.text); effects.push({ kind: 'form', templateId: n.templateId, days: n.days }); cursor = n.next; break;
       case 'remember': {
         const keep: Vars = {};
         for (const k of n.vars) if (state.vars[k]) keep[k] = state.vars[k]!;

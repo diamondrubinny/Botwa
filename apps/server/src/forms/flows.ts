@@ -181,7 +181,7 @@ export async function refreshFlow(db: Db, api: FlowApi, t: TemplateRow, channelI
 }
 
 /** Send a form to fill inside WhatsApp from a conversation on the official channel. */
-export async function sendFlowRequest(db: Db, cfg: Config, out: FlowSender, a: { templateId: string; conversationId: string; userId: string; days: number; values?: Record<string, string>; note?: string }): Promise<{ id: string; number: number; messageId: string }> {
+export async function sendFlowRequest(db: Db, cfg: Config, out: FlowSender, a: { templateId: string; conversationId: string; userId: string | null; days: number; values?: Record<string, string>; note?: string }): Promise<{ id: string; number: number; messageId: string }> {
   const t = await getTemplate(db, a.templateId);
   if (!t || !t.active) throw new FlowProblem('template_not_found');
   if (!t.flowEnabled) throw new FlowProblem('flow_disabled');
@@ -202,8 +202,8 @@ export async function sendFlowRequest(db: Db, cfg: Config, out: FlowSender, a: {
     await db.query('DELETE FROM form_requests WHERE id = $1', [r.id]);
     throw e;
   }
-  const m = await db.query(`INSERT INTO messages (conversation_id, direction, body, external_id, sender_user_id) VALUES ($1,'out',$2,$3,$4) RETURNING id`, [r.conv.id, body, sent.externalMessageId ?? null, a.userId]);
-  await db.query(`UPDATE conversations SET last_message_at = now(), assigned_to = COALESCE(assigned_to, $2), bot_state = 'human' WHERE id = $1`, [r.conv.id, a.userId]);
+  const m = await db.query(`INSERT INTO messages (conversation_id, direction, body, external_id, sender_user_id, auto) VALUES ($1,'out',$2,$3,$4,$4::uuid IS NULL) RETURNING id`, [r.conv.id, body, sent.externalMessageId ?? null, a.userId]);
+  await db.query(`UPDATE conversations SET last_message_at = now(), assigned_to = COALESCE(assigned_to, $2), bot_state = CASE WHEN $2::uuid IS NULL THEN bot_state ELSE 'human' END WHERE id = $1`, [r.conv.id, a.userId]);
   await event(db, r.id, 'sent', `נשלח למילוי בתוך ווצאפ, בתוקף עד ${dateHe(r.expires)}`);
   out.notifyMessage(r.conv.channel_id, r.conv.id, m.rows[0].id);
   return { id: r.id, number: r.number, messageId: m.rows[0].id };

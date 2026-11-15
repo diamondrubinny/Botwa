@@ -28,7 +28,10 @@ export const OLD_ID_INTRO_START = 'שלום, כאן הבוט של יחידת ה�
 /** Under an information answer: how to go on (instead of the whole menu again). */
 export const MORE_TOPICS = 'לנושא נוסף אפשר לכתוב אותו כאן במילים, או "תפריט" לתפריט הראשי.';
 
-export function buildSafetyFlow(tag: (name: string) => string, links: TemplateLinks = {}): Flow {
+/** In the flow, before the accident form is sent (inside WhatsApp or as a link). */
+export const ACCIDENT_FORM_TEXT = 'שולחים לך כאן טופס דיווח קצר על התאונה או האירוע. אפשר למלא ולחתום בו בטלפון.\nבמקרה חירום יש להתקשר מיד לגורמי החירום.';
+
+export function buildSafetyFlow(tag: (name: string) => string, links: TemplateLinks = {}, forms: { accident?: string } = {}): Flow {
   const nodes: FlowNode[] = [];
   const add = (n: FlowNode) => { nodes.push(n); return n.id; };
   const HANDOFF_TEXT = 'הפנייה התקבלה והועברה לטיפול. נחזור אליך בהקדם.';
@@ -81,7 +84,9 @@ export function buildSafetyFlow(tag: (name: string) => string, links: TemplateLi
   const linkTopic = (id: string, text: string) => add({ id, type: 'message', label: id, text: `${text}\n\n${MORE_TOPICS}` });
   const where = (url?: string) => (url ? `\n${url}` : '\nלקבלת הטופס פנו ליחידת הבטיחות.');
   linkTopic('waste', `פינוי פסולת כימית מתבצע באמצעות הטופס של היחידה.${where(links.waste)}`);
-  linkTopic('accident', `דיווח על תאונה או אירוע "כמעט-ונפגע" מתבצע בטופס של היחידה.${where(links.accident)}\nבמקרה חירום יש להתקשר מיד לגורמי החירום.`);
+  // the accident report: the built-in form sent in the conversation when the unit created it (Forms), else the unit's link
+  if (forms.accident && !links.accident) add({ id: 'accident', type: 'form', label: 'accident', templateId: forms.accident, text: ACCIDENT_FORM_TEXT, days: 7 });
+  else linkTopic('accident', `דיווח על תאונה או אירוע "כמעט-ונפגע" מתבצע בטופס של היחידה.${where(links.accident)}\nבמקרה חירום יש להתקשר מיד לגורמי החירום.`);
   linkTopic('event', `אירוע בקמפוס מדווח בטופס האירועים של היחידה.${where(links.event)}`);
   linkTopic('offsite', `ניסוי מחוץ לקמפוס מחייב מילוי טופס מנוהל.${where(links.offsite)}`);
 

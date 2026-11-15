@@ -171,6 +171,7 @@ const PAIRS: [string, string][] = [
   ['שלחו תמונה של האזור או תארו בכתב את השאלה:', 'Send a photo of the area or describe your question in writing:'],
   ['שלחו תמונה או תארו בכתב את השאלה / הדיווח:', 'Send a photo or describe your question / report in writing:'],
   ['לשאלה בנושא הדרכות, כתבו אותה כאן:', 'For a question about training, write it here:'],
+  ['שולחים לך כאן טופס דיווח קצר על התאונה או האירוע. אפשר למלא ולחתום בו בטלפון.', 'Here is a short report form for the accident or incident. You can fill it in and sign it on your phone.'],
   // automatic messages
   ['נשמח לשמוע איך היה השירות: השיבו במספר מ-1 עד 5 (5 = מצוין).', "We'd love to hear how the service was: reply with a number from 1 to 5 (5 = excellent)."],
   ['תודה רבה על המשוב!', 'Thank you very much for your feedback!'],

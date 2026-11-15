@@ -48,15 +48,16 @@ type Node = { id: string; label?: string } & (
   | { type: 'kb'; intro: string; found?: Id; notFound?: Id }
   | { type: 'referral'; text: string; contactName: string; phone: string; message: string; next?: Id }
   | { type: 'tag'; tagId: string; next?: Id }
+  | { type: 'form'; templateId: string; text: string; days: number; next?: Id }
   | { type: 'handoff'; text: string; userId?: string; areaVars?: string[]; officerTopic?: string; showContact?: boolean }
   | { type: 'end'; text: string }
 );
 interface Flow { start: string; nodes: Node[]; labels?: Record<string, string>; kbFirst?: boolean; layout?: Record<string, Pos>; mainMenu?: string }
 interface FState { node: string | null; vars: Record<string, string>; invalid: number; done: boolean; endedAt?: number; files?: number; list?: string[] }
-interface Refs { users: { id: string; name: string; username?: string }[]; tags: { id: string; name: string }[]; officers?: { id: string; name: string; active: boolean; hasAccount: boolean; topics: string[] }[]; topics?: string[] }
+interface Refs { users: { id: string; name: string; username?: string }[]; tags: { id: string; name: string }[]; forms?: { id: string; title: string }[]; officers?: { id: string; name: string; active: boolean; hasAccount: boolean; topics: string[] }[]; topics?: string[] }
 
-const TYPE_LABEL: Record<Node['type'], string> = { message: 'הודעה', menu: 'תפריט', question: 'שאלה (איסוף פרט)', media: 'קובץ, תמונה או טקסט', list: 'רשימה (הוסף עוד)', remember: 'שמירה בכרטיס איש הקשר', condition: 'תנאי', kb: 'מאגר ידע', referral: 'הפניה לווצאפ אישי', tag: 'הוספת תגית', handoff: 'העברה לנציג', end: 'סיום' };
-const TYPE_CLASS: Record<Node['type'], string> = { message: 'muted', menu: 'accent', question: 'accent', media: 'accent', list: 'accent', remember: 'muted', condition: 'warn', kb: 'ok', referral: 'ok', tag: 'muted', handoff: 'danger', end: 'muted' };
+const TYPE_LABEL: Record<Node['type'], string> = { message: 'הודעה', menu: 'תפריט', question: 'שאלה (איסוף פרט)', media: 'קובץ, תמונה או טקסט', list: 'רשימה (הוסף עוד)', remember: 'שמירה בכרטיס איש הקשר', condition: 'תנאי', kb: 'מאגר ידע', referral: 'הפניה לווצאפ אישי', tag: 'הוספת תגית', form: 'שליחת טופס', handoff: 'העברה לנציג', end: 'סיום' };
+const TYPE_CLASS: Record<Node['type'], string> = { message: 'muted', menu: 'accent', question: 'accent', media: 'accent', list: 'accent', remember: 'muted', condition: 'warn', kb: 'ok', referral: 'ok', tag: 'muted', handoff: 'danger', end: 'muted' , form: 'ok' };
 const KIND_LABEL = { text: 'טקסט חופשי', name: 'שם (ישמש כשם איש הקשר)', phone: 'טלפון', email: 'אימייל' } as const;
 const VAR_RE = /^[a-z][a-zA-Z0-9_]{0,23}$/;
 const varsOf = (flow: Flow): string[] => [...new Set(flow.nodes.flatMap((n) => (n.type === 'question' || n.type === 'list' || n.type === 'menu' && n.save || n.type === 'media' && n.save ? [(n as { save?: string }).save!] : [])).filter(Boolean))];
@@ -101,6 +102,7 @@ function blank(type: Node['type'], id: string): Node {
     case 'kb': return { id, type, intro: '' };
     case 'referral': return { id, type, text: 'לשאלות בנושא פנו אל:', contactName: '', phone: '', message: '' };
     case 'tag': return { id, type, tagId: '' };
+    case 'form': return { id, type, templateId: '', text: 'שולחים לך כאן טופס למילוי וחתימה בטלפון.', days: 7 };
     case 'media': return { id, type, text: 'שלחו תמונה או תארו בכתב:', allowText: true, optional: true, retryText: 'אפשר לשלוח כאן תמונה, קובץ או הסבר בכתב.' };
     case 'list': return { id, type, text: 'מה להוסיף לרשימה?', save: 'items', max: 10, moreText: 'להוסיף עוד?', optional: false };
     case 'remember': return { id, type, vars: ['fullName'] };
@@ -525,6 +527,15 @@ function NodeForm({ n, flow, refs, canEdit, upd, del, makeStart, makeMain }: { n
           <div className="field"><label htmlFor={f('ph')}>מספר ווצאפ</label><input id={f('ph')} required dir="ltr" inputMode="tel" value={n.phone} onChange={(e) => set({ phone: e.target.value })} placeholder="0501234567" /></div>
           <div className="field"><label htmlFor={f('ms')}>הודעה שתוכתב מראש</label><input id={f('ms')} maxLength={200} value={n.message} onChange={(e) => set({ message: e.target.value })} /></div>
           <p className="hint">המספר יוצג ללקוחות: יש לקבל את הסכמת האדם.</p>
+        </>
+      )}
+      {n.type === 'form' && (
+        <>
+          <div className="field"><label htmlFor={f('fm')}>הטופס</label>
+            <select id={f('fm')} value={n.templateId} onChange={(e) => set({ templateId: e.target.value })}><option value="">בחרו טופס</option>{(refs.forms ?? []).map((t) => <option key={t.id} value={t.id}>{t.title}</option>)}</select>
+          </div>
+          <div className="field"><label htmlFor={f('fd')}>תוקף הקישור (ימים)</label><input id={f('fd')} type="number" min={1} max={60} value={n.days} onChange={(e) => set({ days: Math.max(1, Math.min(60, Number(e.target.value) || 7)) })} /></div>
+          <p className="hint">בערוץ ווצאפ הרשמי, כשהטופס מפורסם שם, הוא נשלח למילוי בתוך ווצאפ. בכל ערוץ אחר נשלח קישור אישי למילוי וחתימה. הטופס החתום מגיע לשיחה ולטפסים שנשלחו. טופס דיווח תאונה מובנה אפשר ליצור בטפסים ← תבניות.</p>
         </>
       )}
       {n.type === 'tag' && <div className="field"><label htmlFor={f('tg')}>תגית</label><select id={f('tg')} value={n.tagId} onChange={(e) => set({ tagId: e.target.value })}><option value="">בחרו תגית</option>{refs.tags.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}</select></div>}

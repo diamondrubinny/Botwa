@@ -675,6 +675,30 @@ describe('safety flow live: areas, template endpoint, placeholders, profile, fil
     await say('wa10', 'שלום'); await say('wa10', '1'); await say('wa10', 'מקום לא מוכר');
     expect((await conv('wa10')).assigned_to).toBe(ids.o2);
   });
+
+  it('the built-in accident form: created once, connected to the saved flow, and sent as a link when a customer picks the accident topic', async () => {
+    expect((await call('POST', '/forms/templates/accident', 'o1@t.io')).statusCode).toBe(403);   // an agent: no forms management
+    const tpl = (await call('POST', '/flow/templates/safety', 'admin@t.io', { links: { waste: 'https://forms.example/waste', event: 'https://forms.example/event', offsite: 'https://forms.example/offsite', training: 'https://forms.example/training', privacy: 'https://forms.example/privacy' } })).json();
+    expect((await call('PUT', '/flow', 'admin@t.io', { flow: tpl.flow })).statusCode).toBe(200);
+    const r = (await call('POST', '/forms/templates/accident', 'admin@t.io')).json();
+    expect(r).toMatchObject({ created: true, connected: true });
+    expect((await call('POST', '/forms/templates/accident', 'admin@t.io')).json()).toMatchObject({ id: r.id, created: false, connected: true });   // once
+    const saved = (await call('GET', '/flow', 'admin@t.io')).json().flow;
+    expect(saved.nodes.find((n: { id: string }) => n.id === 'accident')).toMatchObject({ type: 'form', templateId: r.id });
+    await call('PUT', '/flow/mode', 'admin@t.io', { mode: 'flow' });
+    // a known customer picks "דיווח תאונה": the form link, the flow is not handed to a person
+    const who = 'wa-acc';
+    await db.query(`DELETE FROM contacts WHERE external_id = $1`, [`${who}@s.whatsapp.net`]);
+    await say(who, 'שלום');
+    await db.query(`UPDATE contacts SET profile = '{"fullName": "דנה לוי", "faculty": "כימיה", "status": "משתלם"}' WHERE external_id = $1`, [`${who}@s.whatsapp.net`]);
+    const menu = (await say(who, 'תפריט')).join('\n');                                       // straight to the topics
+    expect(menu).toContain('דיווח תאונה');
+    const out = (await say(who, '2')).join('\n');
+    expect(out).toContain('שולחים לך כאן טופס דיווח קצר');
+    expect(out).toMatch(/\/f\/f_[\w-]+/);
+    const req = (await db.query(`SELECT r.sent_by, t.title FROM form_requests r JOIN form_templates t ON t.id = r.template_id ORDER BY r.created_at DESC LIMIT 1`)).rows[0];
+    expect(req).toMatchObject({ sent_by: null, title: 'דיווח תאונה / אירוע "כמעט ונפגע"' });
+  });
 });
 
 describe('areas workbook import', () => {

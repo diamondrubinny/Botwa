@@ -722,6 +722,9 @@ check('reactions: a thank-you gets a heart automatically, in the widget and in t
   check('forms: the editor moves a field with the keyboard and saves', true);
   await page.click('.form-editor button:has-text("סגירה")');
   await axe('forms: templates');
+  await page.click('button:has-text("יצירה וחיבור לתרשים")');
+  await page.waitForSelector('text=הטופס נוצר.');
+  check('forms: the built-in accident report is created', await page.isVisible('.form-tpls >> text=דיווח תאונה'));
   // filling inside WhatsApp: short labels (Meta: 20 characters), the switch, and the official channels where it is published
   await page.click('.form-tpls li:has-text("הצהרת בטיחות למבקר") button:has-text("מילוי בתוך ווצאפ")');
   await page.waitForSelector('#ff-h');
@@ -751,6 +754,7 @@ check('reactions: a thank-you gets a heart automatically, in the widget and in t
   await page.click('button:has-text("שליחת טופס לחתימה")');
   await page.waitForSelector('#sf-t');
   await axe('inbox: send a form');
+  await page.selectOption('#sf-t', { label: 'הצהרת בטיחות למבקר' }).catch(() => undefined);   // the built-in accident form is in the list too
   await page.click('#send-form button[type=submit]');
   await page.waitForSelector('#send-form [role=status].ok');
   const link = await chat.locator('.msg.them:has-text("הצהרת בטיחות למבקר") a').getAttribute('href', { timeout: 15000 });

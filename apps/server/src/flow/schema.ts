@@ -51,6 +51,8 @@ export const flowNode = z.discriminatedUnion('type', [
   z.object({ ...base, type: z.literal('kb'), intro: z.string().trim().max(120).default(''), found: next, notFound: next }),
   z.object({ ...base, type: z.literal('referral'), text: text(1000), contactName: text(60), phone: z.string().trim().regex(/^\+?[\d\s-]{8,18}$/), message: z.string().trim().max(200).default(''), next }),
   z.object({ ...base, type: z.literal('tag'), tagId: z.string().uuid(), next }),
+  /** send a digital form (e.g. the accident report): inside WhatsApp when the official channel has it published, else a personal link to sign */
+  z.object({ ...base, type: z.literal('form'), templateId: z.string().uuid(), text: z.string().trim().max(500).default(''), days: z.number().int().min(1).max(60).default(7), next }),
   z.object({
     ...base, type: z.literal('handoff'), text: z.string().trim().max(500).default(''), userId: z.string().uuid().optional(),
     /** pick the person by responsibility area from these answers (first one that matches an area); userId is the fallback */

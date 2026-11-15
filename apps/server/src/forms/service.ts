@@ -61,9 +61,9 @@ export function publicUrl(cfg: Config, token: string): string {
 export const dateHe = (d: Date) => d.toLocaleDateString('he-IL', { timeZone: 'Asia/Jerusalem', day: 'numeric', month: 'numeric', year: 'numeric' });
 
 /** Values the system fills when sending: the customer's name and phone, today, the sender, the inquiry number. */
-async function prefillValues(db: Db, fields: Field[], conv: ConvInfo, userId: string): Promise<Record<string, string>> {
+async function prefillValues(db: Db, fields: Field[], conv: ConvInfo, userId: string | null): Promise<Record<string, string>> {
   const out: Record<string, string> = {};
-  const me = (await db.query('SELECT COALESCE(name_he, name) AS n FROM users WHERE id = $1', [userId])).rows[0]?.n as string | undefined;
+  const me = userId ? (await db.query('SELECT COALESCE(name_he, name) AS n FROM users WHERE id = $1', [userId])).rows[0]?.n as string | undefined : undefined;
   const phone = /^\d{8,15}(@s\.whatsapp\.net)?$/.test(conv.external_id) ? conv.external_id.split('@')[0]! : '';
   for (const f of fields) {
     const v = f.prefill === 'contact_name' ? conv.display_name ?? '' : f.prefill === 'contact_phone' ? phone : f.prefill === 'today' ? new Date().toISOString().slice(0, 10)
@@ -80,7 +80,7 @@ export function linkMessage(name: string | null, title: string, url: string, exp
 }
 
 /** A request for one conversation, without sending anything (group sending decides how each one is delivered). */
-export async function createRequest(db: Db, cfg: Config, a: { templateId: string; conversationId: string; userId: string; days: number; values?: Record<string, string>; batchId?: string | null; keepLink?: boolean }): Promise<{ id: string; number: number; url: string; token: string; expires: Date; title: string; conv: ConvInfo; prefill: Record<string, string> }> {
+export async function createRequest(db: Db, cfg: Config, a: { templateId: string; conversationId: string; userId: string | null; days: number; values?: Record<string, string>; batchId?: string | null; keepLink?: boolean }): Promise<{ id: string; number: number; url: string; token: string; expires: Date; title: string; conv: ConvInfo; prefill: Record<string, string> }> {
   const t = await getTemplate(db, a.templateId);
   if (!t || !t.active) throw new Error('template_not_found');
   if (!t.fields.length) throw new Error('template_has_no_fields');
@@ -101,7 +101,7 @@ export async function createRequest(db: Db, cfg: Config, a: { templateId: string
 }
 
 /** Creates a request for one conversation and sends its personal link there. Returns the request (and the link, for the panel). */
-export async function sendRequest(db: Db, cfg: Config, out: Sender, a: { templateId: string; conversationId: string; userId: string; days: number; values?: Record<string, string>; batchId?: string | null; note?: string }): Promise<{ id: string; number: number; url: string; messageId: string }> {
+export async function sendRequest(db: Db, cfg: Config, out: Sender, a: { templateId: string; conversationId: string; userId: string | null; days: number; values?: Record<string, string>; batchId?: string | null; note?: string }): Promise<{ id: string; number: number; url: string; messageId: string }> {
   const r = await createRequest(db, cfg, a);
   const text = linkMessage(r.conv.display_name, r.title, r.url, r.expires, a.note);
   let sent: { externalMessageId?: string };
@@ -109,9 +109,10 @@ export async function sendRequest(db: Db, cfg: Config, out: Sender, a: { templat
     await db.query('DELETE FROM form_requests WHERE id = $1', [r.id]);
     throw e;
   }
-  const m = await db.query(`INSERT INTO messages (conversation_id, direction, body, external_id, sender_user_id) VALUES ($1,'out',$2,$3,$4) RETURNING id`, [r.conv.id, text, sent.externalMessageId ?? null, a.userId]);
-  await db.query(`UPDATE conversations SET last_message_at = now(), assigned_to = COALESCE(assigned_to, $2), bot_state = 'human' WHERE id = $1`, [r.conv.id, a.userId]);
-  await event(db, r.id, 'sent', `נשלח ע"י משתמש, בתוקף עד ${dateHe(r.expires)}`);
+  // sent by a person: theirs to follow (assigned, the bot steps back); sent by the bot (no person): an automatic message, the flow goes on
+  const m = await db.query(`INSERT INTO messages (conversation_id, direction, body, external_id, sender_user_id, auto) VALUES ($1,'out',$2,$3,$4,$4::uuid IS NULL) RETURNING id`, [r.conv.id, text, sent.externalMessageId ?? null, a.userId]);
+  await db.query(`UPDATE conversations SET last_message_at = now(), assigned_to = COALESCE(assigned_to, $2), bot_state = CASE WHEN $2::uuid IS NULL THEN bot_state ELSE 'human' END WHERE id = $1`, [r.conv.id, a.userId]);
+  await event(db, r.id, 'sent', `${a.userId ? 'נשלח ע"י משתמש' : 'נשלח ע"י הבוט'}, בתוקף עד ${dateHe(r.expires)}`);
   out.notifyMessage(r.conv.channel_id, r.conv.id, m.rows[0].id);
   return { id: r.id, number: r.number, url: r.url, messageId: m.rows[0].id };
 }

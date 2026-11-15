@@ -48,6 +48,8 @@ export function flowRoutes(app: FastifyInstance, db: Db, kb: KnowledgeBase, cfg?
   app.get('/flow/refs', { preHandler: view }, async () => ({
     users: (await db.query('SELECT id, name, username FROM users WHERE active ORDER BY lower(name)')).rows,
     tags: (await db.query('SELECT id, name FROM tags ORDER BY lower(name)')).rows,
+    /** digital forms, for the "send a form" step */
+    forms: (await db.query('SELECT id, title FROM form_templates WHERE active ORDER BY title')).rows,
     /** officers by topic, for the "hand over to the officer of a topic" choice */
     officers: (await listOfficers(db)).map((o) => ({ id: o.id, name: o.name, active: o.active, hasAccount: !!o.userId && o.userActive, topics: o.topics })),
     topics: [...new Set([...TEMPLATE_TAGS, ...(await db.query('SELECT DISTINCT topic FROM officer_topics')).rows.map((r) => r.topic as string)])],
@@ -98,7 +100,8 @@ export function flowRoutes(app: FastifyInstance, db: Db, kb: KnowledgeBase, cfg?
       ids.set(name, (await db.query('SELECT id FROM tags WHERE lower(name) = lower($1)', [name])).rows[0].id as string);
     }
     await audit(db, { actorId: req.user!.id, action: 'flow.template_safety', ip: req.ip });
-    return { flow: buildSafetyFlow((n) => ids.get(n) ?? ids.get('שאלה כללית')!, links.data.links), unfinished: [] as string[] };
+    const accident = (await db.query(`SELECT id FROM form_templates WHERE source_name = 'botwa:accident' AND active ORDER BY created_at DESC LIMIT 1`)).rows[0]?.id as string | undefined;
+    return { flow: buildSafetyFlow((n) => ids.get(n) ?? ids.get('שאלה כללית')!, links.data.links, { accident }), unfinished: [] as string[] };
   });
 
   // A flow equivalent to today's numbered menu: a starting point to edit (not saved until PUT).

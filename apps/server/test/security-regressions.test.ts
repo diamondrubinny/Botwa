@@ -39,3 +39,15 @@ describe('website chat identity with an expiry', () => {
     expect(verifyIdentity(secret, 'wp-42', identitySignature(secret, 'wp-42'))).toBe(true);                                     // older integrations
   });
 });
+
+describe('the built-in accident form', () => {
+  it('a one-page PDF with its fields placed on the page; fits WhatsApp Flows without problems', async () => {
+    const { buildAccidentForm } = await import('../src/forms/accident.js');
+    const { buildFlowJson } = await import('../src/forms/flowjson.js');
+    const f = await buildAccidentForm();
+    expect(f.pdf.subarray(0, 5).toString()).toBe('%PDF-');
+    expect(f.fields.map((x) => x.id)).toEqual(['reporter', 'phone', 'date', 'time', 'place', 'kind', 'what', 'injured', 'injury', 'witnesses', 'actions', 'signature']);
+    for (const x of f.fields) { expect(x.y).toBeGreaterThan(0); expect(x.x + x.w).toBeLessThanOrEqual(f.pages[0]!.w); }
+    expect(buildFlowJson('דיווח תאונה', f.fields).problems).toEqual([]);
+  });
+});

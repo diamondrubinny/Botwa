@@ -1,4 +1,8 @@
 import { readFileSync } from 'node:fs';
+import { ensureAccidentTemplate } from '../forms/accident.js';
+import { loadFlow, saveFlow } from '../flow/store.js';
+import { flowSchema } from '../flow/schema.js';
+import { ACCIDENT_FORM_TEXT } from '../flow/safetyTemplate.js';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { isManager, loadAccessible, sendBlock } from '../access.js';
@@ -298,6 +302,21 @@ export function formRoutes(app: FastifyInstance, db: Db, mgr: ChannelManager, cf
     const out = await receiveFlowReply(db, cfg, mgr, media, { ...a, org: brand.appName || 'Botwa' });
     if (out === 'signed') await audit(db, { action: 'forms.flow_signed', target: a.conversationId, meta: { message: a.messageId } }).catch(() => undefined);
   };
+
+  // the built-in accident / near-miss report: created once (or the existing one), and connected to the saved flow's accident topic
+  app.post('/forms/templates/accident', { preHandler: manage, config: { rateLimit: { max: 10, timeWindow: '1 minute' } } }, async (req) => {
+    const t = await ensureAccidentTemplate(db, req.user!.id);
+    let connected = false;
+    const flow = await loadFlow(db);
+    const node = flow?.nodes.find((n) => n.id === 'accident');
+    if (flow && node && (node.type === 'message' || (node.type === 'form' && node.templateId !== t.id))) {
+      const next = { ...flow, nodes: flow.nodes.map((n) => (n.id === 'accident' ? { id: 'accident', type: 'form' as const, label: n.label ?? 'accident', templateId: t.id, text: ACCIDENT_FORM_TEXT, days: 7 } : n)) };
+      const ok = flowSchema.safeParse(next);
+      if (ok.success) { await saveFlow(db, ok.data); connected = true; }
+    } else if (node?.type === 'form') connected = true;
+    await audit(db, { actorId: req.user!.id, action: 'forms.accident_template', target: t.id, ip: req.ip, meta: { created: t.created, connected } });
+    return { id: t.id, created: t.created, connected };
+  });
 
   app.post('/conversations/:id/forms', { preHandler: any, config: { rateLimit: { max: 30, timeWindow: '1 minute' } } }, async (req, reply) => {
     const p = idParam.safeParse(req.params);

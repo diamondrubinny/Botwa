@@ -84,6 +84,18 @@ function Templates({ onEdit, onBatch, onFlow }: { onEdit: (id: string) => void; 
   return (
     <>
       {msg && <p role="status" className={msg.ok ? 'ok' : 'error'}>{msg.text}</p>}
+      <section className="card" aria-labelledby="acc-h">
+        <h2 id="acc-h">טופס דיווח תאונה מובנה</h2>
+        <p className="hint">טופס מוכן לדיווח על תאונה או אירוע "כמעט ונפגע", עם השדות: שם, טלפון, תאריך, שעה, מיקום, סוג, מה קרה, נפגעים, עדים, מה נעשה וחתימה. אחרי היצירה, נושא "דיווח תאונה" בתרשים הזרימה שולח אותו בשיחה: בתוך ווצאפ כשהוא מפורסם שם, ובכל מקרה אחר כקישור לחתימה. אפשר לערוך את השדות כמו בכל טופס.</p>
+        <button type="button" disabled={busy} onClick={async () => {
+          setBusy(true); setMsg(null);
+          try {
+            const r = await api<{ id: string; created: boolean; connected: boolean }>('POST', '/forms/templates/accident');
+            setMsg({ ok: true, text: `${r.created ? 'הטופס נוצר.' : 'הטופס כבר קיים.'} ${r.connected ? 'הוא מחובר לנושא "דיווח תאונה" בתרשים הזרימה.' : 'אין בתרשים נושא "דיווח תאונה" לחבר אליו: אפשר להוסיף צומת "שליחת טופס" בעורך התרשים.'}` });
+            await load();
+          } catch (e) { fail(e); } finally { setBusy(false); }
+        }}>יצירה וחיבור לתרשים</button>
+      </section>
       <section className="card" aria-labelledby="ft-h">
         <h2 id="ft-h">תבניות ({list.length})</h2>
         {!list.length ? <p className="hint">אין עדיין תבניות. העלו קובץ PDF או ייבאו מאתר יחידת הבטיחות.</p> : (

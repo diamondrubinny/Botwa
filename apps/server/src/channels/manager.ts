@@ -41,6 +41,8 @@ import { isSensitive, pickGif, type GifMoment } from '../bot-gifs.js';
 import { isEmergency } from '../emergency.js';
 import { isPastReportQuestion, isWaitingQuestion } from '../waiting.js';
 import { loadIncident } from '../incident.js';
+import { sendRequest } from '../forms/service.js';
+import { FlowProblem, sendFlowRequest } from '../forms/flows.js';
 import { dueReminders, reminderText } from '../safety/inspections.js';
 import { officerReply, officerUserFor } from '../safety/whoIs.js';
 import { comfortText, detectDistress, stillHereText, type Distress } from '../empathy.js';
@@ -1314,6 +1316,21 @@ export class ChannelManager {
     return true;
   }
 
+  /**
+   * The flow sends a form (e.g. the accident report): inside WhatsApp when the conversation is on the official channel and the form
+   * is published there as a Flow, else a personal link to fill and sign. Sent by the bot (no person): the conversation is not assigned
+   * and the flow goes on. A failure leaves a note for the team.
+   */
+  async sendFormFromBot(convId: string, templateId: string, days: number): Promise<void> {
+    const args = { templateId, conversationId: convId, userId: null, days };
+    try {
+      try { await sendFlowRequest(this.db, this.cfg, this, args); return; } catch (e) { if (!(e instanceof FlowProblem)) throw e; }   // no Flow here: a link
+      await sendRequest(this.db, this.cfg, this, args);
+    } catch (e) {
+      await this.db.query('INSERT INTO conversation_notes (conversation_id, body) VALUES ($1, $2)', [convId, `לא ניתן היה לשלוח את הטופס מהבוט (${(e as Error).message}). אפשר לשלוח אותו ידנית מהשיחה.`]).catch(() => undefined);
+    }
+  }
+
   /** A wide emergency is on and this conversation has not had its status message yet: send it (English when given) and tag it. */
   async incidentReply(channelId: string, convId: string, ext: string): Promise<boolean> {
     const i = await loadIncident(this.db);
@@ -1458,6 +1475,7 @@ export class ChannelManager {
       else if (e.kind === 'tag') await this.db.query('INSERT INTO conversation_tags (conversation_id, tag_id) SELECT $1, id FROM tags WHERE id = $2 ON CONFLICT DO NOTHING', [convId, e.tagId]).catch(() => undefined);
       else if (e.kind === 'profile') await this.db.query(`UPDATE contacts SET profile = profile || $2::jsonb WHERE id = (SELECT contact_id FROM conversations WHERE id = $1)`, [convId, JSON.stringify(e.vars)]).catch(() => undefined);
       else if (e.kind === 'name') await this.db.query(`UPDATE contacts SET display_name = $2 WHERE id = (SELECT contact_id FROM conversations WHERE id = $1) AND display_name IS NULL`, [convId, e.value]).catch(() => undefined);
+      else if (e.kind === 'form') await this.sendFormFromBot(convId, e.templateId, e.days);
       else if (e.kind === 'learn_option') await recordLearn(this.db, this.kb, { kind: 'option_example', target: `${e.node}\n${e.label}`, text: e.text, conversationId: convId }).catch(() => undefined);
     }
     if (handoff) {
