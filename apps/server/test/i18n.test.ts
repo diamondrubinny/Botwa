@@ -162,4 +162,18 @@ describe('a conversation in English', () => {
     expect(await say('972500008884@s.whatsapp.net', 'שלום')).not.toContain('אזעקה');
     expect((await db.query(`SELECT count(*)::int AS n FROM audit_log WHERE action IN ('incident.start', 'incident.end')`)).rows[0].n).toBe(2);
   });
+
+  it('the monthly safety report: a PDF for one calendar month, with the month figures', async () => {
+    const month = new Date().toISOString().slice(0, 7);
+    expect((await app.inject({ method: 'GET', url: '/reports/monthly.pdf?month=2026-13', headers: { cookie, origin: ORIGIN } })).statusCode).toBe(400);
+    const r = await app.inject({ method: 'GET', url: `/reports/monthly.pdf?month=${month}`, headers: { cookie, origin: ORIGIN } });
+    expect(r.statusCode).toBe(200);
+    expect(r.headers['content-type']).toBe('application/pdf');
+    expect(r.rawPayload.subarray(0, 5).toString()).toBe('%PDF-');
+    const { monthlyData } = await import('../src/safety/monthly.js');
+    const d = await monthlyData(db, month);
+    expect(d.title).toMatch(/^דוח בטיחות חודשי – /);
+    expect(d.cases.opened).toBeGreaterThan(0);
+    expect(d.safety.rows.find((x) => x.kind === 'emergency')!.events).toBeGreaterThanOrEqual(1);   // the emergency earlier in this file
+  });
 });

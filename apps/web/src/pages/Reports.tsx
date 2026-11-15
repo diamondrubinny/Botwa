@@ -65,6 +65,7 @@ function TrendChart({ rows }: { rows: { day: string; inbound: number; outbound: 
 
 export function Reports() {
   const [bucket, setBucket] = useState<Bucket>('day');
+  const [month, setMonth] = useState(() => { const d = new Date(); d.setDate(1); d.setMonth(d.getMonth() - 1); return d.toISOString().slice(0, 7); });   // last month
   const [days, setDays] = useState(30);
   const [data, setData] = useState<Summary | null>(null);
   const [failed, setFailed] = useState(false);
@@ -102,6 +103,11 @@ export function Reports() {
         <a className="btn" href={`/reports/export.csv?kind=agents&days=${days}`} download>ייצוא נציגים ל-CSV</a>
         <a className="btn" href={`/reports/export.csv?kind=daily&days=${days}&bucket=${bucket}`} download>ייצוא נפח לפי תקופה ל-CSV</a>
       </p>
+      <form className="toolbar" style={{ display: 'flex', gap: '.5rem', alignItems: 'end', flexWrap: 'wrap' }} onSubmit={(e) => e.preventDefault()} aria-labelledby="mon-h">
+        <h2 id="mon-h" className="sr-only">דוח בטיחות חודשי</h2>
+        <div className="field"><label htmlFor="mon-m">דוח בטיחות חודשי (PDF) לחודש</label><input id="mon-m" type="month" value={month} max={new Date().toISOString().slice(0, 7)} onChange={(e) => setMonth(e.target.value)} /></div>
+        <a className="btn primary" id="mon-dl" href={`/reports/monthly.pdf?month=${month}`} download>הורדת דוח PDF להנהלה</a>
+      </form>
       </div>
       {failed && <p role="alert" className="error">טעינת הדוח נכשלה.</p>}
       {!data ? <Loading card lines={6} /> : (

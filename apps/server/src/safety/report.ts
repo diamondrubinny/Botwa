@@ -12,11 +12,16 @@ export interface SafetyReport { days: number; rows: SafetyRow[]; topics: { name:
 const AUTO_TAGS = ['דחוף', 'זקוק לליווי', 'English'];
 
 export async function safetyReport(db: Db, days: number): Promise<SafetyReport> {
+  return safetyReportRange(db, new Date(Date.now() - days * 86_400_000), new Date(), days);
+}
+
+/** The same for a period (a calendar month for the monthly report). */
+export async function safetyReportRange(db: Db, from: Date, to: Date, days: number): Promise<SafetyReport> {
   const events = `
     SELECT a.target::uuid AS conv, a.created_at AS at,
            CASE WHEN a.action = 'conversation.emergency' THEN 'emergency' ELSE coalesce(a.meta->>'level', 'worried') END AS kind
       FROM audit_log a
-     WHERE a.action IN ('conversation.emergency', 'conversation.comfort') AND a.created_at > now() - make_interval(days => $1)
+     WHERE a.action IN ('conversation.emergency', 'conversation.comfort') AND a.created_at >= $1 AND a.created_at < $2
        AND a.target ~ '^[0-9a-f-]{36}$'`;
   const rows = (await db.query(
     `WITH e AS (${events}),
@@ -24,13 +29,13 @@ export async function safetyReport(db: Db, days: number): Promise<SafetyReport> 
      SELECT kind, count(*)::int AS events, count(reply)::int AS answered,
             count(*) FILTER (WHERE reply - at <= interval '15 minutes')::int AS within15,
             round((percentile_cont(0.5) WITHIN GROUP (ORDER BY extract(epoch FROM reply - at)) FILTER (WHERE reply IS NOT NULL) / 60)::numeric, 1)::float AS "medianMinutes"
-       FROM r GROUP BY kind`, [days])).rows as Omit<SafetyRow, 'unanswered'>[];
+       FROM r GROUP BY kind`, [from, to])).rows as Omit<SafetyRow, 'unanswered'>[];
   const order: SafetyKind[] = ['emergency', 'hazard', 'worried', 'upset'];
   const full = order.map((kind) => { const r = rows.find((x) => x.kind === kind); return { kind, events: r?.events ?? 0, answered: r?.answered ?? 0, within15: r?.within15 ?? 0, medianMinutes: r?.medianMinutes ?? null, unanswered: (r?.events ?? 0) - (r?.answered ?? 0) }; });
   const topics = (await db.query(
     `WITH e AS (${events}) SELECT t.name, count(DISTINCT e.conv)::int AS n FROM e JOIN conversation_tags x ON x.conversation_id = e.conv JOIN tags t ON t.id = x.tag_id
-      WHERE NOT (lower(t.name) = ANY($2::text[])) GROUP BY t.name ORDER BY n DESC, t.name LIMIT 8`, [days, AUTO_TAGS.map((n) => n.toLowerCase())])).rows as { name: string; n: number }[];
-  const english = (await db.query(`SELECT count(*)::int AS n FROM conversations WHERE lang = 'en' AND last_message_at > now() - make_interval(days => $1)`, [days])).rows[0].n as number;
+      WHERE NOT (lower(t.name) = ANY($3::text[])) GROUP BY t.name ORDER BY n DESC, t.name LIMIT 8`, [from, to, AUTO_TAGS.map((n) => n.toLowerCase())])).rows as { name: string; n: number }[];
+  const english = (await db.query(`SELECT count(*)::int AS n FROM conversations WHERE lang = 'en' AND last_message_at >= $1 AND last_message_at < $2`, [from, to])).rows[0].n as number;
   // open right now, flagged, and nobody from the team has written since the flag
   const waitingNow = (await db.query(
     `SELECT count(*)::int AS n FROM conversations c WHERE c.status = 'open' AND c.comfort_since IS NOT NULL
@@ -54,11 +59,15 @@ export function safetyReportText(r: SafetyReport): string {
 export interface BuildingRow { building: string; reports: number; open: number; medianReplyMinutes: number | null; medianCloseHours: number | null; topics: string[] }
 
 export async function hazardsByBuilding(db: Db, days: number): Promise<BuildingRow[]> {
+  return hazardsByBuildingRange(db, new Date(Date.now() - days * 86_400_000), new Date());
+}
+
+export async function hazardsByBuildingRange(db: Db, from: Date, to: Date): Promise<BuildingRow[]> {
   const rows = (await db.query(
     `WITH k AS (
        SELECT k.id, k.conversation_id AS conv, k.opened_at, k.closed_at
          FROM cases k
-        WHERE k.opened_at > now() - make_interval(days => $1)
+        WHERE k.opened_at >= $1 AND k.opened_at < $2
           AND (EXISTS (SELECT 1 FROM conversation_tags x JOIN tags t ON t.id = x.tag_id WHERE x.conversation_id = k.conversation_id AND lower(t.name) IN ('מפגע', 'דחוף'))
                OR EXISTS (SELECT 1 FROM audit_log a WHERE a.target = k.conversation_id::text AND a.created_at >= k.opened_at AND (a.action = 'conversation.emergency' OR (a.action = 'conversation.comfort' AND a.meta->>'level' = 'hazard'))))
      ), b AS (
@@ -75,6 +84,6 @@ export async function hazardsByBuilding(db: Db, days: number): Promise<BuildingR
             round((percentile_cont(0.5) WITHIN GROUP (ORDER BY extract(epoch FROM closed_at - opened_at)) FILTER (WHERE closed_at IS NOT NULL) / 3600)::numeric, 1)::float AS "medianCloseHours",
             (SELECT array_agg(DISTINCT t.name) FROM g g2 JOIN conversation_tags x ON x.conversation_id = g2.conv JOIN tags t ON t.id = x.tag_id
               WHERE g2.bkey = g.bkey AND lower(t.name) NOT IN ('מפגע', 'דחוף', 'זקוק לליווי', 'english', 'אירוע חירום')) AS topics
-       FROM g GROUP BY g.bkey ORDER BY reports DESC, g.bkey LIMIT 50`, [days])).rows as (BuildingRow & { topics: string[] | null })[];
+       FROM g GROUP BY g.bkey ORDER BY reports DESC, g.bkey LIMIT 50`, [from, to])).rows as (BuildingRow & { topics: string[] | null })[];
   return rows.map((r) => ({ ...r, building: r.building || '', topics: (r.topics ?? []).slice(0, 5) }));
 }

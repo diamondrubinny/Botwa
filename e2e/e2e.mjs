@@ -245,6 +245,8 @@ await page.waitForSelector('#sf-rep-h');
 check('reports: the safety and urgency section is there', await page.isVisible('#sf-rep-h'));
 await page.waitForSelector('#bld-h');
 check('reports: hazards by building is there', await page.isVisible('#bld-h'));
+{ const href = await page.getAttribute('#mon-dl', 'href'); const pdf = await page.request.get(BASE + href);
+  check('reports: the monthly safety report downloads as a PDF', pdf.ok() && (pdf.headers()['content-type'] ?? '') === 'application/pdf' && (await pdf.body()).subarray(0, 5).toString() === '%PDF-'); }
 await axe('reports');
 
 // settings + audit pages (admin)

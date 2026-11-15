@@ -6,6 +6,8 @@ import type { Config } from '../config.js';
 import type { Db } from '../db.js';
 import { loadSla } from '../sla.js';
 import { hazardsByBuilding, safetyReport } from '../safety/report.js';
+import { monthlyData, monthlyPdf } from '../safety/monthly.js';
+import { loadBrand } from './branding.js';
 
 /** Aggregate support metrics (no message content). Supervisors/admins only. */
 /** Spreadsheet formula injection guard: cells starting with = + - @ (or tab/CR) are prefixed with an apostrophe. */
@@ -45,6 +47,16 @@ export function reportRoutes(app: FastifyInstance, db: Db, cfg: Config) {
     const q = z.object({ days: z.coerce.number().int().min(1).max(365).default(30) }).safeParse(req.query);
     if (!q.success) return reply.code(400).send({ error: 'bad_request' });
     return hazardsByBuilding(db, q.data.days);
+  });
+
+  // the monthly safety report for the management (PDF): one calendar month
+  app.get('/reports/monthly.pdf', { preHandler: managers, config: { rateLimit: { max: 10, timeWindow: '1 minute' } } }, async (req, reply) => {
+    const q = z.object({ month: z.string().regex(/^20\d\d-(0[1-9]|1[0-2])$/) }).safeParse(req.query);
+    if (!q.success) return reply.code(400).send({ error: 'bad_request' });
+    const org = (await loadBrand(db).catch(() => null))?.appName ?? 'Botwa';
+    const pdf = await monthlyPdf(await monthlyData(db, q.data.month), org);
+    await audit(db, { actorId: req.user!.id, action: 'reports.monthly_pdf', ip: req.ip, meta: { month: q.data.month } });
+    return reply.header('content-type', 'application/pdf').header('content-disposition', `attachment; filename="safety-report-${q.data.month}.pdf"`).header('cache-control', 'no-store').send(pdf);
   });
 
   app.get('/reports/summary', { preHandler: managers }, async (req, reply) => {
