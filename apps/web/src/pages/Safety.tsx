@@ -266,7 +266,7 @@ function Areas({ canEdit }: { canEdit: boolean }) {
     } catch (er) { setMsg({ ok: false, text: errText(er instanceof ApiError ? er.code : 'generic') }); }
   }
   return (
-    <details className="card" style={{ marginTop: '1rem' }}>
+    <details className="card" id="areas" style={{ marginTop: '1rem' }}>
       <summary><strong>אזורי אחריות</strong> (איזה ממונה מטפל באיזה בניין או מקום)</summary>
       <p className="hint">בתרשים הבוט, פנייה עם מיקום (בניין, מעבדה, חדר) מועברת לממונה שאחראי על המקום. ההתאמה לפי מילים שלמות, בסדר הרשימה: הראשון שמתאים קובע. בלי התאמה, הפנייה עוברת לנציג ברירת המחדל של אותו צומת.</p>
       {areas.length === 0 ? <p className="empty">עוד לא הוגדרו אזורים.</p> : (
@@ -343,7 +343,7 @@ function Officers({ canEdit, me }: { canEdit: boolean; me: Me | null }) {
     } catch (er) { setMsg({ ok: false, text: er instanceof ApiError && er.code === 'unknown_workbook' ? 'מבנה הקובץ לא מוכר. הורידו את התבנית ומלאו אותה.' : errText(er instanceof ApiError ? er.code : 'generic') }); }
   }
   return (
-    <details className="card" style={{ marginTop: '1rem' }}>
+    <details className="card" id="officers" style={{ marginTop: '1rem' }}>
       <summary><strong>ממונים ונושאים</strong> (שמות, אימיילים וווצאפ של הממונים, והנושאים שהם אחראים עליהם)</summary>
       <p className="hint">כאן מגדירים מי הממונה על כל נושא. בתרשים הבוט, בצומת "העברה לנציג", בוחרים "ממונה בתחום" והשיחה עוברת לממונה של אותו נושא. אם יש לו חשבון במערכת השיחה משויכת אליו; אם אין, הנציג שנבחר בצומת מקבל אותה, ובהערה הפנימית מופיעים הפרטים ליצירת קשר. אפשר גם להציג ללקוח את הווצאפ והאימייל של הממונה. שיוך לפי מקום (אזורי אחריות) גובר על שיוך לפי נושא.</p>
       {list.length === 0 ? <p className="empty">עוד לא הוגדרו ממונים.</p> : (

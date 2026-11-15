@@ -187,6 +187,34 @@ check('confirm dialog open', await page.isVisible('dialog[open]'));
 await page.keyboard.press('Escape');
 check('dialog closed by Esc', !(await page.isVisible('dialog[open]')));
 
+// global search: Ctrl+K from anywhere, a setting found by a word, Enter lands on the setting itself (focused, highlighted)
+await page.goto(`${BASE}/#/inbox`); await page.waitForSelector('main h1');
+await page.keyboard.press('Control+k');
+await page.waitForSelector('dialog.gsearch[open] input[role="combobox"]');
+check('search: Ctrl+K opens the dialog with the focus in the field', await page.evaluate(() => document.activeElement?.getAttribute('role') === 'combobox'));
+await axe('search: empty');
+await page.keyboard.type('חירום');
+await page.waitForSelector('.gs-item[aria-selected="true"]');
+check('search: "חירום" finds the emergency setting first', (await page.textContent('.gs-item[aria-selected="true"] .gs-label'))?.includes('מצב חירום'));
+await page.waitForFunction(() => /תוצאות|לא נמצאו/.test(document.querySelector('dialog.gsearch [role="status"]')?.textContent ?? ''));
+await axe('search: results');
+await page.keyboard.press('Enter');
+await page.waitForFunction(() => location.hash.startsWith('#/bot') && document.activeElement?.id === 'em-t', null, { timeout: 8000 });
+check('search: Enter opens the bot page on the emergency text, focused and highlighted', await page.evaluate(() => !document.querySelector('dialog.gsearch[open]') && !!document.querySelector('.spot')));
+// arrows, a tab inside a page, Esc
+await page.keyboard.press('Control+k');
+await page.waitForSelector('dialog.gsearch[open]');
+await page.keyboard.type('כפילויות');
+await page.waitForSelector('.gs-item[aria-selected="true"]');
+await page.keyboard.press('Enter');
+await page.waitForFunction(() => location.hash.includes('tab=health') && document.activeElement?.id === 'hl-q', null, { timeout: 8000 });
+check('search: a result inside a tab opens that tab (knowledge base > health > quality)', await page.isVisible('#hl-q'));
+await page.keyboard.press('Control+k');
+await page.keyboard.type('zzqqxx');
+await page.waitForSelector('.gs-empty:has-text("לא נמצאו")');
+await page.keyboard.press('Escape');
+check('search: Esc closes it', await page.evaluate(() => !document.querySelector('dialog.gsearch[open]')));
+
 // team
 await page.click('aside.sidebar nav >> text=צוות');
 await page.fill('#u-name', 'דנה נציגה'); await page.fill('#u-email', 'dana@e2e.io'); await page.fill('#u-pw', 'agent-password-123');

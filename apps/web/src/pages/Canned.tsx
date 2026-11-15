@@ -2,7 +2,7 @@ import { EmptyState, PageTitle } from '../components/Illustration';
 import { GifLibrary } from '../components/GifLibrary';
 import { useState, type FormEvent } from 'react';
 import { api, ApiError, can, type Canned as CannedT, type CannedVar, type Me, type Tag } from '../api';
-import { usePoll } from '../hooks';
+import { useHashQuery, usePoll } from '../hooks';
 import { errText } from '../strings';
 
 export function CannedReplies({ me }: { me: Me }) {
@@ -14,6 +14,7 @@ export function CannedReplies({ me }: { me: Me }) {
   const [folder, setFolder] = useState('');
   const [editId, setEditId] = useState<string | null>(null);
   const [q, setQ] = useState('');
+  useHashQuery(setQ);
   const [vars, setVars] = useState<CannedVar[]>([]);
   const [msg, setMsg] = useState('');
   const [tags, setTags] = useState<Tag[]>([]);

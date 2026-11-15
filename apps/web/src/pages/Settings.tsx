@@ -81,7 +81,7 @@ export function Settings({ me }: { me: Me }) {
         </form>
       )}
       <form className="card" onSubmit={save}>
-        <h2>שעות פעילות ומענה אוטומטי</h2>
+        <h2 id="bh-h">שעות פעילות ומענה אוטומטי</h2>
         <p className="hint">מחוץ לשעות הפעילות נשלחת ללקוח הודעה אוטומטית אחת (לכל היותר אחת ל-12 שעות לשיחה). ההודעה מסומנת כ"מענה אוטומטי" ואינה נחשבת תשובת נציג בדוחות.</p>
         <div className="field">
           <label><input type="checkbox" role="switch" style={{ width: 'auto', minHeight: 0, marginInlineEnd: '.5rem' }} checked={h.enabled} onChange={(e) => setH({ ...h, enabled: e.target.checked })} />הפעלת מענה אוטומטי מחוץ לשעות</label>

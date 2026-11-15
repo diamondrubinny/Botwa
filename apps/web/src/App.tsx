@@ -6,7 +6,8 @@ import { SB_MAX, SB_MIN, useSidebar } from './sidebar';
 import { A11yWidget } from './components/A11yWidget';
 import { Icon } from './components/Icon';
 import { ThemeMenu } from './components/ThemeMenu';
-import { useHashRoute, usePoll } from './hooks';
+import { useHashRoute, useHashSpot, usePoll } from './hooks';
+import { GlobalSearch } from './components/GlobalSearch';
 import { LiveProvider, resubscribeIfEnabled, unsubscribePush, useLive } from './live';
 import { Account } from './pages/Account';
 import { Audit } from './pages/Audit';
@@ -66,6 +67,14 @@ function Shell({ me, reloadMe, onLogout }: { me: Me; reloadMe: () => Promise<voi
   const sheet = useRef<HTMLDialogElement>(null);
   const brand = useBrand();
   const sb = useSidebar();
+  const [searchOpen, setSearchOpen] = useState(false);
+  useHashSpot();
+  // Ctrl+K / ⌘K opens the global search from anywhere (also from a text field: the shortcut is not a typed character)
+  useEffect(() => {
+    const on = (e: KeyboardEvent) => { if ((e.ctrlKey || e.metaKey) && !e.altKey && (e.key === 'k' || e.key === 'K' || e.key === 'ל')) { e.preventDefault(); setSearchOpen(true); } };
+    window.addEventListener('keydown', on);
+    return () => window.removeEventListener('keydown', on);
+  }, []);
 
   const page = me.mfaEnrollmentRequired || me.passwordChangeRequired ? 'account' : route;
   const visible = NAV.filter((n) => n.allowed(me));
@@ -125,6 +134,9 @@ function Shell({ me, reloadMe, onLogout }: { me: Me; reloadMe: () => Promise<voi
           <button type="button" className="sb-btn" onClick={() => sb.setMode('hidden')} aria-label="הסתרת התפריט" title="הסתרת התפריט"><Icon name="close" size={18} /></button>
         </div>
         <div className="brand">{brand.hasLogo ? <img className="brand-logo" src={logoSrc(brand)} alt="" /> : <span className="brand-mark"><Icon name="chat" /></span>}<strong>{brand.appName}</strong></div>
+        <button type="button" className="nav-link gs-side" onClick={() => setSearchOpen(true)} aria-haspopup="dialog" aria-keyshortcuts="Control+K Meta+K" title={sb.mode === 'compact' ? 'חיפוש במערכת (Ctrl+K)' : undefined}>
+          <Icon name="search" /><span className="nav-text">חיפוש במערכת</span>
+        </button>
         <nav aria-label="ניווט ראשי"><ul className="nav-list">{visible.map(link)}</ul></nav>
         <div className="side-foot">
           {availability}
@@ -161,6 +173,9 @@ function Shell({ me, reloadMe, onLogout }: { me: Me; reloadMe: () => Promise<voi
           {brand.hasLogo ? <img className="brand-logo sm" src={logoSrc(brand)} alt="" /> : <span className="brand-mark"><Icon name="chat" size={18} /></span>}
           <strong>{title}</strong>
           <span className="spacer" />
+          <button type="button" className="gs-open" onClick={() => setSearchOpen(true)} aria-haspopup="dialog" aria-keyshortcuts="Control+K Meta+K" title="חיפוש במערכת (Ctrl+K)">
+            <Icon name="search" size={18} /><span className="gs-open-text">חיפוש</span><kbd className="gs-open-kbd" aria-hidden="true">Ctrl K</kbd>
+          </button>
           {availability}
           <ThemeMenu />
         </header>
@@ -193,6 +208,8 @@ function Shell({ me, reloadMe, onLogout }: { me: Me; reloadMe: () => Promise<voi
           <a href="#/privacy">{t.nav.privacy}</a>
         </footer>
       </div>
+
+      <GlobalSearch me={me} open={searchOpen} onClose={() => setSearchOpen(false)} />
 
       <nav className="bottomnav" aria-label="ניווט תחתון">
         {bottom.map((n) => (

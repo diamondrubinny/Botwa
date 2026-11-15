@@ -1,3 +1,4 @@
+import { hashParam, useHashTab } from '../hooks';
 import { useEffect, useState, type FormEvent } from 'react';
 import { api, ApiError, can, FORM_AUDIENCES, FORM_FIELD_TYPES, FORM_STATUS, type FormRequestRow, type FormTemplate, type Me } from '../api';
 import { FormEditor } from '../components/FormEditor';
@@ -12,7 +13,8 @@ const when = (iso: string | null) => (iso ? new Date(iso).toLocaleString('he-IL'
 /** Digital forms: what was sent and signed (everyone, by what they may see), templates (forms managers), checking a signed file. */
 export function Forms({ me }: { me: Me }) {
   const manager = can(me, 'forms.manage');
-  const [tab, setTab] = useState<'sent' | 'templates' | 'verify'>('sent');
+  const [tab, setTab] = useState<'sent' | 'templates' | 'verify'>(() => { const t = hashParam('tab'); return t === 'templates' || t === 'verify' ? t : 'sent'; });
+  useHashTab(['sent', 'templates', 'verify'] as const, setTab);
   const [editing, setEditing] = useState<string | null>(null);
   const [flowFor, setFlowFor] = useState<FormTemplate | null>(null);
   const [batchFor, setBatchFor] = useState<FormTemplate | null>(null);

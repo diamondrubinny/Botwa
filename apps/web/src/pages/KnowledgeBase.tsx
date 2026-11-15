@@ -1,3 +1,4 @@
+import { hashParam, useHashQuery, useHashTab } from '../hooks';
 import { Loading } from '../components/Loading';
 import { EmptyState, PageTitle } from '../components/Illustration';
 import { BotLearning } from '../components/BotLearning';
@@ -31,7 +32,8 @@ type Tab = 'sources' | 'gov' | 'learn' | 'test' | 'gaps' | 'synonyms' | 'stats' 
 const TABS: [Tab, string][] = [['sources', 'מקורות'], ['gov', 'חקיקה ותקינה'], ['learn', 'הבוט לומד'], ['test', 'בדיקת חיפוש'], ['gaps', 'שאלות ללא מענה'], ['synonyms', 'מילים נרדפות'], ['stats', 'סטטיסטיקה'], ['health', 'בריאות וכלים']];
 
 export function KnowledgeBase() {
-  const [tab, setTab] = useState<Tab>('sources');
+  const [tab, setTab] = useState<Tab>(() => { const t = hashParam('tab'); return TABS.some(([k]) => k === t) ? t as Tab : 'sources'; });
+  useHashTab(TABS.map(([k]) => k), setTab);
   return (
     <>
       <PageTitle art="knowledge" title="מאגר ידע" />
@@ -59,6 +61,7 @@ function Sources() {
   const [del, setDel] = useState<Source | null>(null);
   const [edit, setEdit] = useState<string | null>(null);
   const [filter, setFilter] = useState('');
+  useHashQuery(setFilter);
   const load = async () => { setList(await api<Source[]>('GET', '/kb/sources').catch(() => [])); setCats(await api<Category[]>('GET', '/kb/categories').catch(() => [])); };
   usePoll(load, 5000);
   const run = async (fn: () => Promise<unknown>, ok?: string) => {
