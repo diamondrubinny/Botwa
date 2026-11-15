@@ -355,6 +355,15 @@ describe('the safety unit template', () => {
   const byId = new Map(t.nodes.map((n) => [n.id, n]));
   const U = '77777777-7777-4777-8777-777777777777';
 
+  it('the PI / head of unit may be skipped', async () => {
+    const pi = byId.get('q_pi') as Extract<(typeof t.nodes)[number], { type: 'question' }>;
+    expect(pi.text).toContain('ראש יחידה');
+    expect(pi.optional).toBe(true);
+    const r = await runFlow(t, { node: 'q_pi', vars: {}, invalid: 0, done: false } as unknown as FlowState, 'דלג', ctx());
+    expect(r.replies.join('\n')).toContain('מה הסטטוס שלך?');
+    expect(r.state.vars.pi).toBeUndefined();
+  });
+
   it('the website chat already asked the name: the flow does not ask it again', async () => {
     const r = await runFlow(t, null, 'שלום', ctx({ channelType: 'webchat', known: { name: 'רונית כהן' } }));
     expect(r.replies.join('\n')).not.toContain('שם מלא:');
@@ -386,7 +395,7 @@ describe('the safety unit template', () => {
     expect(STATUSES).toHaveLength(9);
     expect(unfinished(t)).toEqual([]);                                                       // nothing is left to fill in before switching on
     const required = ['q_name', 'q_faculty', 'q_pi'].map((id) => (byId.get(id) as { optional: boolean }).optional);
-    expect(required).toEqual([false, false, false]);                                         // name, faculty, PI are mandatory
+    expect(required).toEqual([false, false, true]);                                          // name and faculty are mandatory; the PI / head of unit may be skipped
     expect(['q_building', 'q_room'].map((id) => (byId.get(id) as { optional: boolean }).optional)).toEqual([true, true]);
     const chem = byId.get('chem_list') as { max: number };
     expect(chem.max).toBe(10);
@@ -944,5 +953,20 @@ describe('migration 063: the bot names itself and greets known customers', () =>
       const again = (await d.query(`SELECT value FROM settings WHERE key = 'flow'`)).rows[0].value;
       expect(again.nodes.length).toBe(v.nodes.length);
     } finally { await d.end(); }
+  });
+});
+
+describe('migration 077: the PI question of a saved template flow may be skipped', () => {
+  it('becomes optional; the wording changes only where it is still the template\'s own', async () => {
+    const db = createDb(process.env.TEST_DATABASE_URL ?? 'postgres://postgres@localhost:5432/botwa_test');
+    await db.query('DROP SCHEMA public CASCADE; CREATE SCHEMA public;');
+    await migrate(db);
+    const old = { id: 'q_pi', type: 'question', label: 'שם ה-PI', text: 'שם ה-PI (מחזיק המעבדה):', save: 'pi', optional: false, retryText: 'נא לכתוב את שם ה-PI.', next: 'm_status' };
+    await db.query(`INSERT INTO settings (key, value) VALUES ('flow', $1) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`, [{ start: 'q_pi', nodes: [old] }]);
+    await db.query(`DELETE FROM schema_migrations WHERE name LIKE '077%'`);
+    await migrate(db);
+    const n = (await db.query(`SELECT value->'nodes'->0 AS n FROM settings WHERE key = 'flow'`)).rows[0].n;
+    expect(n).toMatchObject({ optional: true, text: 'שם ה-PI (מחזיק המעבדה) / ראש יחידה (אפשר לכתוב "דלג"):', next: 'm_status' });
+    await db.end();
   });
 });

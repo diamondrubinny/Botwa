@@ -38,7 +38,7 @@ export function buildSafetyFlow(tag: (name: string) => string, links: TemplateLi
   add({ id: 'q_building', type: 'question', kbAside: true, label: 'שם בניין', text: 'שם הבניין (אפשר לכתוב "דלג"):', save: 'building', optional: true, retryText: 'נא לכתוב שם בניין, או "דלג".', next: 'q_room' });
   add({ id: 'q_room', type: 'question', kbAside: true, label: 'מספר חדר', text: 'מספר חדר (אפשר לכתוב "דלג"):', save: 'room', optional: true, retryText: 'נא לכתוב מספר חדר, או "דלג".', next: 'q_faculty' });
   add({ id: 'q_faculty', type: 'question', kbAside: true, label: 'פקולטה', text: 'פקולטה / יחידה (למשל: הנדסת חשמל, פיסיקה, רפואה):', save: 'faculty', optional: false, retryText: 'נא לכתוב את שם הפקולטה.', next: 'q_pi' });
-  add({ id: 'q_pi', type: 'question', kbAside: true, label: 'שם ה-PI', text: 'שם ה-PI (מחזיק המעבדה):', save: 'pi', optional: false, retryText: 'נא לכתוב את שם ה-PI.', next: 'm_status' });
+  add({ id: 'q_pi', type: 'question', kbAside: true, label: 'שם ה-PI', text: 'שם ה-PI (מחזיק המעבדה) / ראש יחידה (אפשר לכתוב "דלג"):', save: 'pi', optional: true, retryText: 'נא לכתוב את שם ה-PI או ראש היחידה, או "דלג".', next: 'm_status' });
   add({ id: 'm_status', type: 'menu', label: 'סטטוס', text: 'מה הסטטוס שלך?', save: 'status', kbOnFreeText: false, options: STATUSES.map((label) => ({ label, next: 'remember', examples: [] as string[] })) });
   add({ id: 'remember', type: 'remember', label: 'שמירת פרטי הזדהות', vars: ['fullName', 'building', 'room', 'faculty', 'pi', 'status'], next: 'id_saved' });
   add({ id: 'id_saved', type: 'message', label: 'תודה על הפרטים', text: ID_SAVED_TEXT, next: 'topics' });

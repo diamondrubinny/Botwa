@@ -110,6 +110,8 @@ const PAIRS: [string, string][] = [
   ['נא לכתוב מספר חדר, או "דלג".', 'Please write the room number, or "skip".'],
   ['פקולטה / יחידה (למשל: הנדסת חשמל, פיסיקה, רפואה):', 'Faculty / unit (for example: Electrical Engineering, Physics, Medicine):'],
   ['נא לכתוב את שם הפקולטה.', 'Please write the name of the faculty.'],
+  ['שם ה-PI (מחזיק המעבדה) / ראש יחידה (אפשר לכתוב "דלג"):', 'Name of the PI (lab head) / head of unit (you can write "skip"):'],
+  ['נא לכתוב את שם ה-PI או ראש היחידה, או "דלג".', 'Please write the name of the PI or head of unit, or "skip".'],
   ['שם ה-PI (מחזיק המעבדה):', "PI's name (the lab's principal investigator):"],
   ['נא לכתוב את שם ה-PI.', "Please write the PI's name."],
   ['מה הסטטוס שלך?', 'What is your status?'],
