@@ -261,6 +261,18 @@ describe('official channel: menus as buttons and message templates', () => {
     expect(texts()).toEqual([]);
   });
 
+  it('"מי מנהלת יחידה הבטיחות" gets an answer about the head of the unit, never search suggestions', async () => {
+    await call('PUT', '/settings/bot', 'adm', { ...DEFAULT_BOT, enabled: true, interactiveMenus: false, items: [{ title: 'שעות', answer: 'a' }, { title: 'מיקום', answer: 'b' }], humanOption: true });
+    await hook(inbound('wamid.HD1', '972501110006', { type: 'text', text: { body: 'שלום' } }));
+    await new Promise((r) => setTimeout(r, 80));
+    sent.length = 0;
+    await hook(inbound('wamid.HD2', '972501110006', { type: 'text', text: { body: 'מי מנהלת יחידה הבטיחות' } }));
+    await new Promise((r) => setTimeout(r, 80));
+    const t = sent.filter((s) => s.body.type === 'text').map((s) => (s.body.text as { body: string }).body).join('\n');
+    expect(t).toContain('ראש יחידת הבטיחות');
+    expect(t).not.toContain('לא מצאתי תשובה מדויקת');
+  });
+
   it('two or three short options become reply buttons; when Meta refuses, or the setting is off, the numbered text is sent instead', async () => {
     await call('PUT', '/settings/bot', 'adm', { ...DEFAULT_BOT, enabled: true, items: [{ title: 'שעות', answer: 'a' }, { title: 'מיקום', answer: 'b' }], humanOption: false });
     sent.length = 0;

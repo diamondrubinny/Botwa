@@ -97,14 +97,28 @@ export function formatOfficers(found: { topic: string; officers: PublicOfficer[]
   ].join('\n')).join('\n\n');
 }
 
+/** "מי ראש / מנהלת יחידת הבטיחות?", "who is the head of the safety unit?" (a question, not "ראש היחידה שלי הוא…") */
+const HEAD_HE = /(ראש|ראשת|מנהל|מנהלת)\s+(ה)?(יחידת|יחידה|היחידה)/;
+const HEAD_EN = /\b(head of (the )?(safety )?unit|unit head|head of safety|safety (unit )?(director|manager))\b/i;
+const QUESTION = /(^|\s)(מי|מיהו|מיהי|מה|איך|למי|את מי|פרטי|טלפון|מייל|who|what|how)(\s|$)|[?؟]/i;
+export const isHeadQuestion = (t: string) => (HEAD_HE.test(t) || HEAD_EN.test(t)) && QUESTION.test(t);
+/** a topic naming the head of the unit ("ראש יחידת הבטיחות", "מנהלת היחידה", "Head of Safety Unit") */
+const isHeadTopic = (topic: string) => /(ראש|ראשת|מנהל|מנהלת|head|director)/i.test(topic) && /(יחיד|unit|safety)/i.test(topic);
+export const HEAD_UNKNOWN = 'הפרטים של ראש יחידת הבטיחות לא מוגדרים אצלי כרגע. אפשר לכתוב כאן את הפנייה, והיא תועבר לצוות היחידה.';
+
 /** Betty's answer to a question about who is responsible for a topic, or null when the message is not such a question. */
 export async function officerReply(db: Db, text: string | null | undefined): Promise<string | null> {
   if (!text || text.length > 160) return null;
   text = fixOfficerTypos(text);
-  if (!ASK.test(text) && !ASK_EN.test(text)) return null;
+  const head = isHeadQuestion(text);
+  if (!head && !ASK.test(text) && !ASK_EN.test(text)) return null;
   const rows = (await db.query(
     `SELECT o.name, o.office_phone AS "officePhone", o.email, o.phone, o.show_whatsapp AS "showWhatsapp", array_agg(t.topic ORDER BY t.topic) AS topics
        FROM officers o JOIN officer_topics t ON t.officer_id = o.id WHERE o.active AND o.public GROUP BY o.id ORDER BY o.sort, o.created_at`)).rows as PublicOfficer[];
+  if (head) {   // the head of the unit: the officer entered under such a topic, else say it is not set (never a search result)
+    const topic = [...new Set(rows.flatMap((r) => r.topics))].find(isHeadTopic);
+    return topic ? formatOfficers([{ topic, officers: rows.filter((r) => r.topics.includes(topic)) }]) : HEAD_UNKNOWN;
+  }
   if (!rows.length) return null;
   const all = [...new Set(rows.flatMap((r) => r.topics))];
   const hit = topicsIn(text, all).slice(0, 3);
