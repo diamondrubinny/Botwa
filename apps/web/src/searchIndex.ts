@@ -17,6 +17,7 @@ export const SEARCH_INDEX: SearchEntry[] = [
   { label: 'מצב חירום: הודעת חירום ומספרים', where: 'בוט', words: 'חירום מד"א 101 102 100 מוקד ביטחון שריפה דחוף emergency', page: 'bot', s: 'em-t', allowed: P('bot.view') },
   { label: 'תרגום לאנגלית (שיחות באנגלית)', where: 'בוט', words: 'אנגלית english תרגום שפה translation lang', page: 'bot', s: 'tr-h', allowed: P('bot.view') },
   { label: 'אירוע חירום רחב (הודעת מצב לכל הפונים)', where: 'בוט', words: 'אירוע חירום רחב אזעקה שריפה פינוי הודעת מצב incident', page: 'bot', s: 'inc-h', allowed: P('bot.view') },
+  { label: 'ממונה בטיחות אחראי בהעברה לאדם (שיוך)', where: 'בוט', words: 'ממונה אחראי שיוך ניתוב העברה לנציג ברירת מחדל ממונה בטיחות routing officer', page: 'bot', s: 'resp-u', allowed: P('bot.view') },
   { label: 'הסלמה אוטומטית (פנייה דחופה בלי מענה)', where: 'בוט', words: 'הסלמה ממונה חלופי מנהל דחוף בלי מענה escalation', page: 'bot', s: 'esc-h', allowed: P('bot.view') },
   { label: 'ליווי אמפתי במצבי לחץ', where: 'בוט', words: 'אמפתיה לחץ לחוץ תסכול מתוסכל ליווי רגיש מפחד', page: 'bot', s: 'emp-l', allowed: P('bot.view') },
   { label: 'GIF מהבוט ברגעים נעימים', where: 'בוט', words: 'gif גיף אנימציה', page: 'bot', s: 'gif-cd', allowed: P('bot.view') },

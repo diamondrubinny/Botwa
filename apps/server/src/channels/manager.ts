@@ -21,6 +21,7 @@ import type { EventType, WebhookService } from '../integrations/webhooks.js';
 import { askText, runFlow, type Effect, type FlowContext, type FlowInput, type FlowState } from '../flow/engine.js';
 import { resolveArea } from '../safety/areas.js';
 import { contactText, officerNote, officersForTopic, pickOfficer } from '../safety/officers.js';
+import { assignResponsible } from '../safety/responsible.js';
 import { forwardText, type ForwardRule } from './forward.js';
 import { listMenuBody, parseNumberedMenu, type CloudTemplate, type TemplateSend } from './cloud-messages.js';
 import { loadFlow } from '../flow/store.js';
@@ -1065,7 +1066,7 @@ export class ChannelManager {
     if (g.same10 >= 5 || g.in60 >= 20 || g.auto10 >= 40) {
       await this.db.query(`UPDATE conversations SET bot_state = 'human' WHERE id = $1`, [convId]);
       await this.db.query(`INSERT INTO conversation_notes (conversation_id, body) VALUES ($1, 'הבוט נעצר: נראה שבצד הלקוח עונה בוט (אותה הודעה שוב ושוב, או הודעות רבות מאוד בזמן קצר).')`, [convId]);
-      await autoAssign(this.db, convId).catch(() => null);
+      { const to = await this.assignToResponsible(convId, bot, null); if (to) this.onAssigned?.(convId, to); }
       return;
     }
 
@@ -1218,7 +1219,7 @@ export class ChannelManager {
     if (tag) await this.db.query('INSERT INTO conversation_tags (conversation_id, tag_id) VALUES ($1, $2) ON CONFLICT DO NOTHING', [convId, tag]).catch(() => undefined);
     await this.db.query(`UPDATE conversations SET status = 'open', bot_state = 'human', snoozed_until = NULL, urgent_since = COALESCE(urgent_since, now()), escalated_at = NULL WHERE id = $1`, [convId]);
     const held = (await this.db.query('SELECT assigned_to FROM conversations WHERE id = $1', [convId])).rows[0]?.assigned_to as string | null;
-    const to = held ?? await autoAssign(this.db, convId).catch(() => null);
+    const to = held ?? await this.assignToResponsible(convId);
     if (to) this.onAssigned?.(convId, to);
     await audit(this.db, { action: 'conversation.emergency', target: convId, meta: { assignedTo: to } }).catch(() => undefined);
     void sendAlert(this.cfg, `🚨 פנייה דחופה (נראית כמו מצב חירום) התקבלה ב-${this.types.get(channelId) ?? 'ערוץ'}. ${to ? 'שויכה לנציג.' : 'לא שויכה: אין נציג זמין!'} יש לפתוח את השיחה ולחזור ללקוח מיד.`, { conversationId: convId });
@@ -1347,7 +1348,7 @@ export class ChannelManager {
         const u = await this.db.query(`UPDATE conversations SET assigned_to = $2, assigned_at = now() WHERE id = $1 AND assigned_to IS NULL RETURNING id`, [convId, officer.userId]).catch(() => ({ rowCount: 0 }));
         if (u.rowCount) { to = officer.userId; topic = officer.topic; await audit(this.db, { action: 'conversation.topic_assign', target: convId, meta: { to, topic, via: 'comfort' } }).catch(() => undefined); }
       }
-      if (!to) to = await autoAssign(this.db, convId).catch(() => null);
+      if (!to) to = await this.assignToResponsible(convId, null, text);
       if (to) { this.onAssigned?.(convId, to); movedNow = true; }
       else movedNow = c.bot_state !== 'human';
     }
@@ -1505,10 +1506,22 @@ export class ChannelManager {
     await this.db.query(`INSERT INTO conversation_notes (conversation_id, body) VALUES ($1, $2)`, [convId, 'הלקוח השיב לתזכורת שלא קיבל מענה לפנייה. נא לחזור אליו.']);
     await this.db.query(`UPDATE conversations SET bot_state = 'human', flow_state = NULL, bot_invalid = 0 WHERE id = $1`, [convId]);
     if (c?.assigned_to) this.onAssigned?.(convId, c.assigned_to);
-    else { const to = await autoAssign(this.db, convId).catch(() => null); if (to) { this.onAssigned?.(convId, to); void this.introduce(convId); } }
+    else { const to = await this.assignToResponsible(convId, bot); if (to) { this.onAssigned?.(convId, to); void this.introduce(convId); } }
     await this.botSay(channelId, convId, ext, REMINDER_MISSING);
     void bot;
     return true;
+  }
+
+  /**
+   * Who gets a conversation the bot hands over: always the responsible safety officer (topic, area, default, backup, any officer),
+   * and only when the unit has no officer with an account, the normal routing. Returns the person, or null.
+   */
+  private async assignToResponsible(convId: string, bot?: BotConfig | null, text?: string | null): Promise<string | null> {
+    const b = bot ?? await loadBot(this.db).catch(() => null);
+    const r = await assignResponsible(this.db, convId, { text, defaultUserId: b?.defaultOfficerUserId ?? null, backupUserId: b?.escalation?.backupUserId ?? null }).catch(() => null);
+    if (r) { await audit(this.db, { action: 'conversation.responsible_assign', target: convId, meta: { to: r.userId, via: r.via, topic: r.topic ?? null } }).catch(() => undefined); return r.userId; }
+    const held = (await this.db.query('SELECT assigned_to FROM conversations WHERE id = $1', [convId])).rows[0]?.assigned_to as string | null | undefined;
+    return held ? null : autoAssign(this.db, convId).catch(() => null);
   }
 
   /** Hand a bot conversation to a person: note, assignment (the named person if active, else normal routing), then the hand-over or away notice. */
@@ -1521,9 +1534,8 @@ export class ChannelManager {
       to = (r.rows[0]?.id as string | undefined) ?? null;
       if (to) await audit(this.db, { action: 'conversation.topic_assign', target: convId, meta: { to, topic: topic.topic } }).catch(() => undefined);
     }
-    if (!to) to = await autoAssign(this.db, convId).catch(() => null);
+    if (!to) to = await this.assignToResponsible(convId, bot);
     if (to) { this.onAssigned?.(convId, to); void this.introduce(convId); }
-    if (to && !topic) await audit(this.db, { action: 'conversation.auto_assign', target: convId, meta: { to, via: 'bot' } }).catch(() => undefined);
     const hours = await loadBusinessHours(this.db);
     const closed = hours.enabled && !isOpen(hours, new Date());
     await this.botSay(channelId, convId, ext, [closed ? hours.awayMessage : customText || bot.humanMessage, extra].filter(Boolean).join('\n\n'));
