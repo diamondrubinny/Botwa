@@ -55,8 +55,19 @@ describe('Betty answers who the officer is', () => {
     await add('ממונה חסוי', ['לייזרים'], { office: '04-829-3333', pub: false });
     await add('לא פעיל', ['חשמל'], { office: '04-829-4444', active: false });
     await add('דנה בלי פרטים', ['אסבסט']);
+    await add('ראשת יחידה לדוגמה', ['ראש יחידת הבטיחות'], { office: '04-829-5555', email: 'head@uni.ac.il' });
   });
   afterAll(async () => { await db.end(); });
+
+  it('the head of the unit: "מי ראש יחידת הבטיחות?" / "who is the head of the safety unit?"', async () => {
+    for (const q of ['מי ראש יחידת הבטיחות?', 'מיהי ראש היחידה?', 'מי מנהלת יחידת הבטיחות', 'Who is the head of the safety unit?']) {
+      const r = await officerReply(db, q);
+      expect(r, q).toContain('ראשת יחידה לדוגמה');
+      expect(r, q).toContain('04-829-5555');
+    }
+    expect(await officerReply(db, 'ראש היחידה שלי הוא פרופ׳ כהן')).toBeNull();          // telling, not asking
+    expect(await officerReply(db, 'מי הממונה על בטיחות אש?')).not.toContain('ראשת יחידה');
+  });
 
   it('name, office phone and e-mail; WhatsApp only when allowed', async () => {
     const fire = (await officerReply(db, 'מי הממונה על בטיחות אש ומה הטלפון המשרדי שלו?'))!;

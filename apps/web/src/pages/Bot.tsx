@@ -230,7 +230,7 @@ export function Bot({ me }: { me: Me }) {
           </div>
           <h3 id="resp-h">ממונה אחראי בהעברה לאדם</h3>
           <p className="hint" id="resp-d">כשבטי מעבירה שיחה לאדם, היא תמיד משייכת אותה לממונה בטיחות אחראי ולא לנציג לא משויך: קודם לממונה הנושא (לפי ההודעה או נושא הפנייה), אחר כך לממונה האזור או הבניין שהלקוח ציין, אחר כך לממונה שנבחר כאן, אחר כך לממונה החלופי שלמטה, ולבסוף לממונה בטיחות כלשהו שיש לו חשבון, הפחות עמוס. נוספת הערה בשיחה שמסבירה למה הפנייה שויכה אליו.</p>
-          <div className="field"><label htmlFor="resp-u">ממונה בטיחות אחראי (ברירת מחדל)</label>
+          <div className="field"><label htmlFor="resp-u">ממונה בטיחות אחראי (ברירת מחדל, למשל ראש יחידת הבטיחות)</label>
             <select id="resp-u" aria-describedby="resp-d" value={b.defaultOfficerUserId ?? ''} onChange={(e) => set({ defaultOfficerUserId: e.target.value || null })}>
               <option value="">לא נבחר (הממונה החלופי, ואחריו ממונה זמין)</option>
               {people.map((u) => <option key={u.id} value={u.id}>{personLabel(u)}</option>)}

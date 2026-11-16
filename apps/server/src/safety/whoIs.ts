@@ -5,8 +5,8 @@ import type { Db } from '../db.js';
  * (Safety > officers and topics): name, office phone and e-mail. Only officers marked as public; their WhatsApp (often a personal
  * mobile) only when allowed for that officer. Asked about contact but no topic recognised: the topics there are officers for.
  */
-const ASK_EN = /\b(officer|in charge|responsible|who handles|who deals|contact (for|of)|phone (number )?(of|for)|email (of|for))\b/i;
-const ASK = /(ממונה|ממונת|ממוני|אחראי|אחראית|מי מטפל|מי מטפלת|למי (לפנות|פונים|אפשר לפנות)|טלפון|מספר (ה)?טלפון|פרטי (ה)?קשר|איך (משיגים|יוצרים קשר|מגיעים ל)|מייל|אימייל|מי (ה)?ממונה)/;
+const ASK_EN = /\b(head of (the )?(safety )?unit|unit head|officer|in charge|responsible|who handles|who deals|contact (for|of)|phone (number )?(of|for)|email (of|for))\b/i;
+const ASK = /((מי|מיהו|מיהי|מי זה|מי זאת)\s+(ה)?(ראש|מנהל|מנהלת)\s+(ה)?(יחידה|יחידת|היחידה)|ממונה|ממונת|ממוני|אחראי|אחראית|מי מטפל|מי מטפלת|למי (לפנות|פונים|אפשר לפנות)|טלפון|מספר (ה)?טלפון|פרטי (ה)?קשר|איך (משיגים|יוצרים קשר|מגיעים ל)|מייל|אימייל|מי (ה)?ממונה)/;
 /** Customer words → words that appear in topic names (so "שריפה" finds "גילוי אש" and "מתזים"). */
 const ALIASES: [RegExp, string[]][] = [
   [/^(אש|שריפ|שרפ|דליק|כיבוי|מטפ|ספרינקלר|עשן|כבאות)/, ['אש', 'מתזים', 'כיבוי', 'כבאות']],
@@ -29,6 +29,8 @@ const ALIASES: [RegExp, string[]][] = [
   [/^(חלל|מוקף)/, ['חלל']],
   [/^(מפגע|מפגעים)/, ['מפגע']],
   [/^(תאורה)/, ['תאורה']],
+  // the head of the unit ("מי ראש יחידת הבטיחות?"): an officer entered with the topic "ראש יחידת הבטיחות"
+  [/^(ראש|head)$/i, ['ראש יחידה', 'ראש היחידה', 'ראש יחידת']],
   // English words → the Hebrew topic names
   [/^(lasers?)$/i, ['לייזר']], [/^(asbestos)$/i, ['אסבסט']], [/^(radiation|radioactive|x-?rays?)$/i, ['קרינה']],
   [/^(fire|fires|extinguishers?|sprinklers?|smoke)$/i, ['אש', 'מתזים', 'כיבוי', 'כבאות']], [/^(gas|gases|cylinders?|lpg)$/i, ['גז', 'גפ']],
@@ -78,7 +80,9 @@ export function topicsIn(text: string, topics: string[]): string[] {
   const hints = q.flatMap((w) => ALIASES.filter(([re]) => re.test(w) || re.test(stem(w))).flatMap(([, t]) => t));
   return topics.filter((topic) => {
     const tl = plain(topic.toLowerCase());
-    if (hints.some((h) => tl.includes(plain(h)))) return true;
+    // a hint matches at the start of a word of the topic ("אש" is in "גילוי אש", not inside "ראש"); a two-word hint as a phrase
+    const tw = words(topic);
+    if (hints.some((h) => (h.includes(' ') ? tl.includes(plain(h.toLowerCase())) : tw.some((w) => w.startsWith(plain(h.toLowerCase())) || stem(w).startsWith(plain(h.toLowerCase())))))) return true;
     return words(topic).filter((w) => w.length >= 3 && !STOP.has(w)).some((w) => qs.has(stem(w)));
   });
 }
