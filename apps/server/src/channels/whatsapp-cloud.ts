@@ -1,5 +1,5 @@
 import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
-import { buildInteractive, buildTemplate, buildTemplateCreate, summarizeTemplate, type CloudTemplate, type MenuOption, type TemplateSend } from './cloud-messages.js';
+import { buildInteractive, parseMorePage, type ListLang, buildTemplate, buildTemplateCreate, summarizeTemplate, type CloudTemplate, type MenuOption, type TemplateSend } from './cloud-messages.js';
 import { PolicyRejected } from './sender.js';
 import type { AdapterContext, ChannelAdapter, InboundMessage, OutboundMedia } from './types.js';
 
@@ -463,6 +463,8 @@ export class WhatsAppCloudAdapter implements ChannelAdapter {
     const caption = m.image?.caption ?? m.document?.caption ?? m.video?.caption;
     // a tap on a menu button or list row arrives as the option number we put in its id (titles are shortened), so the bot reads it like a typed number
     const picked = m.interactive?.button_reply ?? m.interactive?.list_reply;
+    // the "more topics" row of a long menu: shows the next page, it is not an answer
+    const menuPage = parseMorePage(m.interactive?.list_reply?.id) ?? undefined;
     const pickedText = picked ? (/^\d{1,2}$/.test(picked.id ?? '') ? picked.id : picked.title) : undefined;
     // a form filled in WhatsApp (Flows): the answers travel as JSON; the chat shows a short line, never the answers themselves
     const nfm = m.interactive?.type === 'nfm_reply' && typeof m.interactive.nfm_reply?.response_json === 'string' ? m.interactive.nfm_reply.response_json : undefined;
@@ -475,6 +477,7 @@ export class WhatsAppCloudAdapter implements ChannelAdapter {
       text,
       timestamp: new Date((Number(m.timestamp) || Math.floor(Date.now() / 1000)) * 1000),
       media: media?.id ? { fileName: m.document?.filename, download: () => this.downloadMedia(media.id!) } : undefined,
+      ...(menuPage !== undefined ? { menuPage } : {}),
     };
   }
 
@@ -510,9 +513,9 @@ export class WhatsAppCloudAdapter implements ChannelAdapter {
     return { externalMessageId: out.messages?.[0]?.id };
   }
 
-  /** A menu as reply buttons (up to 3) or a list (up to 10 rows). Throws 'menu_not_supported' when it does not fit, so the caller sends the numbered text. */
-  async sendInteractive(externalContactId: string, body: string, options: MenuOption[]): Promise<{ externalMessageId?: string }> {
-    const payload = buildInteractive('', body, options);
+  /** A menu as reply buttons (up to 3) or a list behind a "☰ Menu" button (long menus in pages). Throws 'menu_not_supported' when there is nothing to show, so the caller sends the numbered text. */
+  async sendInteractive(externalContactId: string, body: string, options: MenuOption[], opts?: { lang?: ListLang; page?: number }): Promise<{ externalMessageId?: string }> {
+    const payload = buildInteractive('', body, options, opts?.lang ?? 'he', opts?.page ?? 0);
     if (!payload) throw new Error('menu_not_supported');
     const out = await this.post(`${this.creds?.phoneNumberId}/messages`, addressed(payload, externalContactId));
     return { externalMessageId: out.messages?.[0]?.id };

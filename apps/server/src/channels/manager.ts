@@ -22,7 +22,7 @@ import { runFlow, type Effect, type FlowContext, type FlowInput, type FlowState 
 import { resolveArea } from '../safety/areas.js';
 import { contactText, officerNote, officersForTopic, pickOfficer } from '../safety/officers.js';
 import { forwardText, type ForwardRule } from './forward.js';
-import { parseNumberedMenu, type CloudTemplate, type TemplateSend } from './cloud-messages.js';
+import { listMenuBody, parseNumberedMenu, type CloudTemplate, type TemplateSend } from './cloud-messages.js';
 import { loadFlow } from '../flow/store.js';
 import { loadBusinessHours } from '../routes/settings.js';
 import { sendAlert } from '../alerts.js';
@@ -264,16 +264,25 @@ export class ChannelManager {
   onFlowReply?: (a: { channelId: string; conversationId: string; externalContactId: string; messageId: string; responseJson: string }) => Promise<void>;
 
   /** A menu as buttons or a list. Returns false when the channel cannot, or the menu does not fit, or Meta refuses it: the caller then sends the numbered text. */
-  async sendMenu(channelId: string, externalContactId: string, body: string, options: { id: string; title: string }[]): Promise<{ externalMessageId?: string } | null> {
+  async sendMenu(channelId: string, externalContactId: string, body: string, options: { id: string; title: string }[], opts?: { lang?: 'he' | 'en'; page?: number }): Promise<{ externalMessageId?: string } | null> {
     const a = this.adapters.get(channelId);
     if (!a?.sendInteractive || this.statuses.get(channelId) !== 'connected') return null;
     await this.assertNotPaused(channelId);
     await this.usageGate(channelId, true);
     const settings = this.effective(channelId, await this.loadSending());
-    try { const out = await this.sender.run(channelId, settings, async () => a.sendInteractive!(externalContactId, body, options), { maxWaitMs: 45_000 }); await this.usageCount(channelId, 'interactive'); return out; } catch (e) {
+    try { const out = await this.sender.run(channelId, settings, async () => a.sendInteractive!(externalContactId, opts?.page ? body : listMenuBody(body), options, opts), { maxWaitMs: 45_000 }); await this.usageCount(channelId, 'interactive'); return out; } catch (e) {
       if (e instanceof SendError) throw e;
       return null;
     }
+  }
+
+  /** Page n of the last menu the bot sent in the conversation (its numbered text is what was stored). False when there is none to show. */
+  private async sendMenuPage(channelId: string, convId: string, ext: string, page: number): Promise<boolean> {
+    const last = (await this.db.query(`SELECT body FROM messages WHERE conversation_id = $1 AND direction = 'out' AND auto = true ORDER BY created_at DESC, id DESC LIMIT 5`, [convId])).rows as { body: string | null }[];
+    const parsed = last.map((x) => (x.body ? parseNumberedMenu(x.body) : null)).find((x) => !!x);
+    if (!parsed) return false;
+    const lang = await this.langOf(convId);
+    return !!(await this.sendMenu(channelId, ext, page === 0 ? parsed.body : (lang === 'en' ? 'More topics:' : 'נושאים נוספים:'), parsed.options, { lang, page }));
   }
 
   private statusSince = new Map<string, number>();
@@ -378,6 +387,11 @@ export class ChannelManager {
             void sendAlert(this.cfg, `🚫 לקוח נחסם אוטומטית עקב הצפת הודעות (יותר מ-${this.cfg.FLOOD_LIMIT} ב-2 דקות).`, { contactId: r.contactId });
           }
           if (r.blocked) return; // blocked contact: stored as evidence, nothing else happens (no files, bot, away reply, routing, notification)
+          // "more topics" in a long list menu: the next page of the same menu, nothing for the bot to answer
+          if (m.menuPage !== undefined && r.messageId) {
+            this.emit({ channelId, type: 'message', conversationId: r.conversationId, messageId: r.messageId });
+            if (await this.sendMenuPage(channelId, r.conversationId, m.externalContactId, m.menuPage).catch(() => false)) return;
+          }
           // the customer's language (Hebrew or English): Betty answers in it, and the conversation shows it as a tag
           if (r.messageId && !m.media && m.text && !isCommentContact(m.externalContactId)) await this.noteLanguage(r.conversationId, m.text).catch(() => undefined);
           // a form filled inside WhatsApp: handled by the forms module (signed PDF), never by the bot
@@ -881,7 +895,7 @@ export class ChannelManager {
       const reply = replies[i]!;
       if (menu && i === replies.length - 1 && bot.interactiveMenus) {
         const parsed = parseNumberedMenu(reply);
-        const sent = parsed ? await this.sendMenu(channelId, ext, parsed.body, parsed.options).catch((e) => { if (e instanceof SendError) throw e; return null; }) : null;
+        const sent = parsed ? await this.sendMenu(channelId, ext, parsed.body, parsed.options, { lang }).catch((e) => { if (e instanceof SendError) throw e; return null; }) : null;
         if (sent) {
           const ins = await this.db.query(`INSERT INTO messages (conversation_id, direction, body, external_id, auto) VALUES ($1,'out',$2,$3,true) ON CONFLICT DO NOTHING RETURNING id`, [convId, reply, sent.externalMessageId ?? null]);
           if (ins.rows[0]) { this.notifyMessage(channelId, convId, ins.rows[0].id); this.hookMessage('message.sent', convId, ins.rows[0].id); }

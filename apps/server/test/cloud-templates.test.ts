@@ -2,7 +2,7 @@ import { createHmac, randomBytes } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { buildApp } from '../src/app.js';
 import { DEFAULT_BOT } from '../src/bot.js';
-import { buildInteractive, buildTemplate, buildTemplateCreate, parseNumberedMenu, renderTemplateBody, summarizeTemplate } from '../src/channels/cloud-messages.js';
+import { buildInteractive, listMenuBody, buildTemplate, buildTemplateCreate, parseNumberedMenu, renderTemplateBody, summarizeTemplate } from '../src/channels/cloud-messages.js';
 import { ChannelManager, createDefaultFactory } from '../src/channels/manager.js';
 import { WhatsAppCloudAdapter } from '../src/channels/whatsapp-cloud.js';
 import { loadConfig } from '../src/config.js';
@@ -28,10 +28,31 @@ describe('interactive message shapes', () => {
     const row = long.interactive.action.sections[0]!.rows[0]!;
     expect(row.title.length).toBeLessThanOrEqual(24);
     expect(row.description!.length).toBeLessThanOrEqual(72);
-    expect(buildInteractive('1', 'x', opt(11))).toBeNull();
     expect(buildInteractive('1', 'x', [])).toBeNull();
     expect(buildInteractive('1', '  ', opt(2))).toBeNull();
     expect((buildInteractive('1', 'ש'.repeat(2000), opt(2)) as { interactive: { body: { text: string } } }).interactive.body.text.length).toBeLessThanOrEqual(1024);
+  });
+  it('a list sits behind a "☰ תפריט" button; a menu longer than ten rows is split into pages with "more" and "back" rows', () => {
+    type L = { interactive: { type: string; action: { button: string; sections: { title: string; rows: { id: string; title: string }[] }[] } } };
+    const ten = buildInteractive('1', 'x', opt(10)) as L;
+    expect(ten.interactive.action.button).toBe('☰ תפריט');
+    expect(ten.interactive.action.sections[0]!.rows.map((r) => r.id)).toEqual(['1', '2', '3', '4', '5', '6', '7', '8', '9', '10']);
+    const p1 = buildInteractive('1', 'x', opt(15)) as L;
+    const rows1 = p1.interactive.action.sections[0]!.rows;
+    expect(rows1).toHaveLength(10);
+    expect(rows1.map((r) => r.id)).toEqual(['1', '2', '3', '4', '5', '6', '7', '8', '9', 'more:1']);
+    expect(rows1[9]!.title).toBe('נושאים נוספים ▸');
+    expect(p1.interactive.action.sections[0]!.title).toBe('אפשרויות (1/2)');
+    const p2 = buildInteractive('1', 'x', opt(15), 'he', 1) as L;
+    expect(p2.interactive.action.sections[0]!.rows.map((r) => r.id)).toEqual(['10', '11', '12', '13', '14', '15', 'more:0']);
+    expect(buildInteractive('1', 'x', opt(15), 'he', 2)).toBeNull();
+    // 25 options: three pages, the middle one leads on
+    expect((buildInteractive('1', 'x', opt(25), 'he', 1) as L).interactive.action.sections[0]!.rows.at(-1)!.id).toBe('more:2');
+    const en = buildInteractive('1', 'x', opt(15), 'en') as L;
+    expect(en.interactive.action.button).toBe('☰ Menu');
+    expect(en.interactive.action.sections[0]!.rows.at(-1)!.title).toBe('More topics ▸');
+    for (const r of [...rows1, ...p2.interactive.action.sections[0]!.rows]) expect(r.title.length).toBeLessThanOrEqual(24);
+    expect(listMenuBody('ברצוני\nאפשר לבחור מספר, או לכתוב במילים במה מדובר.')).toBe('ברצוני\nאפשר לבחור מהתפריט (☰ למטה), או לכתוב במילים במה מדובר.');
   });
   it('turns the bot\'s numbered text menu back into intro and options, and refuses anything that is not one', () => {
     expect(parseNumberedMenu('שלום!\n\n1. שעות\n2. מיקום\n0. נציג אנושי')).toEqual({ body: 'שלום!', options: [{ id: '1', title: 'שעות' }, { id: '2', title: 'מיקום' }, { id: '0', title: 'נציג אנושי' }] });
@@ -125,6 +146,35 @@ describe('official channel: menus as buttons and message templates', () => {
     await new Promise((r) => setTimeout(r, 80));
     expect(sent.map((s) => JSON.stringify(s.body))).toEqual(expect.arrayContaining([expect.stringContaining('ברחוב הראשי')]));
     expect((await db.query(`SELECT body FROM messages WHERE direction = 'in' AND body = '2' LIMIT 1`)).rows[0].body).toBe('2');
+  });
+
+  it('a menu of ten rows is one list behind "☰ תפריט"; a longer one (as the flow\'s topic menu) comes in pages, "more topics" brings page 2 without waking the bot', async () => {
+    const items = Array.from({ length: 9 }, (_, i) => ({ title: `נושא מספר ${i + 1}`, answer: `תשובה ${i + 1}` }));
+    await call('PUT', '/settings/bot', 'adm', { ...DEFAULT_BOT, enabled: true, items, humanOption: true });
+    sent.length = 0;
+    await hook(inbound('wamid.PG1', '972501110001', { type: 'text', text: { body: 'שלום' } }));
+    await new Promise((r) => setTimeout(r, 80));
+    type L = { action: { button: string; sections: { rows: { id: string }[] }[] } };
+    const first = sent.find((s) => s.body.type === 'interactive')!.body.interactive as L;
+    expect(first.action.button).toBe('☰ תפריט');
+    expect(first.action.sections[0]!.rows.map((r) => r.id)).toEqual(['1', '2', '3', '4', '5', '6', '7', '8', '9', '0']);
+    // the last menu Betty sent had 15 topics (as the safety flow): page 2 comes from its stored text
+    const conv = (await db.query(`SELECT conversation_id AS id FROM messages WHERE external_id = 'wamid.PG1' LIMIT 1`)).rows[0].id;
+    const topics = Array.from({ length: 15 }, (_, i) => `${i + 1}. נושא ארוך ${i + 1}`).join('\n');
+    await db.query(`INSERT INTO messages (conversation_id, direction, body, auto) VALUES ($1, 'out', $2, true)`, [conv, `ברצוני לקבל מידע / לדווח על:\n\n${topics}`]);
+    sent.length = 0;
+    await hook(inbound('wamid.PG2', '972501110001', { type: 'interactive', interactive: { type: 'list_reply', list_reply: { id: 'more:1', title: 'נושאים נוספים ▸' } } }));
+    await new Promise((r) => setTimeout(r, 80));
+    expect(sent).toHaveLength(1);                                                                            // only page 2, no bot reply
+    const second = sent[0]!.body.interactive as L & { body: { text: string } };
+    expect(second.action.sections[0]!.rows.map((r) => r.id)).toEqual(['10', '11', '12', '13', '14', '15', 'more:0']);
+    expect(second.body.text).toBe('נושאים נוספים:');
+    sent.length = 0;
+    await hook(inbound('wamid.PG3', '972501110001', { type: 'interactive', interactive: { type: 'list_reply', list_reply: { id: 'more:0', title: '◂ חזרה' } } }));
+    await new Promise((r) => setTimeout(r, 80));
+    const back = sent[0]!.body.interactive as L & { body: { text: string } };
+    expect(back.action.sections[0]!.rows.at(-1)!.id).toBe('more:1');
+    expect(back.body.text).toBe('ברצוני לקבל מידע / לדווח על:');
   });
 
   it('two or three short options become reply buttons; when Meta refuses, or the setting is off, the numbered text is sent instead', async () => {
