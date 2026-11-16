@@ -92,6 +92,12 @@ export function mainMenuOf(flow: Flow): string | null {
   return (menus.find((m) => m.kbOnFreeText) ?? menus.find((m) => m.options.length >= 3) ?? menus[0])?.id ?? null;
 }
 
+/** An optional question tells the customer it can be skipped, even when its text (edited in the panel) forgot to say so. */
+export function askText(n: { type: string; text: string; optional?: boolean }): string {
+  if (n.type !== 'question' || !n.optional || /דלג|skip/i.test(n.text)) return n.text;
+  const t = n.text.replace(/\s+$/, '');
+  return t.endsWith(':') ? `${t.slice(0, -1).trimEnd()} (אפשר לכתוב "דלג"):` : `${t} (אפשר לכתוב "דלג")`;
+}
 /** shown under a step that is not the first, so customers know they can go back */
 export const NAV_HINT = 'לחזרה לשלב הקודם כתבו "אחורה". לתפריט הראשי כתבו "תפריט".';
 const SKIP_WORDS = new Set(['דלג', 'דלגי', 'skip', 'לא', 'אין']);
@@ -214,7 +220,7 @@ export async function runFlow(flow: Flow, prev: FlowState | null, input: FlowInp
       else {
         state = { ...state, node: target.id, invalid: 0, list: target.type === 'list' ? { items: [], phase: 'item' } : undefined, history: hist, suggest: undefined, suggestFor: undefined };
         if (target.type === 'menu') return { replies: [menuText(target, ctx.humanOption, humanLabel, hist.length ? NAV_HINT : '')], state, effects, menu: true };
-        if (target.type === 'question' || target.type === 'media' || target.type === 'list') return { replies: [target.text], state, effects };
+        if (target.type === 'question' || target.type === 'media' || target.type === 'list') return { replies: [askText(target)], state, effects };
       }
     }
   }
@@ -431,7 +437,7 @@ export async function runFlow(flow: Flow, prev: FlowState | null, input: FlowInp
           break;
         }
         if (n.type === 'question' && knownBefore(n.save)) { cursor = n.next; if (!cursor) return finished(); break; }   // answered last time
-        replies.push(n.text); return { replies, state: { ...state, node: n.id, invalid: 0, history: histFor(n.id) }, effects };
+        replies.push(askText(n)); return { replies, state: { ...state, node: n.id, invalid: 0, history: histFor(n.id) }, effects };
       }
       case 'list': replies.push(n.text); return { replies, state: { ...state, node: n.id, invalid: 0, list: { items: [], phase: 'item' }, history: histFor(n.id) }, effects };
       case 'handoff': {

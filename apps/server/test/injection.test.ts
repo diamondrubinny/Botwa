@@ -67,3 +67,14 @@ describe('a customer who knows Betty', () => {
     expect(renderBotText('{ברכה}, כאן {בוט} מיחידת הבטיחות 👋', { botName: 'בטי', greeting: 'בוקר טוב' })).toBe('בוקר טוב, כאן בטי מיחידת הבטיחות 👋');
   });
 });
+
+describe('optional questions say they can be skipped', () => {
+  it('adds the hint when an edited text forgot it, and never twice', async () => {
+    const { askText } = await import('../src/flow/engine.js');
+    expect(askText({ type: 'question', optional: true, text: 'שם מנהל/ת המעבדה / ראש יחידה:' })).toBe('שם מנהל/ת המעבדה / ראש יחידה (אפשר לכתוב "דלג"):');
+    expect(askText({ type: 'question', optional: true, text: 'מספר חדר' })).toBe('מספר חדר (אפשר לכתוב "דלג")');
+    expect(askText({ type: 'question', optional: true, text: 'שם ה-PI (אפשר לכתוב "דלג"):' })).toBe('שם ה-PI (אפשר לכתוב "דלג"):');
+    expect(askText({ type: 'question', optional: false, text: 'שם מלא:' })).toBe('שם מלא:');
+    expect(askText({ type: 'menu', optional: true, text: 'בחרו:' })).toBe('בחרו:');
+  });
+});

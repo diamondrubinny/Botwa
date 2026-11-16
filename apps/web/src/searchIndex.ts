@@ -12,6 +12,7 @@ const P = (p: Parameters<typeof can>[1]) => (me: Me) => can(me, p);
 export const SEARCH_INDEX: SearchEntry[] = [
   // bot
   { label: 'הודעת פתיחה של הבוט', where: 'בוט', words: 'פתיחה ברוכים הבאים welcome תפריט ראשי', page: 'bot', s: 'b-welcome', allowed: P('bot.view') },
+  { label: 'הצהרה שבטי היא בוט ולא נציגה אנושית', where: 'בוט', words: 'הצהרה בוט שקיפות לא אנושי נציג אנושי גילוי disclosure transparency', page: 'bot', s: 'b-disc', allowed: P('bot.view') },
   { label: 'זהות הבוט (בטי): שם, תפקיד ותמונה', where: 'בוט', words: 'בטי פרסונה שם הבוט תמונה אווטאר persona', page: 'bot', s: 'persona-h', allowed: P('bot.view') },
   { label: 'מצב חירום: הודעת חירום ומספרים', where: 'בוט', words: 'חירום מד"א 101 102 100 מוקד ביטחון שריפה דחוף emergency', page: 'bot', s: 'em-t', allowed: P('bot.view') },
   { label: 'תרגום לאנגלית (שיחות באנגלית)', where: 'בוט', words: 'אנגלית english תרגום שפה translation lang', page: 'bot', s: 'tr-h', allowed: P('bot.view') },

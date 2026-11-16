@@ -1,7 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { buildApp } from '../src/app.js';
-import { parseRating } from '../src/automations.js';
+import { parseRating, reminderAnswer } from '../src/automations.js';
 import { ChannelManager } from '../src/channels/manager.js';
 import type { ChannelAdapter, AdapterContext } from '../src/channels/types.js';
 import { hashPassword } from '../src/password.js';
@@ -95,6 +95,35 @@ describe('conversation automations', () => {
     expect(sent).toHaveLength(0);                                // empty closing text: closed silently
     expect(await status(c.id)).toBe('closed');
     await db.query('DELETE FROM conversations');
+  });
+
+  it('"did you get our answer?" only after a person answered: never after the bot\'s own message, never twice in a day', async () => {
+    await setA({ ...DEFAULT_AUTOMATIONS, idle: { ...DEFAULT_AUTOMATIONS.idle, enabled: true, reminderAfter: 60, closeAfter: 120 } });
+    const botLast = await conv('בוט', { inAgo: 300, outAgo: 90, bot: true });       // the bot's menu, unanswered
+    const person = await conv('דנה', { inAgo: 300, outAgo: 90 });                    // a person answered
+    sent.length = 0;
+    expect(await runAutomations(db, out)).toMatchObject({ reminded: 1 });
+    expect(sent.map((x) => x.to)).toEqual([person.ext]);
+    expect(await autoKinds(botLast.id)).toEqual([]);
+    // the bot's conversation closes when the whole time (reminder wait + closing wait) is up, without asking
+    await db.query(`UPDATE messages SET created_at = created_at - interval '100 minutes' WHERE conversation_id = $1`, [botLast.id]);
+    await runAutomations(db, out);
+    expect(await status(botLast.id)).toBe('closed');
+    expect(await autoKinds(botLast.id)).toEqual(['idle_close']);
+    // the customer answers the reminder, a person answers again and the customer is silent: no second reminder within 24 hours
+    await db.query(`INSERT INTO messages (conversation_id, direction, body, created_at) VALUES ($1, 'in', 'עוד שאלה', $2)`, [person.id, ago(80)]);
+    await db.query(`INSERT INTO messages (conversation_id, direction, body, auto, created_at) VALUES ($1, 'out', 'תשובה 2', false, $2)`, [person.id, ago(70)]);
+    sent.length = 0;
+    expect(await runAutomations(db, out)).toMatchObject({ reminded: 0 });
+    expect(sent).toHaveLength(0);
+    await db.query('DELETE FROM conversations');
+  });
+
+  it('reads the answer to the reminder: not received, done, or one more question', () => {
+    for (const t of ['לא', 'לא קיבלתי', 'לא קיבלתי תשובה', 'עדיין לא', 'עוד לא', 'אף אחד לא ענה', 'לא חזרו אליי', 'עדיין מחכה', 'No', "I didn't get an answer", 'not yet', 'still waiting']) expect(reminderAnswer(t), t).toBe('missing');
+    for (const t of ['כן', 'כן, תודה', 'קיבלתי', 'כן קיבלתי תודה', 'לא תודה', 'זהו', 'הכל טוב', 'yes', 'got it', 'no thanks']) expect(reminderAnswer(t), t).toBe('done');
+    for (const t of ['יש לי עוד שאלה', 'כן יש', 'עוד שאלה']) expect(reminderAnswer(t), t).toBe('more');
+    for (const t of ['יש מפגע בחדר 304', 'מתי מגיעים לפנות פסולת?', '', 'תפריט']) expect(reminderAnswer(t), t).toBeNull();
   });
 
   it('holding message: once per wait when nobody answered, not while the bot handles it', async () => {

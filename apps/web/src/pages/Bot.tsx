@@ -10,7 +10,7 @@ import { usePoll } from '../hooks';
 
 interface BotCfg {
   enabled: boolean; welcome: string; items: { title: string; answer: string; contact?: { name: string; phone: string; message: string }; route?: { userId: string; byArea?: boolean } }[]; humanOption: boolean; humanLabel: string;
-  humanKeywords: string[]; humanMessage: string; invalidMessage: string; invalidRetries: number; footer: string; preview?: string; mode?: 'menu' | 'flow';
+  humanKeywords: string[]; humanMessage: string; disclosure?: string; invalidMessage: string; invalidRetries: number; footer: string; preview?: string; mode?: 'menu' | 'flow';
   kb: { enabled: boolean; minScore: number; maxChars: number; showSource: boolean; intro: string; answerMode?: 'quote' | 'local'; outro?: string };
   reactions?: { enabled: boolean; ackAll?: boolean; working: string; done: string; noAnswer: string; handoff: string; greeting?: string; thanks?: string };
   catchupHours?: number;
@@ -142,6 +142,11 @@ export function Bot({ me }: { me: Me }) {
           <div className="field">
             <label htmlFor="b-hm">הודעה ללקוח בעת המעבר לנציג</label>
             <textarea id="b-hm" required rows={2} maxLength={500} value={b.humanMessage} onChange={(e) => set({ humanMessage: e.target.value })} />
+          </div>
+          <div className="field">
+            <label htmlFor="b-disc">הצהרה שזה בוט (נאמרת פעם אחת, בהודעה הראשונה של הבוט בכל שיחה)</label>
+            <textarea id="b-disc" rows={2} maxLength={400} aria-describedby="b-disc-h" value={b.disclosure ?? ''} onChange={(e) => set({ disclosure: e.target.value })} />
+            <p id="b-disc-h" className="hint">שקיפות כלפי הלקוח: הלקוח יודע שהוא מדבר עם בוט ולא עם נציג אנושי, ואיך מגיעים לאיש צוות. מומלץ להשאיר. שדה ריק מבטל את ההצהרה.</p>
           </div>
           <div className="field">
             <label htmlFor="b-im">הודעה כשלא הובנה הבחירה</label>

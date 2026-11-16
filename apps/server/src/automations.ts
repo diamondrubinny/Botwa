@@ -60,7 +60,7 @@ export type Automations = z.infer<typeof automationsSchema>;
 export const DEFAULT_AUTOMATIONS: Automations = {
   idle: {
     enabled: false, reminderAfter: 60, closeAfter: 120,
-    reminderText: 'היי {שם}, רצינו לוודא שקיבלת את התשובה שלנו. יש עוד משהו שנוכל לעזור בו?',
+    reminderText: 'היי {שם}, רצינו לוודא: קיבלת מענה לפנייה? אפשר לענות "כן" או "לא".',
     closeText: 'מאחר שלא קיבלנו מענה, אנחנו סוגרים את הפנייה בינתיים. אפשר לכתוב לנו כאן בכל עת והשיחה תיפתח מחדש. יום טוב!',
   },
   holding: { enabled: false, after: 10, text: 'קיבלנו את פנייתך, {שם}. נציג/ה יחזרו אליך בהקדם. תודה על הסבלנות!' },
@@ -209,6 +209,20 @@ export async function thankForFeedback(db: Db, out: AutoSender, convId: string):
   if (conv && a.thanks) await sendAutomatic(db, out, conv, a.thanks, 'feedback_thanks');
 }
 
+/**
+ * The customer's answer to "did you get our answer? anything else?": 'missing' (they did not get one: a person must look),
+ * 'done' (got it / nothing else: close kindly), 'more' (yes, something else: they will write it), or null (anything else: a new
+ * question or request, handled as usual).
+ */
+export function reminderAnswer(textIn: string | null | undefined): 'missing' | 'done' | 'more' | null {
+  const t = (textIn ?? '').toLowerCase().replace(/[!.,?״"׳'():;\-–—\u{1F300}-\u{1FAFF}\u2600-\u27BF\u{FE0F}]/gu, ' ').replace(/\s+/g, ' ').trim();
+  if (!t || t.length > 120) return null;
+  if (/(^|\s)(לא|עוד לא|עדיין לא)\s+(קיבלתי|קבלתי|קיבלנו|קיבלו|ענו|ענית|ענה|חזרו|חזר|חזרת|התקבלה|הגיעה|הגיע)|(^|\s)(אף אחד|איש) לא (ענה|חזר|התקשר)|לא קיבלתי (שום )?(תשובה|מענה)|עדיין מחכ|(^|\s)(עוד|עדיין) לא$|^לא ממש$|^(לא|no|nope)$|didn ?t (get|receive)|did not (get|receive)|(no|not) (an )?(answer|reply|response)( yet)?|not yet|still waiting|nobody (answered|replied|got back)/.test(t)) return 'missing';
+  if (/^(כן|yes|yep|לא תודה|לא צריך|אין|אין צורך|זהו|זה הכל|זה הכול|הכל טוב|הכול טוב|הכל בסדר|הכול בסדר|קיבלתי|קבלתי|כן קיבלתי|כן קיבלתי תודה|קיבלתי תודה|כן תודה|כן תודה רבה|קיבלתי תודה רבה|no|no thanks|nope|nothing else|got it|yes thanks|yes thank you|all good)( תודה| תודה רבה| thanks| thank you)?$/.test(t)) return 'done';
+  if (/^(כן יש|יש|יש לי עוד שאלה|יש עוד שאלה|עוד שאלה|yes there is|i have another question)$/.test(t)) return 'more';
+  return null;
+}
+
 /** One pass of the time-based automations. Returns what was done (for logs and tests). */
 export async function runAutomations(db: Db, out: AutoSender, now = new Date()): Promise<{ reminded: number; closed: number; held: number }> {
   const a = await loadAutomations(db);
@@ -221,18 +235,30 @@ export async function runAutomations(db: Db, out: AutoSender, now = new Date()):
          SELECT c.id,
                 (SELECT max(created_at) FROM messages m WHERE m.conversation_id = c.id AND m.direction = 'in') AS last_in,
                 (SELECT max(created_at) FROM messages m WHERE m.conversation_id = c.id AND m.direction = 'out' AND m.automation IS NULL) AS last_out,
+                (SELECT max(created_at) FROM messages m WHERE m.conversation_id = c.id AND m.direction = 'out' AND m.automation IS NULL AND NOT m.auto) AS last_person,
                 (SELECT max(created_at) FROM messages m WHERE m.conversation_id = c.id AND m.automation = 'idle_reminder') AS last_reminder
            FROM conversations c JOIN contacts ct ON ct.id = c.contact_id
           WHERE c.status = 'open' AND (c.snoozed_until IS NULL OR c.snoozed_until <= $1) AND ${NOT_COMMENT})
-       SELECT id, last_out, last_reminder FROM t
+       SELECT id, last_out, last_person, last_reminder FROM t
         WHERE last_out IS NOT NULL AND (last_in IS NULL OR last_out > last_in)
         ORDER BY last_out LIMIT 50`,
       [now],
     );
-    for (const r of rows as { id: string; last_out: Date; last_reminder: Date | null }[]) {
+    for (const r of rows as { id: string; last_out: Date; last_person: Date | null; last_reminder: Date | null }[]) {
       const reminded = !!r.last_reminder && r.last_reminder > r.last_out;
       const since = (d: Date) => (now.getTime() - d.getTime()) / 60_000;
       const conv = (await db.query(`${CONV} WHERE c.id = $1`, [r.id])).rows[0] as ConvRow;
+      // "did you get our answer?" only after an answer from a person: never after the bot's own menu or question (the customer
+      // has nothing to "get" there, and answering it would bring the menu and, later, the same question again), and at most once a day
+      const askable = !!r.last_person && r.last_person.getTime() >= r.last_out.getTime() && !(r.last_reminder && since(r.last_reminder) < 24 * 60);
+      if (!askable && !reminded) {
+        if (since(r.last_out) >= a.idle.reminderAfter + a.idle.closeAfter) {
+          const sent = a.idle.closeText ? await sendAutomatic(db, out, conv, a.idle.closeText, 'idle_close') : false;
+          await close(db, out, r.id, `השיחה נסגרה אוטומטית: הלקוח לא הגיב${a.idle.closeText && !sent ? ' (הודעת הסגירה לא נשלחה)' : ''}. הודעה חדשה מהלקוח תפתח אותה מחדש.`);
+          done.closed++;
+        }
+        continue;
+      }
       if (a.idle.reminderAfter > 0 && !reminded) {
         if (since(r.last_out) >= a.idle.reminderAfter && a.idle.reminderText) {
           if (await sendAutomatic(db, out, conv, a.idle.reminderText, 'idle_reminder')) done.reminded++;

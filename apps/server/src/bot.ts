@@ -9,6 +9,8 @@ export function isSingleEmoji(v: string): boolean {
   const seg = [...new Intl.Segmenter('en', { granularity: 'grapheme' }).segment(v)];
   return seg.length === 1 && /\p{Extended_Pictographic}/u.test(v);
 }
+/** the default statement that the bot is a bot (transparency towards the customer) */
+export const BOT_DISCLOSURE = '🤖 לידיעתך: אני בוט ולא נציגה אנושית. התשובות שלי מבוססות על המידע של היחידה, ובכל רגע אפשר לכתוב "נציג" כדי לפנות לאיש צוות.';
 const emoji = z.string().refine(isSingleEmoji, 'emoji');
 const GREET_HEAD = new Set(['שלום', 'היי', 'הי', 'הלו', 'אהלן', 'אהלא', 'בוקר', 'ערב', 'צהריים', 'hello', 'hi', 'hey', 'morning', 'afternoon', 'evening']);
 const GREET_TAIL = new Set(['טוב', 'טובים', 'רב', 'וברכה', 'לכולם', 'לך', 'לכם', 'אליכם', 'חברים', 'בוט', 'שוב', 'אחי', 'אחות', 'good', 'everyone', 'there']);
@@ -78,6 +80,8 @@ export const botSchema = z.object({
   /** any message containing one of these (case-insensitive) hands over to a person */
   humanKeywords: z.array(z.string().trim().min(2).max(30)).max(10),
   humanMessage: z.string().trim().min(1).max(500),
+  /** said once at the start of every conversation the bot handles: it is a bot, not a person (empty = not said) */
+  disclosure: z.string().trim().max(400).default(BOT_DISCLOSURE),
   invalidMessage: z.string().trim().min(1).max(300),
   /** how many unrecognised messages are answered with the menu before handing over (0 = hand over at once) */
   invalidRetries: z.number().int().min(0).max(3),
@@ -129,6 +133,7 @@ export const DEFAULT_BOT: BotConfig = {
   humanLabel: 'נציג אנושי',
   humanKeywords: ['נציג', 'agent', 'human'],
   humanMessage: 'מעביר אותך לנציג. נחזור אליך בהקדם.',
+  disclosure: BOT_DISCLOSURE,
   invalidMessage: 'לא הבנתי את הבחירה.',
   invalidRetries: 1,
   footer: 'לחזרה לתפריט שלחו "תפריט". לנציג שלחו "נציג".',

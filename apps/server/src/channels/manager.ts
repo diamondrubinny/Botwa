@@ -18,7 +18,7 @@ import { MediaService } from '../media/store.js';
 import type { KnowledgeBase } from '../kb/service.js';
 import { conversationEventData, messageEventData } from '../integrations/events.js';
 import type { EventType, WebhookService } from '../integrations/webhooks.js';
-import { runFlow, type Effect, type FlowContext, type FlowInput, type FlowState } from '../flow/engine.js';
+import { askText, runFlow, type Effect, type FlowContext, type FlowInput, type FlowState } from '../flow/engine.js';
 import { resolveArea } from '../safety/areas.js';
 import { contactText, officerNote, officersForTopic, pickOfficer } from '../safety/officers.js';
 import { forwardText, type ForwardRule } from './forward.js';
@@ -33,7 +33,7 @@ import type { AdapterFactory, ChannelAdapter, ChannelStatus, ChannelType, Outbou
 import { TelegramAdapter } from './telegram.js';
 import { CLOUD_CREDS_KEY, newVerifyToken, WhatsAppCloudAdapter, type CloudCreds } from './whatsapp-cloud.js';
 import { EMAIL_CREDS_KEY, EmailAdapter, type EmailCreds } from './email.js';
-import { closeByCustomer, introduceAgent, isCloseRequest, thankForFeedback } from '../automations.js';
+import { closeByCustomer, introduceAgent, isCloseRequest, reminderAnswer, thankForFeedback } from '../automations.js';
 import { composeAnswer, type KbAnswer } from '../kb/compose.js';
 import { BOT_INPUT_MAX, detectInjection, INJECTION_HANDOFF_AFTER, INJECTION_NOTE, INJECTION_REPLY } from '../guard/injection.js';
 import { loadPersona } from '../routes/branding.js';
@@ -83,6 +83,10 @@ const MENU_HINT = 'לתפריט הראשי כתבו "תפריט".';
 /** The answer to a plain thank-you. */
 const THANKS_REPLY = 'בשמחה 😊 אם צריך עוד משהו, אני כאן.';
 /** Under an answer from a Hebrew entry, in an English conversation. */
+const WAITING_NOTE = '(הפנייה שלך כבר אצל הצוות, ונציג יחזור אליך בהקדם.)';
+const REMINDER_MISSING = 'מצטערת שעדיין לא קיבלת מענה 🙏 העברתי את הפנייה שוב לצוות, עם בקשה לחזור אליך בהקדם.';
+const REMINDER_DONE = 'שמחה לשמוע 😊 אם יעלה עוד משהו, פשוט כתבו כאן.';
+const REMINDER_MORE = 'בשמחה, כתבו כאן את השאלה 🙂';
 const KB_HEBREW_NOTE = 'התשובה ממאגר המידע שלנו בעברית. אם צריך עזרה, אפשר לכתוב "נציג".';
 
 export class ChannelManager {
@@ -458,6 +462,14 @@ export class ChannelManager {
           if (r.messageId && !stop && !m.media && bot?.reactions.thanks && !isCommentContact(m.externalContactId) && isThanks(m.text)) {
             if ((await this.setOurReaction(r.messageId, bot.reactions.thanks, null).catch(() => 'error')) === 'ok') thanked = bot.reactions.thanks;
           }
+          // the answer to "did you get an answer?": back to the team, closed kindly, or "write your question" (never the menu)
+          if (r.messageId && !stop && !m.media && !isCommentContact(m.externalContactId)
+              && await this.reminderReply(channelId, r.conversationId, m.externalContactId, m.text, bot).catch(() => false)) {
+            this.emit({ channelId, type: 'message', conversationId: r.conversationId, messageId: r.messageId });
+            this.hookMessage('message.received', r.conversationId, r.messageId);
+            this.hookConversation('conversation.status_changed', r.conversationId);
+            return;
+          }
           // "הסתדרתי" / "תסגרו את הקריאה": the customer closes the inquiry; no bot, routing or away reply for this message
           if (r.messageId && !stop && !m.media && !isCommentContact(m.externalContactId) && isCloseRequest(m.text)
               && await closeByCustomer(this.db, this, r.conversationId, m.text ?? '').catch(() => false)) {
@@ -475,7 +487,7 @@ export class ChannelManager {
             && await this.waitingStatus(channelId, r.conversationId, m.externalContactId).catch(() => false);
           // "מי הממונה על לייזרים?" while the inquiry is with the team: the officer's public details, unless a person is answering now
           const informed = !waited && !told && !!r.messageId && !stop && !m.media && !isCommentContact(m.externalContactId)
-            && await this.officerWhileWaiting(channelId, r.conversationId, m.externalContactId, m.text).catch(() => false);
+            && await this.officerWhileWaiting(channelId, r.conversationId, m.externalContactId, m.text, bot).catch(() => false);
           if (waited || informed || told) {
             // nothing more: no bot and no away notice for this message
           } else if (r.messageId && stop) {
@@ -921,6 +933,11 @@ export class ChannelManager {
     const lang = await this.langOf(convId);
     const localized = lang === 'en' ? await Promise.all(rawReplies.map((r) => localize(this.db, lang, r))) : rawReplies;
     const replies = localized.some((r) => r.includes('{')) ? await this.botTextContext(convId, nameHint, lang).then((c) => localized.map((r) => renderBotText(r, c))) : localized;
+    // the first thing the bot says in a conversation includes that it is a bot, not a person (said once; the setting can change or clear it)
+    if (bot.disclosure && replies.length) {
+      const d = lang === 'en' ? await localize(this.db, lang, bot.disclosure) : bot.disclosure;
+      if (!(await this.db.query(`SELECT 1 FROM messages WHERE conversation_id = $1 AND direction = 'out' AND auto AND created_at > now() - interval '12 hours' AND position($2 in body) > 0 LIMIT 1`, [convId, d])).rowCount) { const first = replies[0]!; const cut = first.indexOf('\n\n'); replies[0] = cut > 0 ? `${first.slice(0, cut)}\n\n${d}${first.slice(cut)}` : `${first}\n\n${d}`; }   // after the opening line: a menu keeps its options last
+    }
     for (let i = 0; i < replies.length; i++) {
       const reply = replies[i]!;
       if (menu && i === replies.length - 1 && bot.interactiveMenus) {
@@ -1083,7 +1100,7 @@ export class ChannelManager {
       // it (it pushes the answer out of sight). In the middle of a question, the question once more; otherwise one line on how
       // to get the menu. Only small talk at the very start is followed by the flow's opening.
       const opening = !!chat && !!flow && (!st || (st.node === null && !st.done));   // "היי, מה נשמע?" to start with: the flow opens as usual
-      const resume = node?.type === 'question' ? `\n\nנמשיך: ${node.text}` : opening ? '' : flow || bot.mode === 'menu' ? `\n\n${MENU_HINT}` : '';
+      const resume = node?.type === 'question' ? `\n\nנמשיך: ${askText(node)}` : opening ? '' : flow || bot.mode === 'menu' ? `\n\n${MENU_HINT}` : '';
       await this.botSay(channelId, convId, ext, `${own}${resume}`);
       if (opening) await this.runFlowStep(channelId, convId, ext, bot, flow!, { text: null, media: false }, rx);
       return;
@@ -1439,19 +1456,58 @@ export class ChannelManager {
     return true;
   }
 
-  /** An officer question in a conversation that is with the team (where the bot is silent): answered from the officers list. */
-  async officerWhileWaiting(channelId: string, convId: string, ext: string, text: string | null | undefined): Promise<boolean> {
+  /**
+   * A conversation the bot handed to the team, before anybody from the team has written in it: Betty keeps answering what she can answer
+   * for sure (an officer's public details, a confident knowledge-base answer, "are you there?"), with a line that the request is with the
+   * team. Nothing else (no menu, no flow, no hand-over again). Once a person writes, she is silent.
+   */
+  async officerWhileWaiting(channelId: string, convId: string, ext: string, text: string | null | undefined, bot?: BotConfig | null): Promise<boolean> {
     const c = (await this.db.query(
-      `SELECT c.assigned_to, c.bot_state,
-              EXISTS (SELECT 1 FROM messages m WHERE m.conversation_id = c.id AND m.direction = 'out' AND NOT m.auto AND m.created_at > now() - interval '10 minutes') AS answered
+      `SELECT c.assigned_to, c.bot_state, c.lang,
+              EXISTS (SELECT 1 FROM messages m WHERE m.conversation_id = c.id AND m.direction = 'out' AND NOT m.auto
+                        AND m.created_at >= coalesce((SELECT max(k.opened_at) FROM cases k WHERE k.conversation_id = c.id), c.created_at)) AS answered
          FROM conversations c WHERE c.id = $1`, [convId])).rows[0];
-    if (!c || (!c.assigned_to && c.bot_state !== 'human') || c.answered) return false;
-    const reply = await officerReply(this.db, text);
+    if (!c || (!c.assigned_to && c.bot_state !== 'human') || c.answered || !text?.trim()) return false;
+    if (detectInjection(text)) return false;
+    const persona = (await loadPersona(this.db).catch(() => null)) ?? { name: '', role: '' };
+    const q = withoutBotName(text, persona.name) ?? text;
+    let reply = await officerReply(this.db, q).catch(() => null);
+    let kind = 'officer_info';
+    if (!reply && bot?.enabled) {
+      const here = smallTalkReply(q, persona.name);
+      if (here) { reply = `${here}\n\n${WAITING_NOTE}`; kind = 'waiting_answer'; }
+      else {
+        const kb = await this.kbAnswer(bot, null, q.slice(0, BOT_INPUT_MAX), bot.mode === 'flow', undefined, undefined, c.lang === 'en' ? 'en' : 'he').catch(() => null);
+        if (kb) { reply = `${kb}\n\n${WAITING_NOTE}`; kind = 'waiting_answer'; }
+      }
+    }
     if (!reply) return false;
     const replyL = await this.say(convId, reply);
     const sent = await this.sendText(channelId, ext, replyL, { background: true });
-    const ins = await this.db.query(`INSERT INTO messages (conversation_id, direction, body, external_id, auto, automation) VALUES ($1,'out',$2,$3,true,'officer_info') ON CONFLICT DO NOTHING RETURNING id`, [convId, replyL, sent.externalMessageId ?? null]);
+    const ins = await this.db.query(`INSERT INTO messages (conversation_id, direction, body, external_id, auto, automation) VALUES ($1,'out',$2,$3,true,$4) ON CONFLICT DO NOTHING RETURNING id`, [convId, replyL, sent.externalMessageId ?? null, kind]);
     if (ins.rows[0]) { this.notifyMessage(channelId, convId, ins.rows[0].id); this.hookMessage('message.sent', convId, ins.rows[0].id); }
+    return true;
+  }
+
+  /**
+   * The customer answered "did you get an answer?" (the last thing sent in the last day was that reminder): "לא" goes back to the team
+   * with an apology (never the menu), "כן" / "קיבלתי" closes kindly, "יש עוד שאלה" invites the question. False when it is not such an answer.
+   */
+  async reminderReply(channelId: string, convId: string, ext: string, text: string | null | undefined, bot?: BotConfig | null): Promise<boolean> {
+    const kind = reminderAnswer(text);
+    if (!kind) return false;
+    const last = (await this.db.query(`SELECT automation, created_at FROM messages WHERE conversation_id = $1 AND direction = 'out' ORDER BY created_at DESC LIMIT 1`, [convId])).rows[0] as { automation: string | null; created_at: Date } | undefined;
+    if (last?.automation !== 'idle_reminder' || Date.now() - new Date(last.created_at).getTime() > 24 * 3600_000) return false;
+    if (kind === 'done') return closeByCustomer(this.db, this, convId, text ?? '').then(async (ok) => { if (!ok) await this.botSay(channelId, convId, ext, REMINDER_DONE); return true; });
+    if (kind === 'more') { await this.botSay(channelId, convId, ext, REMINDER_MORE); return true; }
+    // not answered: the team must see it now; the bot steps back
+    const c = (await this.db.query(`SELECT assigned_to FROM conversations WHERE id = $1`, [convId])).rows[0] as { assigned_to: string | null } | undefined;
+    await this.db.query(`INSERT INTO conversation_notes (conversation_id, body) VALUES ($1, $2)`, [convId, 'הלקוח השיב לתזכורת שלא קיבל מענה לפנייה. נא לחזור אליו.']);
+    await this.db.query(`UPDATE conversations SET bot_state = 'human', flow_state = NULL, bot_invalid = 0 WHERE id = $1`, [convId]);
+    if (c?.assigned_to) this.onAssigned?.(convId, c.assigned_to);
+    else { const to = await autoAssign(this.db, convId).catch(() => null); if (to) { this.onAssigned?.(convId, to); void this.introduce(convId); } }
+    await this.botSay(channelId, convId, ext, REMINDER_MISSING);
+    void bot;
     return true;
   }
 

@@ -223,6 +223,44 @@ describe('official channel: menus as buttons and message templates', () => {
     await db.query(`DELETE FROM settings WHERE key = 'bot_persona'`);
   });
 
+  it('the first message says Betty is a bot (once); "לא" to "did you get an answer?" goes back to the team; until a person writes she still answers, then she is silent', async () => {
+    await call('PUT', '/settings/bot', 'adm', { ...DEFAULT_BOT, enabled: true, interactiveMenus: false, items: [{ title: 'שעות', answer: 'a' }, { title: 'מיקום', answer: 'b' }], humanOption: true });
+    const texts = () => sent.filter((s) => s.body.type === 'text').map((s) => (s.body.text as { body: string }).body);
+    sent.length = 0;
+    await hook(inbound('wamid.RM1', '972501110005', { type: 'text', text: { body: 'שלום' } }));
+    await new Promise((r) => setTimeout(r, 80));
+    expect(texts()[0]).toContain('אני בוט ולא נציגה אנושית');
+    expect(texts()[0]).toMatch(/\n1\. שעות\n2\. מיקום\n0\. /);                                            // the menu still ends with its options
+    sent.length = 0;
+    await hook(inbound('wamid.RM2', '972501110005', { type: 'text', text: { body: 'תפריט' } }));
+    await new Promise((r) => setTimeout(r, 80));
+    expect(texts().join('\n')).not.toContain('אני בוט ולא נציגה אנושית');                                      // said once
+    const conv = (await db.query(`SELECT conversation_id FROM messages WHERE external_id = 'wamid.RM1'`)).rows[0].conversation_id;
+    await db.query(`INSERT INTO messages (conversation_id, direction, body, auto, automation) VALUES ($1, 'out', 'קיבלת מענה?', true, 'idle_reminder')`, [conv]);
+    sent.length = 0;
+    await hook(inbound('wamid.RM3', '972501110005', { type: 'text', text: { body: 'לא קיבלתי' } }));
+    await new Promise((r) => setTimeout(r, 80));
+    expect(texts()).toEqual(['מצטערת שעדיין לא קיבלת מענה 🙏 העברתי את הפנייה שוב לצוות, עם בקשה לחזור אליך בהקדם.']);   // no menu
+    expect((await db.query(`SELECT bot_state FROM conversations WHERE id = $1`, [conv])).rows[0].bot_state).toBe('human');
+    expect((await db.query(`SELECT count(*)::int AS n FROM conversation_notes WHERE conversation_id = $1 AND body LIKE '%לא קיבל מענה%'`, [conv])).rows[0].n).toBe(1);
+    // with the team, nobody wrote yet: what she can answer for sure is still answered, with a line that the request is with the team
+    sent.length = 0;
+    await hook(inbound('wamid.RM4', '972501110005', { type: 'text', text: { body: 'מה שלומך?' } }));
+    await new Promise((r) => setTimeout(r, 80));
+    expect(texts()).toEqual(['תודה ששאלת, הכול טוב אצלי 😊 במה אפשר לעזור?\n\n(הפנייה שלך כבר אצל הצוות, ונציג יחזור אליך בהקדם.)']);
+    // something she cannot answer for sure: silence (the team sees it)
+    sent.length = 0;
+    await hook(inbound('wamid.RM5', '972501110005', { type: 'text', text: { body: 'החדר שלי 304 והדלת נעולה' } }));
+    await new Promise((r) => setTimeout(r, 80));
+    expect(texts()).toEqual([]);
+    // a person writes: from now on Betty is silent
+    await db.query(`INSERT INTO messages (conversation_id, direction, body, auto) VALUES ($1, 'out', 'שלום, כאן דנה', false)`, [conv]);
+    sent.length = 0;
+    await hook(inbound('wamid.RM6', '972501110005', { type: 'text', text: { body: 'מה שלומך?' } }));
+    await new Promise((r) => setTimeout(r, 80));
+    expect(texts()).toEqual([]);
+  });
+
   it('two or three short options become reply buttons; when Meta refuses, or the setting is off, the numbered text is sent instead', async () => {
     await call('PUT', '/settings/bot', 'adm', { ...DEFAULT_BOT, enabled: true, items: [{ title: 'שעות', answer: 'a' }, { title: 'מיקום', answer: 'b' }], humanOption: false });
     sent.length = 0;
