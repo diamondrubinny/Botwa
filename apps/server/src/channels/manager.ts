@@ -502,8 +502,10 @@ export class ChannelManager {
             await this.attemptBot(channelId, r.conversationId, m.externalContactId, bot, { text: m.text, media: !!m.media, ext: m.externalMessageId, thanked }, true);
           } else if (r.messageId) {
             if (r.needsRouting) {
-              const to = await autoAssign(this.db, r.conversationId).catch(() => null);
+              let to = await autoAssign(this.db, r.conversationId).catch(() => null);
               if (to) await audit(this.db, { action: 'conversation.auto_assign', target: r.conversationId, meta: { to } }).catch(() => undefined);
+              // routing found nobody (switched off, or nobody available): never left unassigned, the responsible safety officer gets it
+              else to = await this.assignToResponsible(r.conversationId, bot, m.text);
               if (to) { this.onAssigned?.(r.conversationId, to); void this.introduce(r.conversationId); }
             }
             await this.maybeAway(channelId, r.conversationId, m.externalContactId).catch(() => undefined);

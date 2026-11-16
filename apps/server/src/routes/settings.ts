@@ -99,6 +99,7 @@ export function settingsRoutes(app: FastifyInstance, db: Db, mgrRef: Pick<Channe
     const b = botSchema.safeParse(req.body);
     if (!b.success) return reply.code(400).send({ error: 'bad_request' });
     if (b.data.escalation.backupUserId && !(await db.query('SELECT 1 FROM users WHERE id = $1 AND active', [b.data.escalation.backupUserId])).rowCount) return reply.code(400).send({ error: 'unknown_user' });
+    if (b.data.defaultOfficerUserId && !(await db.query('SELECT 1 FROM users WHERE id = $1 AND active', [b.data.defaultOfficerUserId])).rowCount) return reply.code(400).send({ error: 'unknown_user' });
     const routed = [...new Set(b.data.items.flatMap((i) => (i.route ? [i.route.userId] : [])))];
     if (routed.length) {
       const ok = await db.query(`SELECT count(*)::int AS n FROM users WHERE active AND id = ANY($1::uuid[])`, [routed]);
