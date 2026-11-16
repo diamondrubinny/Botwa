@@ -7,6 +7,7 @@ import { loadConfig } from '../src/config.js';
 import { createDb } from '../src/db.js';
 import { migrate } from '../src/migrate.js';
 import { hashPassword } from '../src/password.js';
+import { weeklyDue } from '../src/staff/weekly.js';
 
 describe('Betty for managers on WhatsApp', () => {
   const ORIGIN = 'https://panel.test';
@@ -192,5 +193,29 @@ describe('Betty for managers on WhatsApp', () => {
     expect(after.daysLeft).toBeGreaterThanOrEqual(181);
     expect(after.lastDoneBy).toBe('מנהלת');
     expect((await call('boss@t.io', 'GET', `/inspections/${id}/log`)).json()[0].note).toBe('הכול תקין');
+  });
+
+  it('weekly safety summary: Sunday from 08:40 Israel time, once, to linked managers who did not switch it off', async () => {
+    // 16/11/2026 is a Monday; 15/11 is a Sunday. Israel is UTC+2 in November.
+    expect(weeklyDue(new Date('2026-11-15T06:39:00Z'))).toEqual({ due: false, key: '2026-11-15' });   // 08:39
+    expect(weeklyDue(new Date('2026-11-15T06:40:00Z'))).toEqual({ due: true, key: '2026-11-15' });    // 08:40
+    expect(weeklyDue(new Date('2026-11-16T06:40:00Z')).due).toBe(false);                               // Monday
+    const me = '9725888888@s.whatsapp.net';
+    out.length = 0;
+    expect(await mgr.runWeeklySummary(new Date('2026-11-16T07:00:00Z'))).toBe(0);                     // not Sunday
+    expect(await mgr.runWeeklySummary(new Date('2026-11-15T07:00:00Z'))).toBe(1);
+    const text = out.filter((o) => o.to === me).map((o) => o.text).join('\n');
+    expect(text).toContain('סיכום בטיחות שבועי');
+    expect(text).not.toContain('0501234567');                                                           // no customer details
+    expect(text).not.toContain('דנה כהן');
+    expect(await mgr.runWeeklySummary(new Date('2026-11-15T09:00:00Z'))).toBe(0);                     // once that Sunday
+    // switched off in the panel: the next Sunday nothing is sent
+    expect((await call('boss@t.io', 'GET', '/me/whatsapp-links')).json()).toMatchObject({ weekly: true });
+    expect((await call('boss@t.io', 'PUT', '/me/weekly-summary', { enabled: false })).json()).toEqual({ ok: true, enabled: false });
+    expect((await call('boss@t.io', 'PUT', '/me/weekly-summary', { enabled: 'no' })).statusCode).toBe(400);
+    out.length = 0;
+    expect(await mgr.runWeeklySummary(new Date('2026-11-22T07:00:00Z'))).toBe(0);
+    expect(out).toHaveLength(0);
+    await call('boss@t.io', 'PUT', '/me/weekly-summary', { enabled: true });
   });
 });

@@ -7,6 +7,8 @@ import { EMAIL_OF, PHONE_OF } from '../contacts/identity.js';
 import type { Db } from '../db.js';
 
 const idParam = z.object({ id: z.string().uuid() });
+/** the identification answers shown to the team, in this order (other profile keys are not shown) */
+const PROFILE_FIELDS: [string, string][] = [['fullName', 'שם מלא'], ['building', 'בניין'], ['room', 'חדר'], ['faculty', 'פקולטה / יחידה'], ['pi', 'PI / ראש יחידה'], ['status', 'סטטוס']];
 const MAX_GROUP = 20;
 /** an agent sees conversations assigned to them or unassigned; managers see all (same rule as the inbox) */
 const VISIBLE = (t: string) => `($2::boolean OR ${t}.assigned_to IS NULL OR ${t}.assigned_to = $3)`;
@@ -31,6 +33,23 @@ export function peopleRoutes(app: FastifyInstance, db: Db) {
     if (!conv) return isManager(req.user!) && (await db.query('SELECT 1 FROM contacts WHERE id = $1', [contactId])).rowCount === 1;
     return !!(await loadAccessible(db, req.user!, conv.id));
   }
+
+  /**
+   * What the customer told Betty when identifying (name, building, room, faculty, PI, status) and the conversation's language:
+   * shown at the top of the conversation so the officer does not ask again. Same access rule as the conversation itself.
+   */
+  app.get('/conversations/:id/profile', { preHandler: any }, async (req, reply) => {
+    const p = idParam.safeParse(req.params);
+    if (!p.success) return reply.code(400).send({ error: 'bad_request' });
+    if (!(await loadAccessible(db, req.user!, p.data.id))) return reply.code(404).send({ error: 'not_found' });
+    const r = (await db.query(`SELECT ct.profile, c.lang FROM conversations c JOIN contacts ct ON ct.id = c.contact_id WHERE c.id = $1`, [p.data.id])).rows[0] as { profile: Record<string, unknown> | null; lang: string | null } | undefined;
+    const prof = r?.profile ?? {};
+    const fields = PROFILE_FIELDS.flatMap(([key, label]) => {
+      const v = prof[key];
+      return typeof v === 'string' && v.trim() && v.trim().length <= 200 ? [{ key, label, value: v.trim() }] : [];
+    });
+    return { fields, lang: r?.lang === 'en' ? 'en' : 'he' };
+  });
 
   app.get('/conversations/:id/related', { preHandler: any }, async (req, reply) => {
     const p = idParam.safeParse(req.params);

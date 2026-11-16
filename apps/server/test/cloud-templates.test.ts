@@ -90,6 +90,7 @@ describe('official channel: menus as buttons and message templates', () => {
   let mgr: ChannelManager;
   const sent: { url: string; body: Record<string, unknown> }[] = [];
   let failInteractive = false;
+  let outSeq = 0;
   let tplList: unknown[] = [];
   let createdBody: unknown = null;
   const fakeFetch = async (url: string, init?: RequestInit): Promise<Response> => {
@@ -97,7 +98,7 @@ describe('official channel: menus as buttons and message templates', () => {
     if (init?.method === 'POST' && url.endsWith('/messages')) {
       sent.push({ url, body });
       if (failInteractive && body.type === 'interactive') return Response.json({ error: { code: 100, message: 'bad' } }, { status: 400 });
-      return Response.json({ messages: [{ id: `wamid.${sent.length}` }] });
+      return Response.json({ messages: [{ id: `wamid.out.${++outSeq}` }] });   // unique, like Meta's (sent is cleared between steps)
     }
     if (init?.method === 'POST' && url.endsWith('/message_templates')) { createdBody = body; return Response.json({ id: '555', status: 'PENDING' }); }
     if (url.includes('/message_templates')) return Response.json({ data: tplList });
@@ -248,6 +249,7 @@ describe('official channel: menus as buttons and message templates', () => {
     await hook(inbound('wamid.RM4', '972501110005', { type: 'text', text: { body: 'מה שלומך?' } }));
     await new Promise((r) => setTimeout(r, 80));
     expect(texts()).toEqual(['תודה ששאלת, הכול טוב אצלי 😊 במה אפשר לעזור?\n\n(הפנייה שלך כבר אצל הצוות, ונציג יחזור אליך בהקדם.)']);
+    expect((await db.query(`SELECT count(*)::int AS n FROM messages WHERE conversation_id = $1 AND automation = 'waiting_answer'`, [conv])).rows[0].n).toBe(1);   // kept in the conversation too
     // something she cannot answer for sure: silence (the team sees it)
     sent.length = 0;
     await hook(inbound('wamid.RM5', '972501110005', { type: 'text', text: { body: 'החדר שלי 304 והדלת נעולה' } }));

@@ -79,6 +79,7 @@ const PAIRS: [string, string][] = [
   ['☎️ טלפון משרדי: {*}', '☎️ Office phone: {1}'],
   ['💬 ווצאפ: {*}', '💬 WhatsApp: {1}'],
   ['הפרטים של ראש יחידת הבטיחות לא מוגדרים אצלי כרגע. אפשר לכתוב כאן את הפנייה, והיא תועבר לצוות היחידה.', "I don't have the details of the head of the Safety Unit at the moment. You can write your request here and it will be passed to the unit's team."],
+  ['המפגע שדיווחת עליו טופל ✅ תודה שדיווחת, זה עוזר לשמור על כולם בטוחים. אם המפגע עדיין קיים, כתבו כאן ונחזור לטפל בו.', 'The hazard you reported has been handled ✅ Thank you for reporting, it helps keep everyone safe. If the hazard is still there, write here and we will take care of it.'],
   ['{*} (אפשר לכתוב "דלג"):', '{1} (you can write "skip"):'],
   ['{*} (אפשר לכתוב "דלג")', '{1} (you can write "skip")'],
   ['היי {שם}, רצינו לוודא: קיבלת מענה לפנייה? אפשר לענות "כן" או "לא".', 'Hi {שם}, just checking: did you get an answer to your request? You can reply "yes" or "no".'],

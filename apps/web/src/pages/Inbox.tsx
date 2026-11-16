@@ -9,6 +9,7 @@ import { ConversationFormsList, SendFormPanel } from '../components/Conversation
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { PersonPanel } from '../components/PersonPanel';
 import { CaseHistory } from '../components/CaseHistory';
+import { IdentityCard } from '../components/IdentityCard';
 import { botAvatarSrc, botLabel, useBrand } from '../brand';
 import { Icon } from '../components/Icon';
 import { usePoll } from '../hooks';
@@ -417,6 +418,7 @@ export function Inbox({ me }: { me: Me }) {
                   </small>
                 </div>
               </div>
+              <IdentityCard convId={sel.id} refresh={`${bump}-${msgs.length > 0 ? Math.floor(msgs.length / 5) : 0}`} />
 
               <div className="chat-tools">
                 {canAssignOthers && team.length > 0 ? (

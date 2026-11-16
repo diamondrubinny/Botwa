@@ -15,7 +15,16 @@ export function staffLinkRoutes(app: FastifyInstance, db: Db) {
     const links = (await db.query(`SELECT l.id, l.external_id, l.created_at AS "createdAt", l.last_used_at AS "lastUsedAt", ch.label AS "channel"
         FROM staff_links l JOIN channels ch ON ch.id = l.channel_id WHERE l.user_id = $1 ORDER BY l.created_at`, [req.user!.id])).rows;
     const channels = (await db.query(`SELECT label FROM channels WHERE type IN ('whatsapp', 'whatsapp_cloud', 'telegram') ORDER BY created_at`)).rows.map((r) => r.label as string);
-    return { allowed, channels, links: links.map(({ external_id, ...l }) => ({ ...l, account: masked(external_id) })) };
+    const weekly = (await db.query('SELECT weekly_summary FROM users WHERE id = $1', [req.user!.id])).rows[0]?.weekly_summary !== false;
+    return { allowed, channels, weekly, links: links.map(({ external_id, ...l }) => ({ ...l, account: masked(external_id) })) };
+  });
+  /** the weekly safety summary on WhatsApp (Sunday morning): on by default, each user switches it off for themselves */
+  app.put('/me/weekly-summary', { preHandler: any }, async (req, reply) => {
+    const b = z.object({ enabled: z.boolean() }).strict().safeParse(req.body);
+    if (!b.success) return reply.code(400).send({ error: 'bad_request' });
+    await db.query('UPDATE users SET weekly_summary = $2 WHERE id = $1', [req.user!.id, b.data.enabled]);
+    await audit(db, { actorId: req.user!.id, action: 'staff.weekly_summary_setting', ip: req.ip, meta: { enabled: b.data.enabled } });
+    return { ok: true, enabled: b.data.enabled };
   });
   app.post('/me/whatsapp-links/code', { preHandler: any, config: { rateLimit: { max: 5, timeWindow: '10 minutes' } } }, async (req, reply) => {
     if (!(await mayAsk(db, req.user!.id))) return reply.code(403).send({ error: 'forbidden' });

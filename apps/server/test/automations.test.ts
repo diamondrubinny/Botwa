@@ -172,6 +172,30 @@ describe('conversation automations', () => {
     expect((await call(`/conversations/${a2.id}/status`, { status: 'closed' })).json()).toEqual({ ok: true });
     expect(texts).toHaveLength(1);
     expect(await status(a2.id)).toBe('closed');
+    // a hazard report closed by a person: the reporter hears it was handled, before the closing message; once per inquiry
+    const hz = await conv('נועם', { inAgo: 5 });
+    await db.query(`INSERT INTO tags (name) VALUES ('מפגע') ON CONFLICT DO NOTHING`);
+    await db.query(`INSERT INTO conversation_tags (conversation_id, tag_id) SELECT $1, id FROM tags WHERE name = 'מפגע'`, [hz.id]);
+    texts.length = 0;
+    expect((await call(`/conversations/${hz.id}/status`, { status: 'closed', closingMessage: true })).json()).toEqual({ ok: true, closingSent: true, hazardTold: true });
+    expect(texts[0]).toContain('המפגע שדיווחת עליו טופל ✅');
+    expect(await autoKinds(hz.id)).toEqual(['hazard_done', 'closing']);
+    await call(`/conversations/${hz.id}/status`, { status: 'open' });
+    texts.length = 0;
+    expect((await call(`/conversations/${hz.id}/status`, { status: 'closed' })).json()).toEqual({ ok: true });   // same inquiry: not again
+    expect(texts).toHaveLength(0);
+    // switched off: nothing
+    await setA({ ...DEFAULT_AUTOMATIONS, hazardDone: { enabled: false, text: 'x' } });
+    const hz2 = await conv('דן', { inAgo: 5 });
+    await db.query(`INSERT INTO conversation_tags (conversation_id, tag_id) SELECT $1, id FROM tags WHERE name = 'מפגע'`, [hz2.id]);
+    expect((await call(`/conversations/${hz2.id}/status`, { status: 'closed' })).json()).toEqual({ ok: true });
+    // the identification answers at the top of the conversation: only the known fields, never other profile keys
+    await db.query(`UPDATE contacts SET profile = $2 WHERE id = (SELECT contact_id FROM conversations WHERE id = $1)`,
+      [hz.id, JSON.stringify({ fullName: 'נועם לוי', building: 'מאייר', room: '', pi: 'פרופ׳ כהן', secretNote: 'x', status: 'סטודנט/ית' })]);
+    expect((await call(`/conversations/${hz.id}/profile`)).json()).toEqual({ lang: 'he', fields: [
+      { key: 'fullName', label: 'שם מלא', value: 'נועם לוי' }, { key: 'building', label: 'בניין', value: 'מאייר' },
+      { key: 'pi', label: 'PI / ראש יחידה', value: 'פרופ׳ כהן' }, { key: 'status', label: 'סטטוס', value: 'סטודנט/ית' }] });
+    expect((await call(`/conversations/00000000-0000-4000-8000-000000000000/profile`)).statusCode).toBe(404);
   });
 
   it('every inquiry is a case: opened by the customer, closed by a person or an automation, reopened as a new case', async () => {

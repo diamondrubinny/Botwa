@@ -11,7 +11,7 @@ import { loadSending, PolicyRejected, SendError } from '../channels/sender.js';
 import type { Db } from '../db.js';
 import { MediaService } from '../media/store.js';
 import { isCommentContact } from '../channels/meta-messaging.js';
-import { askFeedback, sendClosingMessage } from '../automations.js';
+import { askFeedback, hazardDone, sendClosingMessage } from '../automations.js';
 import { isSingleEmoji } from '../bot.js';
 
 const idParam = z.object({ id: z.string().uuid() });
@@ -237,6 +237,8 @@ export function conversationRoutes(app: FastifyInstance, db: Db, mgr: ChannelMan
     if (!p.success || !b.success) return reply.code(400).send({ error: 'bad_request' });
     if (!(await loadAccessible(db, req.user!, p.data.id))) return reply.code(404).send({ error: 'not_found' });
     // the closing message goes out before the status changes (a closed conversation is still the same chat for the customer)
+    // a hazard report closed by a person: the reporter hears it was handled (before the closing message and the feedback question)
+    const hazardTold = b.data.status === 'closed' ? await hazardDone(db, mgr, p.data.id).catch(() => false) : false;
     const closingSent = b.data.status === 'closed' && b.data.closingMessage ? await sendClosingMessage(db, mgr, p.data.id) : undefined;
     await db.query(
       `UPDATE conversations SET status = $2, close_kind = CASE WHEN $2 = 'closed' THEN 'staff' ELSE close_kind END, closed_by = CASE WHEN $2 = 'closed' THEN $3::uuid ELSE closed_by END,
@@ -245,7 +247,7 @@ export function conversationRoutes(app: FastifyInstance, db: Db, mgr: ChannelMan
     );
     if (b.data.status === 'closed') await askFeedback(db, mgr, p.data.id, 'staff').catch(() => false);
     mgr.hookConversation('conversation.status_changed', p.data.id);
-    return { ok: true, ...(closingSent !== undefined ? { closingSent } : {}) };
+    return { ok: true, ...(closingSent !== undefined ? { closingSent } : {}), ...(hazardTold ? { hazardTold } : {}) };
   });
 
   // Snooze: hide until a time (minutes from now, max 30 days) or wake now with minutes = 0. A new customer message wakes it automatically.

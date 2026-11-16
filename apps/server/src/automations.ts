@@ -14,6 +14,8 @@ const text = z.string().trim().max(1000);
 const mins = z.number().int().min(1).max(10080);   // up to a week
 
 /** The conversation automations. Each is off until switched on. Times are minutes. */
+export const HAZARD_DONE_TEXT = 'המפגע שדיווחת עליו טופל ✅ תודה שדיווחת, זה עוזר לשמור על כולם בטוחים. אם המפגע עדיין קיים, כתבו כאן ונחזור לטפל בו.';
+
 export const automationsSchema = z.object({
   idle: z.object({
     enabled: z.boolean(),
@@ -49,6 +51,11 @@ export const automationsSchema = z.object({
     enabled: z.boolean(),
     text: text,
   }).default({ enabled: true, text: 'סגרנו את הפנייה לבקשתך. אם יעלה משהו נוסף, אפשר לכתוב לנו כאן בכל עת והיא תיפתח מחדש.' }),
+  /** when a person closes a hazard report (tag "מפגע"), the reporter hears that it was handled, once per inquiry */
+  hazardDone: z.object({
+    enabled: z.boolean(),
+    text: text.min(1),
+  }).default({ enabled: true, text: HAZARD_DONE_TEXT }),
   /** when a person (an officer or an agent) takes the inquiry, they introduce themselves to the customer once */
   introduce: z.object({
     enabled: z.boolean(),
@@ -67,6 +74,7 @@ export const DEFAULT_AUTOMATIONS: Automations = {
   closing: { defaultOn: false, text: 'תודה שפנית אלינו, {שם}! אם יעלה משהו נוסף, אנחנו כאן.' },
   feedback: { enabled: false, question: 'נשמח לשמוע איך היה השירות: השיבו במספר מ-1 עד 5 (5 = מצוין).', thanks: 'תודה רבה על המשוב!', afterAuto: false },
   customerClose: { enabled: true, text: 'סגרנו את הפנייה לבקשתך. אם יעלה משהו נוסף, אפשר לכתוב לנו כאן בכל עת והיא תיפתח מחדש.' },
+  hazardDone: { enabled: true, text: HAZARD_DONE_TEXT },
   introduce: { enabled: true, text: 'שלום {שם}, כאן {נציג}, {תפקיד}. אני אטפל בפנייתך מעכשיו ואחזור אליך בהקדם.' },
 };
 
@@ -96,7 +104,7 @@ const NOT_COMMENT = `ct.external_id !~ '@(fb|ig)comment$'`;
  * Send one automatic message to a conversation if the rules allow it (not blocked, not opted out, inside the platform's
  * reply window). Returns false when it was not sent; the caller decides what that means (e.g. close anyway).
  */
-export async function sendAutomatic(db: Db, out: AutoSender, conv: ConvRow, body: string, kind: 'idle_reminder' | 'idle_close' | 'holding' | 'closing' | 'feedback' | 'feedback_thanks' | 'customer_close' | 'introduce' | 'comfort_follow'): Promise<boolean> {
+export async function sendAutomatic(db: Db, out: AutoSender, conv: ConvRow, body: string, kind: 'idle_reminder' | 'idle_close' | 'holding' | 'closing' | 'feedback' | 'feedback_thanks' | 'customer_close' | 'introduce' | 'comfort_follow' | 'hazard_done'): Promise<boolean> {
   if (!body.trim() || /@(fb|ig)comment$/.test(conv.external_id)) return false;
   if (await sendBlock(db, conv, (await loadSending(db)).replyWindowHours)) return false;
   const hours = await loadBusinessHours(db);
@@ -110,6 +118,22 @@ export async function sendAutomatic(db: Db, out: AutoSender, conv: ConvRow, body
     out.notifyMessage(conv.channel_id, conv.id, ins.rows[0].id);
     return true;
   } catch { return false; }
+}
+
+/**
+ * A person closed a hazard report: the reporter hears it was handled (once per inquiry, before the feedback question).
+ * Not for conversations without the "מפגע" tag, comment threads, blocked or opted-out customers, or outside the reply window.
+ */
+export async function hazardDone(db: Db, out: AutoSender, convId: string): Promise<boolean> {
+  const a = (await loadAutomations(db)).hazardDone;
+  if (!a.enabled) return false;
+  const hz = await db.query(`SELECT 1 FROM conversation_tags x JOIN tags t ON t.id = x.tag_id WHERE x.conversation_id = $1 AND lower(t.name) = 'מפגע'`, [convId]);
+  if (!hz.rowCount) return false;
+  const told = await db.query(`SELECT 1 FROM messages WHERE conversation_id = $1 AND automation = 'hazard_done'
+                                AND created_at >= coalesce((SELECT max(opened_at) FROM cases WHERE conversation_id = $1), '-infinity')`, [convId]);
+  if (told.rowCount) return false;
+  const conv = (await db.query(`${CONV} WHERE c.id = $1 AND ${NOT_COMMENT}`, [convId])).rows[0] as ConvRow | undefined;
+  return !!conv && sendAutomatic(db, out, conv, a.text, 'hazard_done');
 }
 
 async function close(db: Db, out: AutoSender, convId: string, note: string): Promise<void> {

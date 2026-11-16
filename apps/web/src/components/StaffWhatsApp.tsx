@@ -3,7 +3,7 @@ import { api, ApiError } from '../api';
 import { ConfirmDialog } from './ConfirmDialog';
 import { errText } from '../strings';
 
-interface Links { allowed: boolean; channels: string[]; links: { id: string; account: string; channel: string; createdAt: string; lastUsedAt: string | null }[] }
+interface Links { allowed: boolean; channels: string[]; weekly?: boolean; links: { id: string; account: string; channel: string; createdAt: string; lastUsedAt: string | null }[] }
 
 /** Managers ask Betty on WhatsApp about the inquiries: link a WhatsApp account with a one-time code, see and remove links. */
 export function StaffWhatsApp() {
@@ -40,6 +40,13 @@ export function StaffWhatsApp() {
             <tr key={l.id}><th scope="row" dir="ltr">{l.account}</th><td>{l.channel}</td><td>{l.lastUsedAt ? new Date(l.lastUsedAt).toLocaleString('he-IL') : 'עוד לא'}</td>
               <td><button type="button" className="danger" onClick={() => setDel(l.id)}>ניתוק<span className="sr-only"> {l.account}</span></button></td></tr>))}</tbody>
         </table>
+      )}
+      {d.allowed && d.links.length > 0 && (
+        <div className="field">
+          <label><input type="checkbox" role="switch" style={{ width: 'auto', minHeight: 'auto' }} aria-describedby="sw-weekly-h" checked={d.weekly !== false}
+            onChange={async (e) => { const enabled = e.target.checked; setMsg(null); try { await api('PUT', '/me/weekly-summary', { enabled }); setD({ ...d, weekly: enabled }); setMsg({ ok: true, text: enabled ? 'הסיכום השבועי הופעל.' : 'הסיכום השבועי כובה.' }); } catch (err) { fail(err); } }} /> סיכום בטיחות שבועי בווצאפ</label>
+          <p className="hint" id="sw-weekly-h">בכל יום ראשון ב-08:40 בטי שולחת לכם סיכום של השבוע: מצבי חירום, דיווחי מפגע, לקוחות לחוצים וזמני מענה. בלי שמות ובלי תוכן הודעות.</p>
+        </div>
       )}
       {!d.allowed && <p className="hint">לחשבון שלך אין כרגע הרשאה (צריך גישה לכל השיחות ולדוחות). הקישורים הקיימים לא יענו.</p>}
       {msg && <p role="status" className={msg.ok ? 'ok' : 'error'}>{msg.text}</p>}

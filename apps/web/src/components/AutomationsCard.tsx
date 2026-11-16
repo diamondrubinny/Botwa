@@ -10,9 +10,12 @@ interface Automations {
   feedback: { enabled: boolean; question: string; thanks: string; afterAuto: boolean };
   customerClose: { enabled: boolean; text: string };
   introduce: { enabled: boolean; text: string };
+  hazardDone?: { enabled: boolean; text: string };
 }
 
 /** A text box with "choose a ready phrasing" for its situation. */
+const HAZARD_DONE = 'המפגע שדיווחת עליו טופל ✅ תודה שדיווחת, זה עוזר לשמור על כולם בטוחים. אם המפגע עדיין קיים, כתבו כאן ונחזור לטפל בו.';
+
 function PhraseField({ id, label, value, onChange, situation, disabled, required }: { id: string; label: string; value: string; onChange: (v: string) => void; situation: Situation; disabled: boolean; required?: boolean }) {
   const lib = PHRASES[situation];
   return (
@@ -109,6 +112,14 @@ export function AutomationsCard({ canEdit }: { canEdit: boolean }) {
         <label><input type="checkbox" role="switch" checked={a.customerClose?.enabled ?? true} disabled={off} onChange={(e) => set('customerClose', { enabled: e.target.checked })} /> לסגור את הפנייה כשהלקוח כותב שהעניין הסתדר או מבקש לסגור</label>
         <p className="hint">למשל "הסתדרתי", "הסתדר, תודה", "הבעיה נפתרה", "תסגרו את הקריאה", "אפשר לסגור". הודעה עם שאלה, "עדיין", "אבל" או "אל תסגרו" לא סוגרת. הלקוח מקבל אישור, ואם המשוב פעיל הוא גם יתבקש לדרג. הודעה חדשה ממנו פותחת את הפנייה מחדש. בהיסטוריה הפנייה תסומן "נסגרה לבקשת הלקוח".</p>
         <PhraseField id="au-cc" label="הודעת אישור ללקוח (ריק = לסגור בלי הודעה)" value={a.customerClose?.text ?? ''} onChange={(v) => set('customerClose', { text: v })} situation="customerClose" disabled={off || !(a.customerClose?.enabled ?? true)} />
+      </fieldset>
+
+      <fieldset>
+        <legend>סגירת מעגל בדיווח מפגע</legend>
+        <label><input type="checkbox" role="switch" checked={a.hazardDone?.enabled ?? true} disabled={off} onChange={(e) => set('hazardDone', { enabled: e.target.checked, text: a.hazardDone?.text ?? HAZARD_DONE })} /> כשאיש צוות סוגר דיווח מפגע, לעדכן את המדווח שהמפגע טופל</label>
+        <p className="hint" id="au-hd-h">לשיחות עם התגית "מפגע", פעם אחת בכל פנייה, לפני הודעת הסגירה ושאלת המשוב. אם המדווח כותב שהמפגע עדיין קיים, הפנייה נפתחת מחדש ועוברת לממונה האחראי.</p>
+        <div className="field"><label htmlFor="au-hd">ההודעה למדווח</label>
+          <textarea id="au-hd" rows={2} maxLength={1000} aria-describedby="au-hd-h" value={a.hazardDone?.text ?? HAZARD_DONE} disabled={off || !(a.hazardDone?.enabled ?? true)} required onChange={(e) => set('hazardDone', { enabled: a.hazardDone?.enabled ?? true, text: e.target.value })} /></div>
       </fieldset>
 
       {canEdit && <button className="primary" type="submit">שמירת האוטומציות</button>}

@@ -22,6 +22,7 @@ import { askText, runFlow, type Effect, type FlowContext, type FlowInput, type F
 import { resolveArea } from '../safety/areas.js';
 import { contactText, officerNote, officersForTopic, pickOfficer } from '../safety/officers.js';
 import { assignResponsible } from '../safety/responsible.js';
+import { weeklySummaryTargets } from '../staff/weekly.js';
 import { forwardText, type ForwardRule } from './forward.js';
 import { listMenuBody, parseNumberedMenu, type CloudTemplate, type TemplateSend } from './cloud-messages.js';
 import { loadFlow } from '../flow/store.js';
@@ -1296,6 +1297,17 @@ export class ChannelManager {
       await this.db.query('UPDATE inspections SET last_reminded_at = now() WHERE id = ANY($1::uuid[])', [list.map((i) => i.id)]);
     }
     return due.length;
+  }
+
+  /** Sunday morning: the week's safety summary on WhatsApp to the linked managers (once a week). Returns how many got it. */
+  async runWeeklySummary(now = new Date()): Promise<number> {
+    const tz = await loadBusinessHours(this.db).then((h) => h.timezone).catch(() => 'Asia/Jerusalem');
+    const w = await weeklySummaryTargets(this.db, now, tz || 'Asia/Jerusalem');
+    if (!w) return 0;
+    let n = 0;
+    for (const t of w.to) if (await this.sendText(t.channelId, t.externalId, w.text, { background: true }).then(() => true).catch(() => false)) n++;
+    if (w.to.length) await audit(this.db, { action: 'staff.weekly_summary', meta: { sent: n, of: w.to.length } }).catch(() => undefined);
+    return n;
   }
 
   alertTeam(text: string, extra: Record<string, unknown> = {}): void { if (this.alertBudget()) void sendAlert(this.cfg, text, extra); }
