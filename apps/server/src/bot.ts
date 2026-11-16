@@ -10,8 +10,8 @@ export function isSingleEmoji(v: string): boolean {
   return seg.length === 1 && /\p{Extended_Pictographic}/u.test(v);
 }
 const emoji = z.string().refine(isSingleEmoji, 'emoji');
-const GREET_HEAD = new Set(['שלום', 'היי', 'הי', 'הלו', 'אהלן', 'אהלא', 'בוקר', 'ערב', 'צהריים', 'hello', 'hi', 'hey']);
-const GREET_TAIL = new Set(['טוב', 'טובים', 'רב', 'וברכה', 'לכולם', 'לך', 'לכם', 'אליכם', 'חברים', 'בוט', 'שוב', 'אחי', 'אחות']);
+const GREET_HEAD = new Set(['שלום', 'היי', 'הי', 'הלו', 'אהלן', 'אהלא', 'בוקר', 'ערב', 'צהריים', 'hello', 'hi', 'hey', 'morning', 'afternoon', 'evening']);
+const GREET_TAIL = new Set(['טוב', 'טובים', 'רב', 'וברכה', 'לכולם', 'לך', 'לכם', 'אליכם', 'חברים', 'בוט', 'שוב', 'אחי', 'אחות', 'good', 'everyone', 'there']);
 /** A message that is only a greeting ("שלום", "היי שוב", "בוקר טוב"): at most four words, all greeting vocabulary. */
 export function isGreeting(text: string | null): boolean {
   if (!text) return false;
@@ -120,7 +120,7 @@ export type BotConfig = z.infer<typeof botSchema>;
 export const DEFAULT_BOT: BotConfig = {
   enabled: false,
   mode: 'menu',
-  welcome: 'שלום {שם פרטי}! כאן {בוט}. במה אפשר לעזור? השיבו במספר:',
+  welcome: '{ברכה} {שם פרטי}! כאן {בוט}. במה אפשר לעזור? השיבו במספר:',
   items: [
     { title: 'שעות פעילות', answer: 'אנחנו פעילים בימים א׳–ה׳ בין 9:00 ל-17:00.' },
     { title: 'פרטי יצירת קשר', answer: 'אפשר ליצור איתנו קשר גם בטלפון או באימייל: [להשלים].' },

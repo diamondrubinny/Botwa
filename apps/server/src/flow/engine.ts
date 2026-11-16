@@ -97,7 +97,7 @@ export const NAV_HINT = 'לחזרה לשלב הקודם כתבו "אחורה". �
 const SKIP_WORDS = new Set(['דלג', 'דלגי', 'skip', 'לא', 'אין']);
 const YES = new Set(['כן', 'yes', 'y', '1', 'עוד']);
 const NO = new Set(['לא', 'no', 'n', '2', 'די', 'זהו', 'סיימתי']);
-const GREETINGS = new Set(['שלום', 'היי', 'הי', 'הלו', 'אהלן', 'בוקר טוב', 'ערב טוב', 'צהריים טובים', 'תודה', 'תודה רבה', 'ok', 'אוקיי', 'אוקי', 'hello', 'hi']);
+const GREETINGS = new Set(['שלום', 'היי', 'הי', 'הלו', 'אהלן', 'בוקר טוב', 'ערב טוב', 'צהריים טובים', 'good morning', 'good afternoon', 'good evening', 'תודה', 'תודה רבה', 'ok', 'אוקיי', 'אוקי', 'hello', 'hi']);
 const LETTERS = ['א', 'ב', 'ג'];
 /** added under a knowledge-base answer instead of repeating the menu or the pending question */
 export const ANSWER_HINT = 'לשאלה נוספת פשוט כתבו אותה. לתפריט כתבו "תפריט", ולשלב הקודם "אחורה".';

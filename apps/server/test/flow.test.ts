@@ -458,7 +458,7 @@ describe('the safety unit template', () => {
     for (const part of ['שם מלא: דנה לוי', 'פקולטה: הנדסה', 'שם ה-PI: פרופ׳ כהן', 'סטטוס: משתלם', 'מיקום: בניין 3 חדר 12', 'קבצים שנשלחו: 1']) expect(note).toContain(part);
 
     const back = await run(null, 'שלום', { profile: { fullName: 'דנה לוי', faculty: 'הנדסה', pi: 'פרופ׳ כהן', status: 'משתלם' } });
-    expect(back.replies[0]).toBe('היי {שם פרטי}, טוב לראות אותך שוב! כאן {בוט} מיחידת הבטיחות 😊'); expect(back.replies[1]).toContain('ברצוני לקבל מידע / לדווח על:');
+    expect(back.replies[0]).toBe('{ברכה} {שם פרטי}, טוב לראות אותך שוב! כאן {בוט} מיחידת הבטיחות 😊'); expect(back.replies[1]).toContain('ברצוני לקבל מידע / לדווח על:');
   });
 
   it('forms are links, chemicals take up to ten items and an optional SDS, the question goes to the officer, hazards to the area officer', async () => {
@@ -613,7 +613,7 @@ describe('safety flow live: areas, template endpoint, placeholders, profile, fil
     const status = (await say('wa1', 'פרופ׳ לוי')).join('\n');
     expect(status).toContain('מה הסטטוס שלך?');
     expect(status).not.toContain('נציג אנושי');                                               // an identification answer, not "a person"
-    expect(first.join(' ')).toContain('שלום, כאן הבוט מיחידת הבטיחות');                     // no persona name yet: "the bot"
+    expect(first.join(' ')).toMatch(/^(בוקר טוב|צהריים טובים|ערב טוב|לילה טוב), כאן הבוט מיחידת הבטיחות/);                     // no persona name yet: "the bot"
     const topics = await say('wa1', '1');                                                    // status: manager
     expect(topics[0]).toBe('תודה רונית! שמרתי את הפרטים, כך שבפעם הבאה לא נשאל אותם שוב.');  // thanked by first name
     expect(topics[1]).toContain('ברצוני לקבל מידע / לדווח על:');
@@ -646,10 +646,10 @@ describe('safety flow live: areas, template endpoint, placeholders, profile, fil
     expect(await say('wa99', 'יש עשן')).toEqual([]);                              // not twice in 10 minutes; the bot stays out
     // "היי בטי" is a greeting: the conversation opens as usual, no knowledge-base search on the bot's name
     const hi = await say('wa88', 'היי בטי');
-    expect(hi.join(' ')).toContain('שלום, כאן בטי מיחידת הבטיחות');
+    expect(hi.join(' ')).toMatch(/(בוקר טוב|צהריים טובים|ערב טוב|לילה טוב), כאן בטי מיחידת הבטיחות/);
     expect(hi.join(' ')).not.toContain('לא מצאתי');
     const again = await say('wa1', 'שלום שוב');
-    expect(again[0]).toBe('היי רונית, טוב לראות אותך שוב! כאן בטי מיחידת הבטיחות 😊');          // remembered by first name, the bot by its name
+    expect(again[0]).toMatch(/^(בוקר טוב|צהריים טובים|ערב טוב|לילה טוב) רונית, טוב לראות אותך שוב! כאן בטי מיחידת הבטיחות 😊$/);          // remembered by first name, the bot by its name
     expect(again[1]).toContain('ברצוני לקבל מידע / לדווח על:');                                 // identification is not asked again
     await say('wa1', '5');                                                                    // chemicals
     await say('wa1', 'אצטון'); await say('wa1', '2');                                          // one item, no more

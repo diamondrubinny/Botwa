@@ -52,7 +52,7 @@ import { factReply } from '../safety/facts.js';
 import { hoursSummary } from '../canned.js';
 import { staffMessage } from '../staff/assistant.js';
 import { detect, sanitizeFileName } from '../media/validate.js';
-import { renderBotText, cleanName, identityReply, smallTalkReply, withoutBotName, type BotTextContext } from '../bot-text.js';
+import { renderBotText, cleanName, dayPart, farewellReply, greetingFor, identityReply, isFarewell, smallTalkReply, withoutBotName, type BotTextContext } from '../bot-text.js';
 import { isCommentContact, META_CREDS_KEY, MetaMessagingAdapter, type CommentReplyMode, type MetaCreds } from './meta-messaging.js';
 import { WebChatAdapter } from './webchat.js';
 import { WhatsAppAdapter } from './whatsapp.js';
@@ -883,7 +883,13 @@ export class ChannelManager {
     ]);
     // in English, the bot's name as translated ("בטי" → "Betty")
     const persona = persona0 && lang === 'en' ? { ...persona0, name: (await dictionary(this.db)).exact.get(persona0.name?.trim() ?? '') ?? persona0.name } : persona0;
-    return { botName: persona?.name, fullName: cleanName(nameHint) || cleanName(row?.full_name) || cleanName(row?.display_name) };
+    return { botName: persona?.name, fullName: cleanName(nameHint) || cleanName(row?.full_name) || cleanName(row?.display_name), greeting: greetingFor(await this.dayPartNow(), lang) };
+  }
+
+  /** Morning, noon, evening or night at the business's own time zone (its business hours setting; Israel by default). */
+  async dayPartNow(now = new Date()): Promise<ReturnType<typeof dayPart>> {
+    const tz = await loadBusinessHours(this.db).then((h) => h.timezone).catch(() => 'Asia/Jerusalem');
+    return dayPart(now, tz || 'Asia/Jerusalem');
   }
 
   /** The bot's replies of one step; when the last is its menu and the channel can show buttons or a list, send the menu that way (the text is kept in the conversation either way). */
@@ -1050,6 +1056,12 @@ export class ChannelManager {
       const resume = node?.type === 'question' ? `\n\nנמשיך: ${node.text}` : opening ? '' : flow || bot.mode === 'menu' ? `\n\n${MENU_HINT}` : '';
       await this.botSay(channelId, convId, ext, `${own}${resume}`);
       if (opening) await this.runFlowStep(channelId, convId, ext, bot, flow!, { text: null, media: false }, rx);
+      return;
+    }
+    // "לילה טוב" / "יום טוב" / "good night": a goodbye that fits the hour; never an answer to the menu, never a hand-over
+    // (only once Betty has spoken: "שבת שלום" / "לילה טוב" as the very first message is a hello, and the welcome answers it)
+    if (text && isFarewell(text) && (await this.db.query(`SELECT 1 FROM messages WHERE conversation_id = $1 AND direction = 'out' LIMIT 1`, [convId])).rowCount) {
+      await this.botSay(channelId, convId, ext, farewellReply(text, await this.dayPartNow()));
       return;
     }
     // "תודה" / "thank you" (nothing else in it): a warm word back, never an answer to the menu or the flow's question (it is not

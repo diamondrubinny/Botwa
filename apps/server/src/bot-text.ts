@@ -6,9 +6,37 @@ export const BOT_TEXT_VARIABLES = [
   ['{בוט}', 'שם הבוט (למשל בטי). בלי שם: "הבוט"'],
   ['{שם פרטי}', 'השם הפרטי של הלקוח, אם הוא כבר מוכר'],
   ['{שם}', 'השם המלא של הלקוח, אם הוא כבר מוכר'],
+  ['{ברכה}', 'ברכה לפי השעה: בוקר טוב, צהריים טובים, ערב טוב או לילה טוב'],
 ] as const;
 
-export interface BotTextContext { botName?: string | null; fullName?: string | null }
+export interface BotTextContext { botName?: string | null; fullName?: string | null; /** the greeting of this hour ("בוקר טוב"); default "שלום" */ greeting?: string | null }
+
+/** Part of the day at the business's time zone: morning 05–12, noon 12–17, evening 17–22, night 22–05. */
+export type DayPart = 'morning' | 'noon' | 'evening' | 'night';
+export function dayPart(now: Date = new Date(), timeZone = 'Asia/Jerusalem'): DayPart {
+  let h: number;
+  try { h = Number(new Intl.DateTimeFormat('en-GB', { timeZone, hour: '2-digit', hourCycle: 'h23' }).format(now)); } catch { h = now.getHours(); }
+  return h >= 5 && h < 12 ? 'morning' : h >= 12 && h < 17 ? 'noon' : h >= 17 && h < 22 ? 'evening' : 'night';
+}
+const GREETING = {
+  he: { morning: 'בוקר טוב', noon: 'צהריים טובים', evening: 'ערב טוב', night: 'לילה טוב' },
+  en: { morning: 'Good morning', noon: 'Good afternoon', evening: 'Good evening', night: 'Hello' },
+} as const;
+/** "בוקר טוב" / "Good evening"…: what to say at this hour. */
+export const greetingFor = (part: DayPart, lang: 'he' | 'en' = 'he'): string => GREETING[lang][part];
+
+/** "לילה טוב", "יום טוב", "תודה ולילה טוב", "good night": the customer is saying goodbye (not a new request, nothing to choose). */
+const BYE = /^((תודה|תודה רבה|thanks|thank you)\s*,?\s*(ו|and )?\s*)?(לילה טוב|ליל מנוחה|יום טוב|המשך יום טוב|יום נעים|המשך יום נעים|ערב טוב ונעים|ערב נעים|המשך ערב נעים|סוף שבוע נעים|שבת שלום|good ?night|nighty night|have a (good|nice|great) (day|night|evening|weekend))(\s+(לך|לכם|גם לך|גם לכם|ותודה|תודה|ותודה רבה|תודה רבה|and thanks|thanks|to you|too|bye|ביי))*$/;
+export function isFarewell(text: string | null | undefined): boolean {
+  const t = (text ?? '').toLowerCase().replace(/[!.,״"׳:;()\u200e\u200f\u{1F300}-\u{1FAFF}\u2600-\u27BF\u{FE0F}]/gu, ' ').replace(/\s+/g, ' ').trim();
+  return !!t && t.length <= 60 && !/[?؟]/.test(text ?? '') && BYE.test(t);
+}
+/** Betty's goodbye, fitting the hour (a "לילה טוב" at noon gets "המשך יום נעים"; "שבת שלום" is answered in kind). */
+export function farewellReply(text: string, part: DayPart): string {
+  if (/שבת שלום/.test(text)) return 'שבת שלום 🕯️ אם יעלה משהו, אני כאן.';
+  if (/סוף שבוע/.test(text) || /weekend/i.test(text)) return 'סוף שבוע נעים ☀️ אם יעלה משהו, אני כאן.';
+  return part === 'night' ? 'לילה טוב 🌙 אם יעלה משהו, אני כאן.' : part === 'evening' ? 'ערב נעים 🌆 אם יעלה משהו, אני כאן.' : 'המשך יום נעים ☀️ אם יעלה משהו, אני כאן.';
+}
 
 /** A plausible person's name: letters (any script), spaces, apostrophes, hyphens and dots only, 2–60 characters. */
 const NAME = /^[\p{L}][\p{L}\p{M}'’״׳.\- ]{1,59}$/u;
@@ -35,6 +63,7 @@ export function renderBotText(text: string, c: BotTextContext): string {
     'בוט': (c.botName ?? '').replace(/[\r\n]+/g, ' ').trim() || 'הבוט', 'bot': (c.botName ?? '').trim() || 'הבוט',
     'שם פרטי': firstName(full), 'first name': firstName(full),
     'שם': full, 'name': full,
+    'ברכה': (c.greeting ?? '').trim() || 'שלום', 'greeting': (c.greeting ?? '').trim() || 'Hello',
   };
   let empty = false;
   const out = text.replace(/\{([^{}\n]{1,20})\}/g, (m, k: string) => { if (!Object.hasOwn(vals, k)) return m; if (!vals[k]) empty = true; return vals[k]!; });
@@ -80,7 +109,7 @@ const HERE = /^(את|אתה|עדיין|את עדיין|אתה עדיין) (כא�
 const HOW_EN = /^(hi |hello |hey )?(how are you( doing| today)?|how('?s| is) it going|how are things|what'?s up|how do you do)$/;
 const HERE_EN = /^(hi |hello |hey )?(are you (there|here|still there|still here|online|with me|awake|listening)|(is )?(any ?one|any ?body|someone|somebody) (there|here)|you there|still there)$/;
 export function smallTalkReply(text: string | null | undefined, botName?: string | null): string | null {
-  const t = (text ?? '').toLowerCase().replace(/[?!.,״"׳:;()\u200e\u200f\u{1F300}-\u{1FAFF}\u2600-\u27BF]/gu, ' ').replace(/^(היי|הי|שלום|אהלן|בוקר טוב|ערב טוב|צהריים טובים|hi|hello|hey)\s+/, '').replace(/\s+/g, ' ').trim();
+  const t = (text ?? '').toLowerCase().replace(/[?!.,״"׳:;()\u200e\u200f\u{1F300}-\u{1FAFF}\u2600-\u27BF]/gu, ' ').replace(/^(היי|הי|שלום|אהלן|בוקר טוב|ערב טוב|צהריים טובים|לילה טוב|hi|hello|hey|good (morning|afternoon|evening))\s+/, '').replace(/\s+/g, ' ').trim();
   if (!t) return /^\s*[?？]+\s*$/.test(text ?? '') ? 'כן, אני כאן איתך 😊' : null;   // a lone "?" (or "בטי?"): are you there?
   if (HOW.test(t) || HOW_EN.test(t)) return 'תודה ששאלת, הכול טוב אצלי 😊 במה אפשר לעזור?';
   if (HERE_EN.test(t)) return 'כן, אני כאן איתך 😊';

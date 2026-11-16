@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { cleanName, firstName, identityReply, renderBotText, smallTalkReply, withoutBotName } from '../src/bot-text.js';
+import { cleanName, dayPart, farewellReply, firstName, greetingFor, identityReply, isFarewell, renderBotText, smallTalkReply, withoutBotName } from '../src/bot-text.js';
 import { isGreeting } from '../src/bot.js';
 import { buildSafetyFlow } from '../src/flow/safetyTemplate.js';
 import { flowSchema, validateFlow } from '../src/flow/schema.js';
@@ -33,7 +33,7 @@ describe('bot text variables', () => {
     expect(by.get('start')).toMatchObject({ yes: 'welcome_back' });
     expect(by.get('welcome_back')).toMatchObject({ next: 'topics' });
     expect(by.get('remember')).toMatchObject({ next: 'id_saved' });
-    expect((by.get('id_intro') as { text: string }).text).toMatch(/^שלום, כאן \{בוט\} מיחידת הבטיחות/);
+    expect((by.get('id_intro') as { text: string }).text).toMatch(/^\{ברכה\}, כאן \{בוט\} מיחידת הבטיחות/);
   });
 });
 
@@ -65,5 +65,34 @@ describe('the bot\'s own name and small talk', () => {
   it('answers small talk kindly; leaves real questions alone', () => {
     for (const q of ['מה שלומך', 'מה שלומך?', 'היי, מה נשמע?', 'מה קורה איתך', 'איך את?', 'מה העניינים 😊']) expect(smallTalkReply(q), q).toContain('הכול טוב אצלי');
     for (const q of ['מה שלומך עם הטופס ששלחתי?', 'מה קורה עם הפנייה שלי?', 'איך אני מזמין הדרכה', 'שלום']) expect(smallTalkReply(q), q).toBeNull();
+  });
+});
+
+describe('greeting by the hour', () => {
+  // Israel in November is UTC+2
+  const at = (h: number) => new Date(Date.UTC(2026, 10, 16, (h - 2 + 24) % 24, 30));
+  it('morning, noon, evening and night at the business time zone', () => {
+    expect([6, 11, 12, 16, 17, 21, 22, 2, 4, 5].map((h) => dayPart(at(h), 'Asia/Jerusalem'))).toEqual(['morning', 'morning', 'noon', 'noon', 'evening', 'evening', 'night', 'night', 'night', 'morning']);
+    expect(dayPart(at(9), 'No/Such_Zone')).toMatch(/morning|noon|evening|night/);   // a bad zone never throws
+    expect(['morning', 'noon', 'evening', 'night'].map((p) => greetingFor(p as never))).toEqual(['בוקר טוב', 'צהריים טובים', 'ערב טוב', 'לילה טוב']);
+    expect(greetingFor('evening', 'en')).toBe('Good evening');
+  });
+  it('{ברכה} is filled with the greeting of the hour, "שלום" when unknown', () => {
+    expect(renderBotText('{ברכה} {שם פרטי}, טוב לראות אותך שוב!', { fullName: 'דיימונד רוביני', greeting: 'ערב טוב' })).toBe('ערב טוב דיימונד, טוב לראות אותך שוב!');
+    expect(renderBotText('{ברכה} {שם פרטי}! כאן {בוט}.', { botName: 'בטי', greeting: 'בוקר טוב' })).toBe('בוקר טוב! כאן בטי.');
+    expect(renderBotText('{ברכה}, כאן {בוט}', {})).toBe('שלום, כאן הבוט');
+  });
+  it('a goodbye ("לילה טוב", "תודה ויום טוב", "good night") is recognized and answered for the hour; a request is not a goodbye', () => {
+    for (const t of ['לילה טוב', 'לילה טוב!', 'תודה ולילה טוב', 'תודה רבה, יום טוב', 'יום טוב לך', 'המשך יום נעים', 'שבת שלום', 'Good night', 'have a nice day', 'ערב נעים 🙂']) expect(isFarewell(t), t).toBe(true);
+    for (const t of ['בוקר טוב', 'ערב טוב', 'שלום', 'לילה טוב, יש מפגע בחדר 3', 'יום טוב?', 'יש לי שאלה', '']) expect(isFarewell(t), t).toBe(false);
+    expect(farewellReply('לילה טוב', 'night')).toBe('לילה טוב 🌙 אם יעלה משהו, אני כאן.');
+    expect(farewellReply('לילה טוב', 'noon')).toBe('המשך יום נעים ☀️ אם יעלה משהו, אני כאן.');
+    expect(farewellReply('יום טוב', 'evening')).toBe('ערב נעים 🌆 אם יעלה משהו, אני כאן.');
+    expect(farewellReply('שבת שלום', 'morning')).toContain('שבת שלום');
+  });
+  it('English greetings are greetings too', () => {
+    expect(isGreeting('good morning')).toBe(true);
+    expect(isGreeting('Good evening everyone')).toBe(true);
+    expect(smallTalkReply('good morning, how are you?')).toContain('הכול טוב');
   });
 });

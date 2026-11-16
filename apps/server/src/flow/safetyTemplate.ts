@@ -20,7 +20,7 @@ export interface TemplateLinks { waste?: string; accident?: string; event?: stri
 export const templateLinksSchema = z.object(Object.fromEntries(['waste', 'accident', 'event', 'offsite', 'training', 'privacy'].map((k) => [k, z.preprocess((v) => (typeof v === 'string' && v.trim() === '' ? undefined : v), z.string().trim().max(500).regex(/^https:\/\/[^\s]+$/, 'https only').optional())]))).strict();
 
 /** The bot greets someone it already knows by first name and introduces itself by its persona name (see bot-text.ts). */
-export const WELCOME_BACK_TEXT = 'היי {שם פרטי}, טוב לראות אותך שוב! כאן {בוט} מיחידת הבטיחות 😊';
+export const WELCOME_BACK_TEXT = '{ברכה} {שם פרטי}, טוב לראות אותך שוב! כאן {בוט} מיחידת הבטיחות 😊';
 export const ID_SAVED_TEXT = 'תודה {שם פרטי}! שמרתי את הפרטים, כך שבפעם הבאה לא נשאל אותם שוב.';
 /** The opening line of the identification as it was before the bot introduced itself by name (for upgrading saved flows). */
 export const OLD_ID_INTRO_START = 'שלום, כאן הבוט של יחידת הבטיחות.';
@@ -41,7 +41,7 @@ export function buildSafetyFlow(tag: (name: string) => string, links: TemplateLi
   // who stopped half-way is asked only what is still missing
   add({ id: 'start', type: 'condition', label: 'מוכר מפעם קודמת?', check: { kind: 'has', name: 'status' }, yes: 'welcome_back', no: 'id_intro' });
   add({ id: 'welcome_back', type: 'message', label: 'ברוכים השבים', text: WELCOME_BACK_TEXT, next: 'topics' });
-  add({ id: 'id_intro', type: 'message', label: 'הזדהות', text: 'שלום, כאן {בוט} מיחידת הבטיחות 👋 כדי שנוכל לטפל בפנייה נשאל כמה פרטים (פעם אחת בלבד).\nהפרטים (שם, בניין, חדר, פקולטה, שם ה-PI וסטטוס) ותוכן הפנייה, כולל תמונות וקבצים, נשמרים בשרתי היחידה ונגישים לאנשי הצוות המטפלים בלבד, לצורך טיפול בפנייה.' + (links.privacy ? ` מדיניות הפרטיות: ${links.privacy}` : ''), next: 'q_name' });
+  add({ id: 'id_intro', type: 'message', label: 'הזדהות', text: '{ברכה}, כאן {בוט} מיחידת הבטיחות 👋 כדי שנוכל לטפל בפנייה נשאל כמה פרטים (פעם אחת בלבד).\nהפרטים (שם, בניין, חדר, פקולטה, שם ה-PI וסטטוס) ותוכן הפנייה, כולל תמונות וקבצים, נשמרים בשרתי היחידה ונגישים לאנשי הצוות המטפלים בלבד, לצורך טיפול בפנייה.' + (links.privacy ? ` מדיניות הפרטיות: ${links.privacy}` : ''), next: 'q_name' });
   add({ id: 'q_name', type: 'question', kbAside: true, label: 'שם מלא', text: 'שם מלא:', save: 'fullName', kind: 'name', optional: false, retryText: 'נא לכתוב שם מלא.', next: 'q_building' });
   add({ id: 'q_building', type: 'question', kbAside: true, label: 'שם בניין', text: 'שם הבניין (אפשר לכתוב "דלג"):', save: 'building', optional: true, retryText: 'נא לכתוב שם בניין, או "דלג".', next: 'q_room' });
   add({ id: 'q_room', type: 'question', kbAside: true, label: 'מספר חדר', text: 'מספר חדר (אפשר לכתוב "דלג"):', save: 'room', optional: true, retryText: 'נא לכתוב מספר חדר, או "דלג".', next: 'q_faculty' });

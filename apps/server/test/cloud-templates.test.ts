@@ -177,6 +177,19 @@ describe('official channel: menus as buttons and message templates', () => {
     expect(back.body.text).toBe('ברצוני לקבל מידע / לדווח על:');
   });
 
+  it('"לילה טוב" after Betty spoke is a goodbye fitting the hour: no menu again, no hand-over', async () => {
+    await call('PUT', '/settings/bot', 'adm', { ...DEFAULT_BOT, enabled: true, items: [{ title: 'שעות', answer: 'a' }, { title: 'מיקום', answer: 'b' }], humanOption: true });
+    await hook(inbound('wamid.BY1', '972501110002', { type: 'text', text: { body: 'שלום' } }));
+    await new Promise((r) => setTimeout(r, 80));
+    sent.length = 0;
+    await hook(inbound('wamid.BY2', '972501110002', { type: 'text', text: { body: 'תודה ולילה טוב' } }));
+    await new Promise((r) => setTimeout(r, 80));
+    const texts = sent.filter((s) => s.body.type === 'text').map((s) => (s.body.text as { body: string }).body);
+    expect(texts).toHaveLength(1);
+    expect(texts[0]).toMatch(/^(לילה טוב 🌙|ערב נעים 🌆|המשך יום נעים ☀️) אם יעלה משהו, אני כאן\.$/);
+    expect(sent.some((s) => s.body.type === 'interactive')).toBe(false);
+  });
+
   it('two or three short options become reply buttons; when Meta refuses, or the setting is off, the numbered text is sent instead', async () => {
     await call('PUT', '/settings/bot', 'adm', { ...DEFAULT_BOT, enabled: true, items: [{ title: 'שעות', answer: 'a' }, { title: 'מיקום', answer: 'b' }], humanOption: false });
     sent.length = 0;
