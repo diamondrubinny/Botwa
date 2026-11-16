@@ -644,9 +644,11 @@ describe('safety flow live: areas, template endpoint, placeholders, profile, fil
     expect((await db.query(`SELECT t.name FROM conversation_tags x JOIN tags t ON t.id = x.tag_id WHERE x.conversation_id = $1`, [ec.id])).rows.map((r) => r.name)).toContain('דחוף');
     expect((await db.query(`SELECT body FROM conversation_notes WHERE conversation_id = $1`, [ec.id])).rows.map((r) => r.body).join(' ')).toContain('🚨 פנייה דחופה');
     expect(await say('wa99', 'יש עשן')).toEqual([]);                              // not twice in 10 minutes; the bot stays out
-    // "היי בטי" is a greeting: the conversation opens as usual, no knowledge-base search on the bot's name
+    // "היי בטי" is a greeting: the conversation opens as usual, no knowledge-base search on the bot's name; she was called by
+    // name, so she does not introduce herself ("כאן בטי…") again
     const hi = await say('wa88', 'היי בטי');
-    expect(hi.join(' ')).toMatch(/(בוקר טוב|צהריים טובים|ערב טוב|לילה טוב), כאן בטי מיחידת הבטיחות/);
+    expect(hi.join(' ')).toMatch(/^(בוקר טוב|צהריים טובים|ערב טוב|לילה טוב) 👋 כדי שנוכל לטפל בפנייה/);
+    expect(hi.join(' ')).not.toContain('כאן בטי');
     expect(hi.join(' ')).not.toContain('לא מצאתי');
     const again = await say('wa1', 'שלום שוב');
     expect(again[0]).toMatch(/^(בוקר טוב|צהריים טובים|ערב טוב|לילה טוב) רונית, טוב לראות אותך שוב! כאן בטי מיחידת הבטיחות 😊$/);          // remembered by first name, the bot by its name

@@ -9,7 +9,22 @@ export const BOT_TEXT_VARIABLES = [
   ['{ברכה}', 'ברכה לפי השעה: בוקר טוב, צהריים טובים, ערב טוב או לילה טוב'],
 ] as const;
 
-export interface BotTextContext { botName?: string | null; fullName?: string | null; /** the greeting of this hour ("בוקר טוב"); default "שלום" */ greeting?: string | null }
+export interface BotTextContext { botName?: string | null; fullName?: string | null; /** the greeting of this hour ("בוקר טוב"); default "שלום" */ greeting?: string | null;
+  /** the customer called the bot by name, or it introduced itself in this conversation already: leave out "כאן {בוט}…" */ skipIntro?: boolean }
+
+const escRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+/**
+ * The bot's self-introduction taken out ("…שוב! כאן {בוט} מיחידת הבטיחות 😊" → "…שוב! 😊", "{ברכה}, כאן {בוט} מיחידת הבטיחות 👋" →
+ * "{ברכה} 👋", "This is {בוט} from the Safety Unit"): for a customer who already knows who they are talking to.
+ */
+export function withoutIntro(text: string, botName?: string | null): string {
+  const who = ['\\{בוט\\}', '\\{bot\\}', ...((botName ?? '').trim().length >= 2 ? [escRe(botName!.trim())] : [])].join('|');
+  const tail = '(?:\\s+(?:מיחידת|מ|של|from)[^.!?\\n\\p{Extended_Pictographic}]*)?\\s*[.!]?';
+  return text
+    .replace(new RegExp(`[,،]?\\s*(?:כאן|זאת|זו|זה)\\s+(?:${who})${tail}`, 'gu'), ' ')
+    .replace(new RegExp(`[,]?\\s*(?:this is|it's|i'm|i am)\\s+(?:${who})${tail}`, 'giu'), ' ')
+    .replace(/[ \t]{2,}/g, ' ').replace(/[ \t]+([,.!?:;])/g, '$1').replace(/^[ \t]+|[ \t]+$/gm, '');
+}
 
 /** Part of the day at the business's time zone: morning 05–12, noon 12–17, evening 17–22, night 22–05. */
 export type DayPart = 'morning' | 'noon' | 'evening' | 'night';
@@ -56,7 +71,8 @@ export function firstName(full: string | null | undefined): string {
 }
 
 /** Fill the bot variables. A missing value leaves no stray punctuation behind ("שלום {שם פרטי}!" → "שלום!"). */
-export function renderBotText(text: string, c: BotTextContext): string {
+export function renderBotText(text0: string, c: BotTextContext): string {
+  const text = c.skipIntro ? withoutIntro(text0, c.botName) : text0;
   if (!text.includes('{')) return text;
   const full = cleanName(c.fullName);
   const vals: Record<string, string> = {
@@ -100,6 +116,13 @@ export function withoutBotName(text: string | null, name: string | null | undefi
   const esc = n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const out = text.replace(new RegExp(`(^|[\\s,.!?:;״"'׳()])(?:ו|ה)?${esc}(?=$|[\\s,.!?:;״"'׳()])`, 'g'), '$1').replace(/^[\s,.:;]+/, '').replace(/\s{2,}/g, ' ').trim();
   return out.length ? out : text;
+}
+
+/** Does the message call the bot by its name ("היי בטי", "בטי?", "תודה בטי")? Whole words only ("בטיחות" is not her name). */
+export function mentionsName(text: string | null | undefined, name: string | null | undefined): boolean {
+  const n = (name ?? '').trim();
+  if (!text || n.length < 2) return false;
+  return new RegExp(`(^|[\\s,.!?:;״"'׳()])(?:ו|ה)?${escRe(n)}(?=$|[\\s,.!?:;״"'׳()])`, 'i').test(text);
 }
 
 /** Small talk ("מה שלומך?", "מה נשמע?", "מה קורה?"): a short friendly answer; null for anything else. */

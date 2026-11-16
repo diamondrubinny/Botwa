@@ -16,6 +16,7 @@ const PAIRS: [string, string][] = [
   // ---- Betty's own messages ----
   ['בטי', 'Betty'],
   ['בשמחה 😊 אם צריך עוד משהו, אני כאן.', "You're welcome 😊 If you need anything else, I'm here."],
+  ['אני עונה רק על שאלות בנושאי הבטיחות של היחידה, לפי המידע שלה 🙂 במה אפשר לעזור? לתפריט כתבו "תפריט", ולנציג "נציג".', 'I only answer questions about the unit\'s safety topics, based on its information 🙂 How can I help? For the menu write "menu", for an agent "agent".'],
   ['לילה טוב 🌙 אם יעלה משהו, אני כאן.', "Good night 🌙 If anything comes up, I'm here."],
   ['ערב נעים 🌆 אם יעלה משהו, אני כאן.', "Have a nice evening 🌆 If anything comes up, I'm here."],
   ['המשך יום נעים ☀️ אם יעלה משהו, אני כאן.', "Have a nice day ☀️ If anything comes up, I'm here."],

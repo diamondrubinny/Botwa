@@ -35,6 +35,7 @@ import { CLOUD_CREDS_KEY, newVerifyToken, WhatsAppCloudAdapter, type CloudCreds 
 import { EMAIL_CREDS_KEY, EmailAdapter, type EmailCreds } from './email.js';
 import { closeByCustomer, introduceAgent, isCloseRequest, thankForFeedback } from '../automations.js';
 import { composeAnswer, type KbAnswer } from '../kb/compose.js';
+import { BOT_INPUT_MAX, detectInjection, INJECTION_HANDOFF_AFTER, INJECTION_NOTE, INJECTION_REPLY } from '../guard/injection.js';
 import { loadPersona } from '../routes/branding.js';
 import { saveUsername } from './username-store.js';
 import { isSensitive, pickGif, type GifMoment } from '../bot-gifs.js';
@@ -52,7 +53,7 @@ import { factReply } from '../safety/facts.js';
 import { hoursSummary } from '../canned.js';
 import { staffMessage } from '../staff/assistant.js';
 import { detect, sanitizeFileName } from '../media/validate.js';
-import { renderBotText, cleanName, dayPart, farewellReply, greetingFor, identityReply, isFarewell, smallTalkReply, withoutBotName, type BotTextContext } from '../bot-text.js';
+import { renderBotText, cleanName, dayPart, mentionsName, farewellReply, greetingFor, identityReply, isFarewell, smallTalkReply, withoutBotName, type BotTextContext } from '../bot-text.js';
 import { isCommentContact, META_CREDS_KEY, MetaMessagingAdapter, type CommentReplyMode, type MetaCreds } from './meta-messaging.js';
 import { WebChatAdapter } from './webchat.js';
 import { WhatsAppAdapter } from './whatsapp.js';
@@ -883,7 +884,30 @@ export class ChannelManager {
     ]);
     // in English, the bot's name as translated ("בטי" → "Betty")
     const persona = persona0 && lang === 'en' ? { ...persona0, name: (await dictionary(this.db)).exact.get(persona0.name?.trim() ?? '') ?? persona0.name } : persona0;
-    return { botName: persona?.name, fullName: cleanName(nameHint) || cleanName(row?.full_name) || cleanName(row?.display_name), greeting: greetingFor(await this.dayPartNow(), lang) };
+    return { botName: persona?.name, fullName: cleanName(nameHint) || cleanName(row?.full_name) || cleanName(row?.display_name), greeting: greetingFor(await this.dayPartNow(), lang), skipIntro: await this.knowsBot(convId, persona?.name) };
+  }
+
+  /** conversations whose customer just called the bot by name (cleared after a few minutes) */
+  private namedBy = new Map<string, number>();
+  /** The customer knows who they are talking to: they called the bot by name, or it introduced itself here in the last 12 hours. */
+  private async knowsBot(convId: string, botName?: string | null): Promise<boolean> {
+    const at = this.namedBy.get(convId);
+    if (at && Date.now() - at < 10 * 60_000) return true;
+    if (at) this.namedBy.delete(convId);
+    if (this.namedBy.size > 5000) this.namedBy.clear();
+    const n = (botName ?? '').trim();
+    if (n.length < 2) return false;
+    const en = (await dictionary(this.db).catch(() => null))?.exact.get(n) ?? n;
+    return !!(await this.db.query(`SELECT 1 FROM messages WHERE conversation_id = $1 AND direction = 'out' AND auto AND created_at > now() - interval '12 hours' AND (position($2 in body) > 0 OR position($3 in body) > 0) LIMIT 1`, [convId, `כאן ${n}`, `This is ${en}`]).then((r) => r.rowCount).catch(() => 0));
+  }
+
+  /** A prompt-injection attempt: a fixed answer (nothing of the message repeated), a note and an audit entry; a person after repeated attempts. */
+  private async injectionAttempt(channelId: string, convId: string, ext: string, bot: BotConfig): Promise<void> {
+    await audit(this.db, { action: 'bot.injection_attempt', target: convId }).catch(() => undefined);
+    const n = Number((await this.db.query(`SELECT count(*)::int AS n FROM audit_log WHERE action = 'bot.injection_attempt' AND target = $1`, [convId])).rows[0]?.n ?? 1);
+    if (n === 1) await this.db.query(`INSERT INTO conversation_notes (conversation_id, body) VALUES ($1, $2)`, [convId, INJECTION_NOTE]);
+    if (n >= INJECTION_HANDOFF_AFTER) { await this.handoffNow(channelId, convId, ext, bot, 'ניסיונות חוזרים לעקוף את הנחיות הבוט'); return; }
+    await this.botSay(channelId, convId, ext, INJECTION_REPLY);
   }
 
   /** Morning, noon, evening or night at the business's own time zone (its business hours setting; Israel by default). */
@@ -1030,6 +1054,12 @@ export class ChannelManager {
 
     // the bot's own name is not part of the question ("היי בטי" is a greeting, "בטי, מה זה…" searches "מה זה…")
     const persona = (await loadPersona(this.db).catch(() => null)) ?? { name: '', role: '' };
+    // called by her name: she knows the customer knows who she is, so no "כאן בטי מיחידת הבטיחות" in what she says next
+    if (mentionsName(text, persona.name) || (c.lang === 'en' && mentionsName(text, (await dictionary(this.db)).exact.get(persona.name?.trim() ?? '')))) this.namedBy.set(convId, Date.now());
+    // a message that tries to override her rules or make her reveal them: a fixed polite answer, never fed to a model
+    if (text && detectInjection(text)) { await this.injectionAttempt(channelId, convId, ext, bot); return; }
+    if (text && text.length > BOT_INPUT_MAX) text = text.slice(0, BOT_INPUT_MAX);
+    if (rawText && rawText.length > BOT_INPUT_MAX) rawText = rawText.slice(0, BOT_INPUT_MAX);
     text = withoutBotName(text, persona.name);
     rawText = withoutBotName(rawText, persona.name);
     if (c.lang === 'en') {   // "Betty, are you there?": her English name is not part of the question either
