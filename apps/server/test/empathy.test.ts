@@ -51,7 +51,9 @@ describe('Betty stays with a stressed customer until a person answers', () => {
     async start() { ctxA.events.onStatus('connected'); }
     async stop() {} async logout() {}
     async sendText(to: string, text: string) { out.push({ to, text }); return { externalMessageId: `e${++n}` }; }
+    async sendMedia(to: string, m: { mime: string; caption?: string; buffer: Buffer }) { media.push({ to, mime: m.mime, caption: m.caption, size: m.buffer.length }); return { externalMessageId: `e${++n}` }; }
   }
+  const media: { to: string; mime: string; caption?: string; size: number }[] = [];
   const say = async (from: string, text: string) => {
     out.length = 0;
     await ctxA.events.onMessage({ externalContactId: from, externalMessageId: `em${++mid}`, text, timestamp: new Date() });
@@ -145,6 +147,15 @@ describe('Betty stays with a stressed customer until a person answers', () => {
     expect(text).toContain('🛡️ בטיחות ודחיפות, 7 ימים אחרונים:');
     expect(text).toContain('⚠️ דיווחי מפגע');
     expect(text).not.toContain('972500000');
+    // reporters' rating of how hazard reports were handled (1-5), only cases of conversations tagged "מפגע"
+    const hz = (await db.query(`SELECT x.conversation_id FROM conversation_tags x JOIN tags t ON t.id = x.tag_id WHERE t.name = 'מפגע' LIMIT 1`)).rows[0]?.conversation_id
+      ?? (await db.query(`SELECT id FROM conversations LIMIT 1`)).rows[0].id;
+    await db.query(`INSERT INTO tags (name) VALUES ('מפגע') ON CONFLICT DO NOTHING`);
+    await db.query(`INSERT INTO conversation_tags (conversation_id, tag_id) SELECT $1, id FROM tags WHERE name = 'מפגע' ON CONFLICT DO NOTHING`, [hz]);
+    await db.query(`INSERT INTO cases (conversation_id, opened_at, closed_at, rating, rated_at) VALUES ($1, now() - interval '2 days', now() - interval '1 day', 4, now() - interval '1 day'), ($1, now() - interval '2 days', now() - interval '1 day', 5, now() - interval '1 day')`, [hz]);
+    const r2 = await safetyReport(db, 7);
+    expect(r2.hazardRating).toEqual({ avg: 4.5, n: 2 });
+    expect(safetyReportText(r2)).toContain('⭐ שביעות רצון מטיפול במפגעים: 4.5 מתוך 5 (2 דירוגים)');
   });
 
   it('escalation: an urgent conversation with no answer from a person goes to an available manager after the set minutes, once', async () => {
@@ -163,10 +174,42 @@ describe('Betty stays with a stressed customer until a person answers', () => {
     expect(after.escalated_at).not.toBeNull();
     expect((await db.query(`SELECT body FROM conversation_notes WHERE conversation_id = $1 AND body LIKE '⏫%'`, [c.id])).rows[0].body).toContain('הועברה אל מנהלת');
     expect(await mgr.runEscalations(at(30))).toBe(0);                                  // once per mark
+    expect(media).toHaveLength(0);                                                     // no photo: the setting is off by default
     // a person answers: the mark is done
     await db.query(`INSERT INTO messages (conversation_id, direction, body, auto) VALUES ($1, 'out', 'בדרך אליך', false)`, [c.id]);
     await mgr.runEscalations(at(31));
     expect((await conv(ext)).urgent_since).toBeNull();
+  });
+
+  it('escalation photo (when turned on): the reporter\'s latest clean image goes to the linked WhatsApp of the person, noted and audited', async () => {
+    const { mkdir, writeFile } = await import('node:fs/promises');
+    const path = await import('node:path');
+    const { randomUUID } = await import('node:crypto');
+    const { loadBot } = await import('../src/bot.js');
+    const stored = (await db.query(`SELECT value FROM settings WHERE key = 'bot'`)).rows[0]?.value;
+    const bot = await loadBot(db);
+    await db.query(`INSERT INTO settings (key, value) VALUES ('bot', $1) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`, [JSON.stringify({ ...bot, escalation: { ...bot.escalation, sendPhoto: true } })]);
+    const boss = (await db.query(`SELECT id FROM users WHERE email = 'boss-esc@t.io'`)).rows[0].id;
+    const ch = (await db.query(`SELECT channel_id FROM conversations LIMIT 1`)).rows[0].channel_id;
+    await db.query(`INSERT INTO staff_links (user_id, channel_id, external_id) VALUES ($1, $2, '972509990000@s.whatsapp.net') ON CONFLICT DO NOTHING`, [boss, ch]);
+    const ext = '972500008888@s.whatsapp.net';
+    await say(ext, 'סכנה לייזר בחדר 7');
+    const c = await conv(ext);
+    await db.query(`UPDATE conversations SET urgent_since = NULL WHERE id <> $1`, [c.id]);
+    // the reporter's photo, already scanned clean, and an infected one that must never go out
+    const store = randomUUID();
+    await mkdir(path.join(cfg.MEDIA_DIR, 'clean'), { recursive: true });
+    await writeFile(path.join(cfg.MEDIA_DIR, 'clean', store), Buffer.from('fake-png-bytes'));
+    const m1 = (await db.query(`INSERT INTO messages (conversation_id, direction, body) VALUES ($1, 'in', '') RETURNING id`, [c.id])).rows[0].id;
+    await db.query(`INSERT INTO attachments (message_id, kind, mime, size, file_name, storage_name, status) VALUES ($1, 'image', 'image/png', 14, 'x.png', $2, 'clean')`, [m1, store]);
+    const m2 = (await db.query(`INSERT INTO messages (conversation_id, direction, body, created_at) VALUES ($1, 'in', '', now() + interval '1 second') RETURNING id`, [c.id])).rows[0].id;
+    await db.query(`INSERT INTO attachments (message_id, kind, mime, size, file_name, storage_name, status) VALUES ($1, 'image', 'image/png', 14, 'y.png', NULL, 'infected')`, [m2]);
+    media.length = 0;
+    const at = new Date(new Date(c.urgent_since).getTime() + 16 * 60_000);
+    expect(await mgr.runEscalations(at)).toBe(1);
+    expect(media).toEqual([{ to: '972509990000@s.whatsapp.net', mime: 'image/png', caption: expect.stringContaining('📷 התמונה שצורפה לפנייה'), size: 14 }]);
+    expect((await db.query(`SELECT count(*)::int AS n FROM audit_log WHERE action = 'conversation.escalation_photo' AND target = $1`, [c.id])).rows[0].n).toBe(1);
+    await db.query(`UPDATE settings SET value = $1 WHERE key = 'bot'`, [JSON.stringify(stored ?? bot)]);
   });
 
   it('hazards by building: grouped by the reporter\'s building, with open count and reply time', async () => {

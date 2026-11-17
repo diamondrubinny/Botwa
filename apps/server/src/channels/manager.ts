@@ -1,3 +1,4 @@
+import { readFile } from 'node:fs/promises';
 import type { GovImporter } from '../kb/gov/importer.js';
 import type { StandardsImporter } from '../kb/gov/standards.js';
 import type { FireImporter } from '../kb/gov/fire.js';
@@ -22,7 +23,7 @@ import { askText, runFlow, type Effect, type FlowContext, type FlowInput, type F
 import { resolveArea } from '../safety/areas.js';
 import { contactText, officerNote, officersForTopic, pickOfficer } from '../safety/officers.js';
 import { assignResponsible } from '../safety/responsible.js';
-import { weeklySummaryTargets } from '../staff/weekly.js';
+import { gapsLine, WEEKLY_FOOTER, weeklySummaryTargets } from '../staff/weekly.js';
 import { forwardText, type ForwardRule } from './forward.js';
 import { listMenuBody, parseNumberedMenu, type CloudTemplate, type TemplateSend } from './cloud-messages.js';
 import { loadFlow } from '../flow/store.js';
@@ -1273,6 +1274,7 @@ export class ChannelManager {
         const link = (await this.db.query('SELECT channel_id, external_id FROM staff_links WHERE user_id = $1 ORDER BY last_used_at DESC NULLS LAST LIMIT 1', [to])).rows[0] as { channel_id: string; external_id: string } | undefined;
         if (link) await this.sendText(link.channel_id, link.external_id, `⏫ פנייה דחופה${c.num ? ` #${c.num}` : ''} הועברה אליך: אין מענה אנושי כבר ${mins} דקות.
 לפתיחה: ${this.cfg.APP_ORIGIN.split(',')[0]!.trim()}/#/inbox?c=${c.id}`, { background: true }).catch(() => undefined);
+        if (link && bot.escalation.sendPhoto) await this.sendEscalationPhoto(link.channel_id, link.external_id, c.id, c.num).catch(() => undefined);
       }
     }
     // a person answered or the conversation was closed: the mark is done
@@ -1299,13 +1301,36 @@ export class ChannelManager {
     return due.length;
   }
 
+  /**
+   * The latest photo the reporter attached to an escalated conversation, to the person's linked WhatsApp: only a file the antivirus
+   * found clean, only an image, at most 5MB, from the last 24 hours. Noted in the conversation and the audit log (who got which file).
+   */
+  private async sendEscalationPhoto(channelId: string, ext: string, convId: string, num: number | null): Promise<boolean> {
+    const a = (await this.db.query(
+      `SELECT a.id, a.mime, a.storage_name FROM attachments a JOIN messages m ON m.id = a.message_id
+        WHERE m.conversation_id = $1 AND m.direction = 'in' AND a.status = 'clean' AND a.storage_name IS NOT NULL
+          AND a.mime IN ('image/jpeg', 'image/png', 'image/webp') AND coalesce(a.size, 0) <= 5242880 AND m.created_at > now() - interval '24 hours'
+        ORDER BY m.created_at DESC LIMIT 1`, [convId])).rows[0] as { id: string; mime: string; storage_name: string } | undefined;
+    if (!a) return false;
+    const buffer = await readFile(this.media.cleanPath(a.storage_name));
+    await this.sendMedia(channelId, ext, { buffer, mime: a.mime, fileName: `hazard.${a.mime.split('/')[1]}`, caption: `📷 התמונה שצורפה לפנייה${num ? ` #${num}` : ''}` });
+    await this.db.query(`INSERT INTO conversation_notes (conversation_id, body) VALUES ($1, 'התמונה שצורפה לפנייה נשלחה לווצאפ של מי שקיבל את ההסלמה.')`, [convId]);
+    await audit(this.db, { action: 'conversation.escalation_photo', target: convId, meta: { attachment: a.id } }).catch(() => undefined);
+    return true;
+  }
+
   /** Sunday morning: the week's safety summary on WhatsApp to the linked managers (once a week). Returns how many got it. */
   async runWeeklySummary(now = new Date()): Promise<number> {
     const tz = await loadBusinessHours(this.db).then((h) => h.timezone).catch(() => 'Asia/Jerusalem');
     const w = await weeklySummaryTargets(this.db, now, tz || 'Asia/Jerusalem');
     if (!w) return 0;
     let n = 0;
-    for (const t of w.to) if (await this.sendText(t.channelId, t.externalId, w.text, { background: true }).then(() => true).catch(() => false)) n++;
+    for (const t of w.to) {
+      const text = [w.text, ...(t.kb && w.gaps ? [gapsLine(w.gaps)] : []), WEEKLY_FOOTER].join('\n\n');
+      if (await this.sendText(t.channelId, t.externalId, text, { background: true }).then(() => true).catch(() => false)) n++;
+    }
+    // the knowledge-base managers: a push about the unanswered questions (with a link to write answers)
+    if (w.gaps) for (const u of w.kbUsers) this.onNotifyUser?.(u, `${w.gaps} שאלות שבטי לא ידעה השבוע`, '/#/kb?tab=gaps', 'botwa-gaps');
     if (w.to.length) await audit(this.db, { action: 'staff.weekly_summary', meta: { sent: n, of: w.to.length } }).catch(() => undefined);
     return n;
   }

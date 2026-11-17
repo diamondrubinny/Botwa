@@ -18,7 +18,7 @@ interface BotCfg {
   gifs?: { enabled: boolean; greeting: boolean; thanks: boolean; handoff: boolean; close: boolean; cooldownMinutes: number };
   emergency?: { enabled: boolean; text: string; textEn?: string };
   empathy?: { enabled: boolean };
-  escalation?: { enabled: boolean; minutes: number; backupUserId: string | null };
+  escalation?: { enabled: boolean; minutes: number; backupUserId: string | null; sendPhoto?: boolean };
   defaultOfficerUserId?: string | null;
 }
 const GIFS = { enabled: true, greeting: true, thanks: true, handoff: true, close: true, cooldownMinutes: 360 };
@@ -246,6 +246,8 @@ export function Bot({ me }: { me: Me }) {
               {people.map((u) => <option key={u.id} value={u.id}>{personLabel(u)}</option>)}
             </select>
           </div>
+          <div className="field"><label><input type="checkbox" role="switch" style={{ width: 'auto', minHeight: 'auto' }} aria-describedby="esc-ph-h" checked={!!esc.sendPhoto} disabled={!esc.enabled} onChange={(e) => set({ escalation: { ...esc, sendPhoto: e.target.checked } })} /> לשלוח גם את תמונת המפגע לווצאפ של מי שמקבל את ההסלמה</label>
+            <p className="hint" id="esc-ph-h">רק אם הוא קישר ווצאפ לבטי. נשלחת התמונה האחרונה שהמדווח צירף ב-24 השעות האחרונות, ורק אם סריקת האנטי-וירוס מצאה אותה נקייה. פרטיות: התמונה יוצאת לטלפון של איש הצוות ועלולה להופיע בה אדם. לכן זה כבוי כברירת מחדל, ומומלץ להפעיל רק אחרי בדיקה עם ממונה הפרטיות. כל שליחה נרשמת בשיחה וביומן הפעולות.</p></div>
         </fieldset>
 
         <fieldset disabled={!canEdit}>

@@ -96,6 +96,7 @@ export async function monthlyPdf(d: MonthlyData, org: string): Promise<Buffer> {
   else w.table([{ title: 'סוג', w: 140 }, { title: 'כמה', w: 60 }, { title: 'נענו תוך 15 דק׳', w: 110 }, { title: 'מענה (חציון)', w: 100 }, { title: 'בלי מענה אנושי', w: 80 }],
     rows.map((r) => [KIND[r.kind], String(r.events), `${r.within15} מתוך ${r.events}`, num(r.medianMinutes, 'דק׳'), String(r.unanswered)]));
   if (d.safety.topics.length) w.note(`נושאים: ${d.safety.topics.map((t) => `${t.name} (${t.n})`).join(', ')}`);
+  if (d.safety.hazardRating?.n) w.note(`שביעות רצון המדווחים מטיפול במפגעים: ${d.safety.hazardRating.avg} מתוך 5 (${d.safety.hazardRating.n} דירוגים).`);
 
   w.heading('מפגעים לפי בניין');
   if (!d.buildings.length) w.note('לא היו דיווחי מפגע או חירום בחודש זה.');

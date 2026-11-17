@@ -7,7 +7,7 @@ import type { Db } from '../db.js';
  */
 export type SafetyKind = 'emergency' | 'hazard' | 'worried' | 'upset';
 export interface SafetyRow { kind: SafetyKind; events: number; answered: number; within15: number; medianMinutes: number | null; unanswered: number }
-export interface SafetyReport { days: number; rows: SafetyRow[]; topics: { name: string; n: number }[]; english: number; waitingNow: number }
+export interface SafetyReport { days: number; rows: SafetyRow[]; topics: { name: string; n: number }[]; english: number; waitingNow: number; /** reporters' 1-5 rating of how hazard reports were handled */ hazardRating: { avg: number | null; n: number } }
 
 const AUTO_TAGS = ['דחוף', 'זקוק לליווי', 'English'];
 
@@ -40,15 +40,20 @@ export async function safetyReportRange(db: Db, from: Date, to: Date, days: numb
   const waitingNow = (await db.query(
     `SELECT count(*)::int AS n FROM conversations c WHERE c.status = 'open' AND c.comfort_since IS NOT NULL
         AND NOT EXISTS (SELECT 1 FROM messages m WHERE m.conversation_id = c.id AND m.direction = 'out' AND NOT m.auto AND m.created_at > c.comfort_since)`)).rows[0].n as number;
-  return { days, rows: full, topics, english, waitingNow };
+  // how reporters rated the handling of hazard reports (the feedback question after "the hazard was handled")
+  const hr = (await db.query(
+    `SELECT count(*)::int AS n, round(avg(k.rating)::numeric, 1)::float AS avg FROM cases k
+      WHERE k.rating IS NOT NULL AND k.rated_at >= $1 AND k.rated_at < $2
+        AND EXISTS (SELECT 1 FROM conversation_tags x JOIN tags t ON t.id = x.tag_id WHERE x.conversation_id = k.conversation_id AND lower(t.name) = 'מפגע')`, [from, to])).rows[0] as { n: number; avg: number | null };
+  return { days, rows: full, topics, english, waitingNow, hazardRating: { avg: hr.n ? hr.avg : null, n: hr.n } };
 }
 
 const KIND_HE: Record<SafetyKind, string> = { emergency: '🚨 מצבי חירום', hazard: '⚠️ דיווחי מפגע', worried: '💛 לקוחות לחוצים', upset: '😕 לקוחות מתוסכלים' };
 /** The same report as a short text (for managers on WhatsApp). */
 export function safetyReportText(r: SafetyReport): string {
   const lines = r.rows.filter((x) => x.events).map((x) => `${KIND_HE[x.kind]}: ${x.events}${x.medianMinutes !== null ? ` · מענה אנושי תוך ${x.medianMinutes} דק׳ (חציון)` : ''}${x.unanswered ? ` · ${x.unanswered} בלי מענה אנושי` : ''}`);
-  if (!lines.length) return `🛡️ ב-${r.days} הימים האחרונים לא היו מצבי חירום, דיווחי מפגע או לקוחות לחוצים.`;
-  return [`🛡️ בטיחות ודחיפות, ${r.days} ימים אחרונים:`, ...lines, ...(r.topics.length ? [`נושאים: ${r.topics.slice(0, 5).map((t) => `${t.name} (${t.n})`).join(', ')}`] : []), ...(r.waitingNow ? [`⏳ עכשיו מחכים למענה: ${r.waitingNow}`] : [])].join('\n');
+  if (!lines.length && !r.hazardRating?.n) return `🛡️ ב-${r.days} הימים האחרונים לא היו מצבי חירום, דיווחי מפגע או לקוחות לחוצים.`;
+  return [`🛡️ בטיחות ודחיפות, ${r.days} ימים אחרונים:`, ...lines, ...(r.topics.length ? [`נושאים: ${r.topics.slice(0, 5).map((t) => `${t.name} (${t.n})`).join(', ')}`] : []), ...(r.hazardRating?.n ? [`⭐ שביעות רצון מטיפול במפגעים: ${r.hazardRating.avg} מתוך 5 (${r.hazardRating.n} דירוגים)`] : []), ...(r.waitingNow ? [`⏳ עכשיו מחכים למענה: ${r.waitingNow}`] : [])].join('\n');
 }
 
 /**

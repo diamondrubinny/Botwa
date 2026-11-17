@@ -201,6 +201,10 @@ describe('Betty for managers on WhatsApp', () => {
     expect(weeklyDue(new Date('2026-11-15T06:40:00Z'))).toEqual({ due: true, key: '2026-11-15' });    // 08:40
     expect(weeklyDue(new Date('2026-11-16T06:40:00Z')).due).toBe(false);                               // Monday
     const me = '9725888888@s.whatsapp.net';
+    // questions Betty could not answer last week (the same wording twice counts once); the text itself never goes out
+    await db.query(`INSERT INTO kb_queries (text, via, answered) VALUES ('איפה מפנים סוללות ליתיום של דנה כהן', 'bot', false), ('איפה מפנים סוללות ליתיום של דנה כהן', 'bot', false), ('שאלה אחרת', 'bot', false), ('נענתה', 'bot', true)`);
+    const pushes: { userId: string; title: string; url: string }[] = [];
+    mgr.onNotifyUser = (userId, title, url) => { pushes.push({ userId, title, url }); };
     out.length = 0;
     expect(await mgr.runWeeklySummary(new Date('2026-11-16T07:00:00Z'))).toBe(0);                     // not Sunday
     expect(await mgr.runWeeklySummary(new Date('2026-11-15T07:00:00Z'))).toBe(1);
@@ -208,6 +212,9 @@ describe('Betty for managers on WhatsApp', () => {
     expect(text).toContain('סיכום בטיחות שבועי');
     expect(text).not.toContain('0501234567');                                                           // no customer details
     expect(text).not.toContain('דנה כהן');
+    expect(text).toContain('❓ 2 שאלות שבטי לא ידעה לענות עליהן השבוע');                                // the admin manages the knowledge base
+    expect(text).toContain('לכיבוי הסיכום השבועי');
+    expect(pushes).toEqual([{ userId: ids['boss@t.io'], title: '2 שאלות שבטי לא ידעה השבוע', url: '/#/kb?tab=gaps' }]);   // agents without kb.manage get nothing
     expect(await mgr.runWeeklySummary(new Date('2026-11-15T09:00:00Z'))).toBe(0);                     // once that Sunday
     // switched off in the panel: the next Sunday nothing is sent
     expect((await call('boss@t.io', 'GET', '/me/whatsapp-links')).json()).toMatchObject({ weekly: true });
