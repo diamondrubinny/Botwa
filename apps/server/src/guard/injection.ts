@@ -11,23 +11,26 @@ const ZERO_WIDTH = /[​-‏‪-‮⁠-⁤⁦-⁩﻿]/g;
 /** chat-template and role markers that models treat as structure */
 const ROLE_MARKERS = /<\|[^|>]{0,40}\|>|\[\/?(INST|SYS|SYSTEM)\]|<<\/?SYS>>|<\/?(system|assistant|user|instructions?|prompt|knowledge|customer_question)>|^\s*#{2,}\s*(system|instruction|instructions|prompt|הוראות|הנחיות)\b.*$|^\s*(system|assistant|developer)\s*:/gim;
 
-const VERB_HE = '(?:^|\\s)(?:ל|ו)?(?:תתעלמ|התעלמ|תתעלם|התעלם|תשכח|שכח|תבטל|בטל|תעקפ|עקפ|תעקוף|עקוף)\\S*\\s+(?:מ|על\\s+|את\\s+)?';
+// imperatives only, addressed to the bot ("תתעלמי", "עקוף"): "שכחתי את ההוראות של הקורס" is the customer talking about themselves
+const VERB_ALL_HE = '(?:^|\\s)(?:ו)?(?:תתעלמי|תתעלם|התעלמי|התעלם|תבטלי|תבטל|בטלי|בטל|תעקפי|תעקוף|עקפי|עקוף)\\s+(?:מ|על\\s+|את\\s+)?';
+const VERB_QUAL_HE = '(?:^|\\s)(?:ו)?(?:תתעלמי|תתעלם|התעלמי|התעלם|תשכחי|תשכח|שכחי|שכח|תבטלי|תבטל|בטלי|בטל|תעקפי|תעקוף|עקפי|עקוף)\\s+(?:מ|על\\s+|את\\s+)?';
 const TARGET_HE = '(?:ה)?(?:הוראות|הנחיות|כללים|חוקים|פרומפט|הגבלות|מגבלות)';
 const QUAL_HE = '\\s+(?:הקודמות|הקודמים|הקודם|שלך|שקיבלת|שנתנו\\s+לך|המקוריות|המקוריים|של\\s+המערכת|שלמעלה)';
 const HE = [
-  // "ignore / forget / bypass ALL the instructions", "...the previous instructions / your rules"
-  new RegExp(`${VERB_HE}כל\\s+${TARGET_HE}`),
-  new RegExp(`${VERB_HE}${TARGET_HE}${QUAL_HE}`),
+  // "ignore / bypass ALL the instructions", "ignore / forget the previous instructions / your rules"
+  new RegExp(`${VERB_ALL_HE}כל\\s+${TARGET_HE}`),
+  new RegExp(`${VERB_QUAL_HE}${TARGET_HE}${QUAL_HE}`),
   // "your system instructions", "show me your instructions / prompt"
-  /(הנחיות|הוראות)\s+(ה)?מערכת\s+(שלך|שקיבלת)|פרומפט\s+(ה)?מערכת|(ה)?פרומפט\s+(שלך|שקיבלת)|(מה|תראי|תראה|הראי|הראה|תציגי|תציג|הציגי|חשפי|תחשפי|תגלי|גלי|תכתבי|כתבי|תעתיקי|העתיקי)\s+(לי\s+)?(את\s+)?(ה)?(הוראות|הנחיות|כללים)\s+(שלך|שקיבלת)/,
+  /(הנחיות|הוראות)\s+(ה)?מערכת\s+(שלך|שקיבלת)|פרומפט\s+(ה)?מערכת|(ה)?פרומפט\s+(שלך|שקיבלת)|(תראי|תראה|הראי|הראה|תציגי|תציג|הציגי|חשפי|תחשפי|תגלי|גלי|תעתיקי|העתיקי)\s+(לי\s+)?(את\s+)?(ה)?(הוראות|הנחיות)\s+(שלך|שקיבלת)(?=$|[\s,.!?])/,
   // "from now on you are… / pretend to be… / act like… / developer mode / answer without restrictions"
   /מעכשיו\s+(את|אתה|תהיי|תהיה)\s+(לא\s+)?(בוט|עוזר|עוזרת|מודל|מערכת|חופשי|חופשייה|בלי\s+הגבלות|ללא\s+הגבלות)|(תעמידי|תעמיד|העמידי|העמד)\s+פנים|(תתנהגי|תתנהג)\s+כמו\s+(בוט|מודל|עוזר|עוזרת|מישהו|מישהי|האקר|אדם)|(תשחקי|תשחק)\s+(את\s+)?(ה)?תפקיד|מצב\s+(מפתח|מפתחים|ללא\s+הגבלות|בלי\s+הגבלות)|(תעני|ענה|תענה|עני|דברי|תדברי)\s+(בלי|ללא)\s+(שום\s+)?(הגבלות|מגבלות|צנזורה|סינון)/,
 ];
+// explicit override wording only: "your rules for lab visitors" or "the original instructions of the extinguisher" are real questions
 const EN = [
-  /\b(ignore|disregard|forget|override|bypass)\b[^.\n]{0,25}\b(previous|prior|above|earlier|preceding|initial|your|system|all (of )?(your|the) (previous|prior))\b[^.\n]{0,20}\b(instructions?|prompts?|rules|guidelines|directives|constraints)\b/i,
-  /\b(system|initial|hidden|original|developer)\s+(prompt|instructions?)\b/i,
-  /\b(reveal|show|print|repeat|output|tell me|what are|leak|dump)\b[^.\n]{0,25}\byour\s+(instructions?|prompt|rules|guidelines|configuration)\b/i,
-  /\b(you are now|from now on,? you are|act as (an? )?(unrestricted|uncensored|different|evil|dan)\b|pretend (to be|you are)|roleplay as|developer mode|jailbreak|dan mode|do anything now|answer without (any )?(restrictions|filters|limits))/i,
+  /\b(ignore|disregard|forget|override|bypass)\b[^.\n]{0,25}\b(previous|prior|above|earlier|preceding|initial|your|system|all (of )?(your|the) (previous|prior))\b[^.\n]{0,20}\b(instructions?|prompts?|directives)\b/i,
+  /\b(system|hidden|developer)\s+(prompt|instructions?)\b|\byour\s+(system\s+)?prompt\b/i,
+  /\b(reveal|print|repeat|output|leak|dump)\b[^.\n]{0,25}\byour\s+(instructions?|prompt|configuration)\b/i,
+  /\b(you are now (dan|an? (unrestricted|uncensored|evil|different) (ai|bot|assistant|model))|from now on,? you are (an? )?(unrestricted|uncensored|evil|different|dan)|act as (an? )?(unrestricted|uncensored|evil|dan)\b|pretend (to be|you are) (an? )?(unrestricted|uncensored|evil|different|human|person|dan)|roleplay as|developer mode|jailbreak|dan mode|do anything now|answer without (any )?(restrictions|filters|limits))/i,
 ];
 
 /** True when the message tries to override the bot's rules, reveal its instructions or switch its role. */

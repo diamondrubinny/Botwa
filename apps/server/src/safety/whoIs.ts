@@ -98,10 +98,11 @@ export function formatOfficers(found: { topic: string; officers: PublicOfficer[]
 }
 
 /** "מי ראש / מנהלת יחידת הבטיחות?", "who is the head of the safety unit?" (a question, not "ראש היחידה שלי הוא…") */
-const HEAD_HE = /(ראש|ראשת|מנהל|מנהלת)\s+(ה)?(יחידת|יחידה|היחידה)/;
-const HEAD_EN = /\b(head of (the )?(safety )?unit|unit head|head of safety|safety (unit )?(director|manager))\b/i;
-const QUESTION = /(^|\s)(מי|מיהו|מיהי|מה|איך|למי|את מי|פרטי|טלפון|מייל|who|what|how)(\s|$)|[?؟]/i;
-export const isHeadQuestion = (t: string) => (HEAD_HE.test(t) || HEAD_EN.test(t)) && QUESTION.test(t);
+const HEAD = '(?:ה)?(?:ראש|ראשת|מנהל|מנהלת)\\s+(?:ה)?(?:יחידת|יחידה|היחידה)';
+// the head of the unit is what is asked about: "מי ראש היחידה?", "מה הטלפון של מנהלת יחידת הבטיחות", never "ראש היחידה שלי ביקש שאדווח…"
+const HEAD_HE = new RegExp(`^(?:(?:ו)?(?:מי|מיהו|מיהי|מי זה|מי זאת|מי זו)\\s+|(?:מה|מהו|מהם)\\s+(?:ה)?(?:טלפון|מייל|אימייל|מספר|פרטי\\s+(?:ה)?קשר)\\s+(?:של\\s+)?|(?:פרטי\\s+(?:ה)?קשר|טלפון|מייל)\\s+(?:של\\s+)?|(?:איך|כיצד)\\s+(?:פונים|מגיעים|יוצרים קשר)\\s+(?:ל|אל\\s+|עם\\s+))${HEAD}(?!\\s+(?:שלי|שלנו|שלו|שלה|שלהם|ביקש|ביקשה|אמר|אמרה))`);
+const HEAD_EN = /^(who('?s| is)|what('?s| is) the (phone|e-?mail|contact)( number| details)? (of|for)|how (do i|can i|to) (contact|reach))\s+(the\s+)?(head of (the )?(safety )?unit|unit head|head of safety|safety (unit )?(director|manager))\b/i;
+export const isHeadQuestion = (t: string) => { const x = t.trim().replace(/^[\s,.!?]+/, ''); return HEAD_HE.test(x) || HEAD_EN.test(x); };
 /** a topic naming the head of the unit ("ראש יחידת הבטיחות", "מנהלת היחידה", "Head of Safety Unit") */
 const isHeadTopic = (topic: string) => /(ראש|ראשת|מנהל|מנהלת|head|director)/i.test(topic) && /(יחיד|unit|safety)/i.test(topic);
 export const HEAD_UNKNOWN = 'הפרטים של ראש יחידת הבטיחות לא מוגדרים אצלי כרגע. אפשר לכתוב כאן את הפנייה, והיא תועבר לצוות היחידה.';

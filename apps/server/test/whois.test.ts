@@ -60,12 +60,15 @@ describe('Betty answers who the officer is', () => {
   afterAll(async () => { await db.end(); });
 
   it('the head of the unit: "מי ראש יחידת הבטיחות?" / "who is the head of the safety unit?"', async () => {
-    for (const q of ['מי ראש יחידת הבטיחות?', 'מיהי ראש היחידה?', 'מי מנהלת יחידת הבטיחות', 'מי מנהלת יחידה הבטיחות', 'מי ראש יחידת הבטיחות', 'מה הטלפון של ראש היחידה', 'Who is the head of the safety unit?']) {
+    for (const q of ['מי ראש יחידת הבטיחות?', 'מיהי ראש היחידה?', 'מי מנהלת יחידת הבטיחות', 'מי מנהלת יחידה הבטיחות', 'מי ראש יחידת הבטיחות', 'מה הטלפון של ראש היחידה', 'פרטי קשר של מנהלת היחידה', 'איך פונים לראש היחידה?', 'Who is the head of the safety unit?']) {
       const r = await officerReply(db, q);
       expect(r, q).toContain('ראשת יחידה לדוגמה');
       expect(r, q).toContain('04-829-5555');
     }
     expect(await officerReply(db, 'ראש היחידה שלי הוא פרופ׳ כהן')).toBeNull();          // telling, not asking
+    // found in review: a report that mentions the head of the unit is a report, not a question about them
+    expect(await officerReply(db, 'ראש היחידה שלי ביקש שאדווח על מפגע, מה עושים?')).toBeNull();
+    expect(await officerReply(db, 'מנהל היחידה שלנו אמר לפנות אליכם לגבי דליפת גז?')).toBeNull();
     expect(await officerReply(db, 'מי הממונה על בטיחות אש?')).not.toContain('ראשת יחידה');
     // no head of unit in the list: a clear answer, never knowledge-base suggestions
     await db.query(`UPDATE officers SET active = false WHERE name = 'ראשת יחידה לדוגמה'`);

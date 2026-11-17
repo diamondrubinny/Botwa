@@ -405,6 +405,8 @@ export class ChannelManager {
           if (m.menuPage !== undefined && r.messageId) {
             this.emit({ channelId, type: 'message', conversationId: r.conversationId, messageId: r.messageId });
             if (await this.sendMenuPage(channelId, r.conversationId, m.externalContactId, m.menuPage).catch(() => false)) return;
+            // the page could not be shown (no menu among the last messages, or the list was refused): the main menu, never an invalid choice
+            m = { ...m, text: 'תפריט', menuPage: undefined };
           }
           // the customer's language (Hebrew or English): Betty answers in it, and the conversation shows it as a tag
           if (r.messageId && !m.media && m.text && !isCommentContact(m.externalContactId)) await this.noteLanguage(r.conversationId, m.text).catch(() => undefined);
@@ -1118,7 +1120,12 @@ export class ChannelManager {
     }
     // "לילה טוב" / "יום טוב" / "good night": a goodbye that fits the hour; never an answer to the menu, never a hand-over
     // (only once Betty has spoken: "שבת שלום" / "לילה טוב" as the very first message is a hello, and the welcome answers it)
-    if (text && isFarewell(text) && (await this.db.query(`SELECT 1 FROM messages WHERE conversation_id = $1 AND direction = 'out' LIMIT 1`, [convId])).rowCount) {
+    // ("לילה טוב" answering Betty's own night greeting "לילה טוב, כאן בטי…" is a hello back, not a goodbye)
+    // (the opening comes in several messages: any of Betty's messages of the last 10 minutes that starts with those words counts)
+    const recentOut = text && isFarewell(text) ? (await this.db.query(`SELECT body FROM messages WHERE conversation_id = $1 AND direction = 'out' ORDER BY created_at DESC LIMIT 5`, [convId])).rows.map((r) => String(r.body ?? '')) : null;
+    const said = text ? text.replace(/[!.,\s\u{1F300}-\u{1FAFF}\u2600-\u27BF\u{FE0F}]+$/u, '').trim() : '';
+    const echo = !!recentOut && !!said && (await this.db.query(`SELECT 1 FROM messages WHERE conversation_id = $1 AND direction = 'out' AND auto AND created_at > now() - interval '10 minutes' AND left(btrim(body), $3) = $2 LIMIT 1`, [convId, said, said.length])).rowCount! > 0;
+    if (text && recentOut && recentOut.length > 0 && !echo && isFarewell(text)) {
       await this.botSay(channelId, convId, ext, farewellReply(text, await this.dayPartNow()));
       return;
     }
@@ -1276,7 +1283,8 @@ export class ChannelManager {
       void sendAlert(this.cfg, `⏫ פנייה דחופה${c.num ? ` #${c.num}` : ''} בלי מענה אנושי ${mins} דקות. ${who ? `הועברה אל ${who}.` : 'לא נמצא מנהל זמין!'}`, { conversationId: c.id });
       if (to) {
         this.onAssigned?.(c.id, to, 'handover');
-        // the person linked their WhatsApp to Betty: a short message there (no customer details)
+        // the person linked their WhatsApp to Betty: a short message there (no customer details; the hazard photo only when a
+        // manager turned on "send the photo" in the escalation settings)
         const link = (await this.db.query('SELECT channel_id, external_id FROM staff_links WHERE user_id = $1 ORDER BY last_used_at DESC NULLS LAST LIMIT 1', [to])).rows[0] as { channel_id: string; external_id: string } | undefined;
         if (link) await this.sendText(link.channel_id, link.external_id, `⏫ פנייה דחופה${c.num ? ` #${c.num}` : ''} הועברה אליך: אין מענה אנושי כבר ${mins} דקות.
 לפתיחה: ${this.cfg.APP_ORIGIN.split(',')[0]!.trim()}/#/inbox?c=${c.id}`, { background: true }).catch(() => undefined);

@@ -19,10 +19,13 @@ const escRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
  */
 export function withoutIntro(text: string, botName?: string | null): string {
   const who = ['\\{בוט\\}', '\\{bot\\}', ...((botName ?? '').trim().length >= 2 ? [escRe(botName!.trim())] : [])].join('|');
-  const tail = '(?:\\s+(?:מיחידת|מ|של|from)[^.!?\\n\\p{Extended_Pictographic}]*)?\\s*[.!]?';
+  // the name as a whole word ("בטי", not the start of "בטיחות"), then only "מיחידת …" / "של …" / "from …" up to the end of that phrase;
+  // never across a line break (a menu may follow on the next line)
+  const end = '(?=$|[ \\t,.!?…:;\\n]|\\p{Extended_Pictographic})';
+  const tail = '(?:[ \\t]+(?:מיחידת|של|from)(?:[ \\t]+[^\\s.,!?:;\\p{Extended_Pictographic}]+){1,4})?[ \\t]*[.!]?';
   return text
-    .replace(new RegExp(`[,،]?\\s*(?:כאן|זאת|זו|זה)\\s+(?:${who})${tail}`, 'gu'), ' ')
-    .replace(new RegExp(`[,]?\\s*(?:this is|it's|i'm|i am)\\s+(?:${who})${tail}`, 'giu'), ' ')
+    .replace(new RegExp(`[,،]?[ \\t]*(?:כאן|זאת|זו|זה)[ \\t]+(?:${who})${end}${tail}`, 'gu'), ' ')
+    .replace(new RegExp(`[,]?[ \\t]*(?:this is|it's|i'm|i am)[ \\t]+(?:${who})${end}${tail}`, 'giu'), ' ')
     .replace(/[ \t]{2,}/g, ' ').replace(/[ \t]+([,.!?:;])/g, '$1').replace(/^[ \t]+|[ \t]+$/gm, '');
 }
 

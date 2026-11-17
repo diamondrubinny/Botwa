@@ -275,6 +275,29 @@ describe('official channel: menus as buttons and message templates', () => {
     expect(t).not.toContain('לא מצאתי תשובה מדויקת');
   });
 
+  it('"לילה טוב" answering Betty\'s own night greeting is a hello back (no goodbye); a "more topics" tap with no menu to page brings the main menu', async () => {
+    await call('PUT', '/settings/bot', 'adm', { ...DEFAULT_BOT, enabled: true, interactiveMenus: false, items: [{ title: 'שעות', answer: 'a' }, { title: 'מיקום', answer: 'b' }], humanOption: true });
+    const texts = () => sent.filter((s) => s.body.type === 'text').map((s) => (s.body.text as { body: string }).body);
+    await hook(inbound('wamid.NG1', '972501110007', { type: 'text', text: { body: 'שלום' } }));
+    await new Promise((r) => setTimeout(r, 80));
+    const conv = (await db.query(`SELECT conversation_id FROM messages WHERE external_id = 'wamid.NG1'`)).rows[0].conversation_id;
+    await db.query(`INSERT INTO messages (conversation_id, direction, body, auto) VALUES ($1, 'out', 'לילה טוב, כאן בטי מיחידת הבטיחות 👋', true)`, [conv]);
+    sent.length = 0;
+    await hook(inbound('wamid.NG2', '972501110007', { type: 'text', text: { body: 'לילה טוב' } }));
+    await new Promise((r) => setTimeout(r, 80));
+    expect(texts().join('\n')).not.toMatch(/^(לילה טוב 🌙|ערב נעים|המשך יום נעים)/);
+    // the tap on "more topics" in a conversation with no menu to page: the main menu, never an invalid choice or a hand-over
+    await hook(inbound('wamid.NG3', '972501110008', { type: 'text', text: { body: 'שלום' } }));
+    await new Promise((r) => setTimeout(r, 80));
+    const c2 = (await db.query(`SELECT conversation_id FROM messages WHERE external_id = 'wamid.NG3'`)).rows[0].conversation_id;
+    await db.query(`DELETE FROM messages WHERE conversation_id = $1 AND direction = 'out'`, [c2]);
+    sent.length = 0;
+    await hook(inbound('wamid.NG4', '972501110008', { type: 'interactive', interactive: { type: 'list_reply', list_reply: { id: 'more:1', title: 'נושאים נוספים ▸' } } }));
+    await new Promise((r) => setTimeout(r, 80));
+    expect(texts().join('\n')).toContain('1. שעות');
+    expect((await db.query(`SELECT bot_state FROM conversations WHERE id = $1`, [c2])).rows[0].bot_state).not.toBe('human');
+  });
+
   it('two or three short options become reply buttons; when Meta refuses, or the setting is off, the numbered text is sent instead', async () => {
     await call('PUT', '/settings/bot', 'adm', { ...DEFAULT_BOT, enabled: true, items: [{ title: 'שעות', answer: 'a' }, { title: 'מיקום', answer: 'b' }], humanOption: false });
     sent.length = 0;

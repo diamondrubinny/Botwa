@@ -119,11 +119,25 @@ describe('conversation automations', () => {
     await db.query('DELETE FROM conversations');
   });
 
+  it('a conversation handed to the team that no person has answered is never told "you did not reply" nor closed', async () => {
+    await setA({ ...DEFAULT_AUTOMATIONS, idle: { ...DEFAULT_AUTOMATIONS.idle, enabled: true, reminderAfter: 60, closeAfter: 120 } });
+    const c = await conv('ממתין', { inAgo: 400, outAgo: 390, bot: true });            // Betty's "passed to the team" line
+    await db.query(`UPDATE conversations SET bot_state = 'human' WHERE id = $1`, [c.id]);
+    sent.length = 0;
+    await runAutomations(db, out);
+    expect(await status(c.id)).toBe('open');
+    expect(sent).toHaveLength(0);
+    // once a person answered and the customer went quiet, the normal rules apply again
+    await db.query(`INSERT INTO messages (conversation_id, direction, body, auto, created_at) VALUES ($1, 'out', 'תשובה', false, $2)`, [c.id, ago(70)]);
+    expect(await runAutomations(db, out)).toMatchObject({ reminded: 1 });
+    await db.query('DELETE FROM conversations');
+  });
+
   it('reads the answer to the reminder: not received, done, or one more question', () => {
     for (const t of ['לא', 'לא קיבלתי', 'לא קיבלתי תשובה', 'עדיין לא', 'עוד לא', 'אף אחד לא ענה', 'לא חזרו אליי', 'עדיין מחכה', 'No', "I didn't get an answer", 'not yet', 'still waiting']) expect(reminderAnswer(t), t).toBe('missing');
     for (const t of ['כן', 'כן, תודה', 'קיבלתי', 'כן קיבלתי תודה', 'לא תודה', 'זהו', 'הכל טוב', 'yes', 'got it', 'no thanks']) expect(reminderAnswer(t), t).toBe('done');
     for (const t of ['יש לי עוד שאלה', 'כן יש', 'עוד שאלה']) expect(reminderAnswer(t), t).toBe('more');
-    for (const t of ['יש מפגע בחדר 304', 'מתי מגיעים לפנות פסולת?', '', 'תפריט']) expect(reminderAnswer(t), t).toBeNull();
+    for (const t of ['יש מפגע בחדר 304', 'מתי מגיעים לפנות פסולת?', '', 'תפריט', 'אין']) expect(reminderAnswer(t), t).toBeNull();   // "אין" could mean "no answer": not closed on
   });
 
   it('holding message: once per wait when nobody answered, not while the bot handles it', async () => {
