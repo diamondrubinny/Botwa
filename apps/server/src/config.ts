@@ -87,6 +87,21 @@ const schema = z.object({
   WEBAUTHN_RP_ID: z.string().min(3).optional(),
   WEB_DIST: z.string().optional(),
   MESSAGE_RETENTION_DAYS: z.coerce.number().int().min(0).default(365),
+  /** encrypted backups copied to S3-compatible storage (AWS S3, Cloudflare R2, Backblaze B2, Wasabi, MinIO); all five or none */
+  OFFSITE_S3_ENDPOINT: z.string().url().refine((v) => /^https:\/\//.test(v) || /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?\/?$/.test(v), 'https only (http for a local MinIO)').optional(),
+  OFFSITE_S3_BUCKET: z.string().regex(/^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$/).optional(),
+  OFFSITE_S3_REGION: z.string().regex(/^[a-z0-9-]{2,30}$/).default('us-east-1'),
+  OFFSITE_S3_ACCESS_KEY: z.string().min(3).optional(),
+  OFFSITE_S3_SECRET_KEY: z.string().min(8).optional(),
+  OFFSITE_S3_PREFIX: z.string().regex(/^[\w./-]{0,100}$/).default('botwa/'),
+  /** how many backups to keep outside the server (older copies there are deleted after an upload) */
+  OFFSITE_KEEP: z.coerce.number().int().min(1).max(365).default(30),
+  /** the audit log (who did what, when): deleted after this many days; 0 = kept */
+  AUDIT_RETENTION_DAYS: z.coerce.number().int().min(0).default(730),
+  /** form requests that were never signed (expired, cancelled, left open): deleted after this many days; 0 = kept */
+  FORM_UNSIGNED_RETENTION_DAYS: z.coerce.number().int().min(0).default(180),
+  /** signed forms (the encrypted PDF and values): 0 = kept. A signed document may have to be kept by law: check before setting */
+  FORM_SIGNED_RETENTION_DAYS: z.coerce.number().int().min(0).default(0),
   REQUIRE_MFA_FOR_PRIVILEGED: bool('true'),
 });
 

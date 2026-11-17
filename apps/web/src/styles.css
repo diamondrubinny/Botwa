@@ -922,3 +922,5 @@ dialog.gsearch { width: min(640px, calc(100vw - 1.5rem)); max-width: none; margi
 /* who the customer said they are (identification answers), under the conversation header */
 .identity-card { background: var(--surface-2); border-block-end: 1px solid var(--border); color: var(--text); }
 .identity-card dt { color: var(--muted); }
+/* system status: a level that needs a look */
+td.warn { color: var(--warn); font-weight: 600; }

@@ -3,7 +3,9 @@ import { sendAlert } from './alerts.js';
 import { sendDueScheduled } from './scheduled.js';
 import { buildApp } from './app.js';
 import { ChannelManager } from './channels/manager.js';
-import { purgeOldMessages } from './inbox.js';
+import { runRetention } from './retention.js';
+import { HealthAlerts, systemHealth } from './system/health.js';
+import { offsiteConfigured, offsiteStatus, uploadBackup, weeklyOffsiteCheck } from './system/offsite.js';
 import { createBackup, verifyBackup, backupPath } from './backup.js';
 import { MediaService } from './media/store.js';
 import { loadConfig } from './config.js';
@@ -47,13 +49,16 @@ setInterval(() => void mgr.fire?.runDue().then((r) => { if (r?.failed.length) vo
 setInterval(() => void purgeSmsLog(db).catch((err) => app.log.error({ err }, 'sms log purge failed')), 86_400_000).unref();
 setInterval(() => void mgr.kb?.refreshDue().catch((err) => app.log.error({ err }, 'kb refresh failed')), 3600_000).unref();
 // learning suggestions nobody approved: kept 90 days at most (they may hold customers' wording)
-setInterval(() => void db.query(`DELETE FROM kb_learn WHERE status <> 'approved' AND updated_at < now() - interval '90 days'`).catch((err) => app.log.error({ err }, 'learning purge failed')), 24 * 3600_000).unref();
-setInterval(() => void db.query(`DELETE FROM webchat_visitors WHERE last_seen_at < now() - interval '90 days'`).catch((err) => app.log.error({ err }, 'webchat purge failed')), 24 * 3600_000).unref();
-setInterval(() => void mgr.kb?.purgeOldQueries(cfg.KB_QUERY_RETENTION_DAYS).catch((err) => app.log.error({ err }, 'kb purge failed')), 24 * 3600_000).unref();
 
-const purge = () => purgeOldMessages(db, cfg.MESSAGE_RETENTION_DAYS, media).catch((err) => app.log.error({ err }, 'retention purge failed'));
+// the retention policy: every rule in one daily pass, recorded with how many records of each kind were deleted
+const purge = () => runRetention(db, cfg, media).then((r) => { if (r.error) app.log.error({ error: r.error }, 'retention purge had errors'); }).catch((err) => app.log.error({ err }, 'retention purge failed'));
 void purge();
 setInterval(purge, 24 * 3600 * 1000).unref();
+// system status: an alert (ALERT_WEBHOOK_URL) for a channel down 10+ minutes, a full disk or a missing backup; once until it recovers
+const healthAlerts = new HealthAlerts((text) => void sendAlert(cfg, text));
+setInterval(() => void systemHealth(db, cfg, media, { channels: () => mgr.channelStates(), offsite: () => offsiteStatus(db, cfg) }).then((h) => healthAlerts.check(h.items)).catch((err) => app.log.error({ err }, 'health check failed')), 5 * 60_000).unref();
+// once a week: the newest copy outside the server is downloaded, decrypted and checked like a restore would read it
+setInterval(() => void weeklyOffsiteCheck(db, cfg).then(async (ran) => { if (ran) { const st = await offsiteStatus(db, cfg); if (!st.lastCheckOk) void sendAlert(cfg, `⚠️ בדיקת השחזור מהגיבוי שמחוץ לשרת נכשלה: ${st.lastCheckError ?? ''}`); } }).catch((err) => app.log.error({ err }, 'offsite check failed')), 3600_000).unref();
 // Optional automatic daily encrypted backup.
 if (cfg.BACKUP_AUTO_HOUR !== undefined) {
   let lastDay = '';
@@ -62,7 +67,15 @@ if (cfg.BACKUP_AUTO_HOUR !== undefined) {
     const day = now.toDateString();
     if (now.getHours() === cfg.BACKUP_AUTO_HOUR && day !== lastDay) {
       lastDay = day;
-      createBackup(cfg).then(async (b) => { const v = await verifyBackup(cfg, backupPath(cfg, b.name)); (v.ok ? app.log.info : app.log.error).call(app.log, { backup: b.name, verified: v.ok, reason: v.reason }, 'automatic backup done'); }).catch((err) => app.log.error({ err }, 'automatic backup failed'));
+      createBackup(cfg).then(async (b) => {
+        const v = await verifyBackup(cfg, backupPath(cfg, b.name));
+        (v.ok ? app.log.info : app.log.error).call(app.log, { backup: b.name, verified: v.ok, reason: v.reason }, 'automatic backup done');
+        // a verified backup is copied outside the server (when configured); a failure is an alert, the local copy stays
+        if (v.ok && offsiteConfigured(cfg)) {
+          const up = await uploadBackup(db, cfg, b.name);
+          if (!up.ok) { app.log.error({ error: up.error }, 'offsite backup upload failed'); void sendAlert(cfg, `⚠️ העלאת הגיבוי אל מחוץ לשרת נכשלה: ${up.error}. הגיבוי המקומי קיים.`); }
+        }
+      }).catch((err) => app.log.error({ err }, 'automatic backup failed'));
     }
   }, 60_000).unref();
 }

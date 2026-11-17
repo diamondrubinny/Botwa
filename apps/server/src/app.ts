@@ -58,6 +58,8 @@ import { tagRoutes } from './routes/tags.js';
 import { settingsRoutes } from './routes/settings.js';
 import { eventRoutes } from './routes/events.js';
 import { reportRoutes } from './routes/reports.js';
+import { retentionRoutes } from './routes/retention.js';
+import { systemRoutes } from './routes/system.js';
 import { mediaRoutes } from './routes/media.js';
 import { conversationRoutes } from './routes/conversations.js';
 import type { ChannelManager } from './channels/manager.js';
@@ -173,6 +175,8 @@ export async function buildApp(cfg: Config, db: Db, mgr: ChannelManager, media: 
   incidentRoutes(app, db, cfg);
   inspectionRoutes(app, db);
   backupRoutes(app, db, cfg);
+  retentionRoutes(app, db, cfg, media);
+  systemRoutes(app, db, cfg, mgr, media);
   const push = new PushService(db, cfg);
   await push.init();
   mgr.onInbound = (id) => void push.notifyInbound(id).catch(() => undefined);

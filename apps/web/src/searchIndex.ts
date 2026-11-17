@@ -10,6 +10,8 @@ const any = () => true;
 const P = (p: Parameters<typeof can>[1]) => (me: Me) => can(me, p);
 
 export const SEARCH_INDEX: SearchEntry[] = [
+  { label: 'מצב המערכת (ערוצים, אנטי-וירוס, דיסק, גיבויים)', where: 'הגדרות', words: 'מצב מערכת בריאות ניטור health דיסק ערוץ נפל תקלה שרת גיבוי', page: 'settings', s: 'sys-h', allowed: P('settings.manage') },
+  { label: 'מדיניות שמירה ומחיקה (מה נמחק ומתי)', where: 'הגדרות', words: 'שמירה מחיקה retention פרטיות תיקון 13 יומן ביקורת טפסים ניקוי', page: 'settings', s: 'ret-h', allowed: P('settings.manage') },
   // bot
   { label: 'הודעת פתיחה של הבוט', where: 'בוט', words: 'פתיחה ברוכים הבאים welcome תפריט ראשי', page: 'bot', s: 'b-welcome', allowed: P('bot.view') },
   { label: 'הצהרה שבטי היא בוט ולא נציגה אנושית', where: 'בוט', words: 'הצהרה בוט שקיפות לא אנושי נציג אנושי גילוי disclosure transparency', page: 'bot', s: 'b-disc', allowed: P('bot.view') },

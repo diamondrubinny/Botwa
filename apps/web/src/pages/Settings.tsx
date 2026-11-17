@@ -9,6 +9,9 @@ import { ContactsCsv } from '../components/ContactsCsv';
 import { ForwardRules } from '../components/ForwardRules';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { AutomationsCard } from '../components/AutomationsCard';
+import { RetentionCard } from '../components/RetentionCard';
+import { SystemHealth } from '../components/SystemHealth';
+import { OffsiteBackup } from '../components/OffsiteBackup';
 import { usePoll } from '../hooks';
 import { errText } from '../strings';
 
@@ -187,6 +190,7 @@ export function Settings({ me }: { me: Me }) {
           ))}
         </div>
         <p role="status" className={bkMsg?.ok ? 'ok' : 'error'}>{bkMsg?.text}</p>
+        <OffsiteBackup latest={backups[0]?.name ?? null} onMsg={setBkMsg} />
         <div style={{ overflowX: 'auto' }}>
           <table>
             <caption className="sr-only">קבצי גיבוי</caption>
@@ -216,6 +220,8 @@ export function Settings({ me }: { me: Me }) {
       <ConfirmDialog open={!!delBk} danger title="מחיקת גיבוי" message={`הקובץ ${delBk ?? ''} יימחק לצמיתות.`} onCancel={() => setDelBk(null)}
         onConfirm={async () => { const n = delBk!; setDelBk(null); await api('DELETE', `/backups/${n}`).catch(() => undefined); await loadBackups(); }} />
       </>)}
+      {canEdit && <SystemHealth />}
+      {canEdit && <RetentionCard canEdit={canEdit} />}
       {canView && <SecurityPanel canEdit={canEdit} />}
       {can(me, 'contacts.manage') && <ContactsCsv />}
       {canEdit && <ForwardRules />}

@@ -129,6 +129,12 @@ export class ChannelManager {
     return probe !== null;
   }
 
+  /** Every channel's live status and since when (for the system status card). */
+  async channelStates(): Promise<{ id: string; label: string; type: string; status: string; since: number | null; autoStart: boolean }[]> {
+    const rows = (await this.db.query('SELECT id, label, type, status, auto_start FROM channels ORDER BY created_at')).rows as { id: string; label: string; type: string; status: string; auto_start: boolean }[];
+    return rows.map((r) => ({ id: r.id, label: r.label, type: r.type, status: this.statuses.get(r.id) ?? r.status ?? 'stopped', since: this.statusSince.get(r.id) ?? null, autoStart: r.auto_start }));
+  }
+
   snapshot(channelId: string): { status: ChannelStatus; qr?: string; code?: string } {
     return { status: this.statuses.get(channelId) ?? 'stopped', qr: this.lastQr.get(channelId), code: this.lastCode.get(channelId) };
   }
