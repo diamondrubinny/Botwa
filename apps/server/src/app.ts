@@ -62,6 +62,7 @@ import { retentionRoutes } from './routes/retention.js';
 import { systemRoutes } from './routes/system.js';
 import { mediaRoutes } from './routes/media.js';
 import { conversationRoutes } from './routes/conversations.js';
+import { agentTranslationRoutes } from './routes/agent-translation.js';
 import type { ChannelManager } from './channels/manager.js';
 import type { Config } from './config.js';
 import type { Db } from './db.js';
@@ -172,6 +173,7 @@ export async function buildApp(cfg: Config, db: Db, mgr: ChannelManager, media: 
   scheduledRoutes(app, db);
   settingsRoutes(app, db, mgr);
   translationRoutes(app, db);
+  agentTranslationRoutes(app, db, cfg);
   incidentRoutes(app, db, cfg);
   inspectionRoutes(app, db);
   backupRoutes(app, db, cfg);

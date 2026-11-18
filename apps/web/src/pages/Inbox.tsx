@@ -10,6 +10,7 @@ import { ConfirmDialog } from '../components/ConfirmDialog';
 import { PersonPanel } from '../components/PersonPanel';
 import { CaseHistory } from '../components/CaseHistory';
 import { IdentityCard } from '../components/IdentityCard';
+import { DraftTranslation, foreignLang, MessageTranslation, SentOriginal, useTranslationStatus } from '../components/Translation';
 import { botAvatarSrc, botLabel, useBrand } from '../brand';
 import { Icon } from '../components/Icon';
 import { usePoll } from '../hooks';
@@ -88,6 +89,8 @@ export function Inbox({ me }: { me: Me }) {
   const [tagFilter, setTagFilter] = useState('');
   const [err, setErr] = useState('');
   const [sending, setSending] = useState(false);
+  const mt = useTranslationStatus();
+  const [convLang, setConvLang] = useState<'he' | 'en' | 'ar' | 'ru'>('he');
   const [formPanel, setFormPanel] = useState(false);
   useEffect(() => { setFormPanel(false); }, [selId]);
   const [picker, setPicker] = useState<'emoji' | 'gif' | null>(null);
@@ -231,6 +234,29 @@ export function Inbox({ me }: { me: Me }) {
     edit(text.startsWith('/') ? body : text ? `${text}\n${body}` : body);
     taRef.current?.focus();
   };
+
+  // the conversation's language, for "translate before sending" (it may change as the customer writes, or by a person)
+  useEffect(() => {
+    let live = true;
+    if (!selId || !mt?.ready) { setConvLang('he'); return; }
+    api<{ lang: 'he' | 'en' | 'ar' | 'ru' }>('GET', `/conversations/${selId}/profile`).then((p) => { if (live) setConvLang(p.lang); }).catch(() => undefined);
+    return () => { live = false; };
+  }, [selId, mt?.ready, msgCount, bump]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  /** Send the machine translation of the agent's Hebrew reply; the Hebrew is kept with the message. True when sent. */
+  async function sendTranslated(translated: string, original: string): Promise<boolean> {
+    if (!selId || sending) return false;
+    setSending(true);
+    let ok = false;
+    await act(async () => {
+      await api('POST', `/conversations/${selId}/messages`, { text: translated, originalText: original, ...(isComment ? { commentReply } : {}) });
+      if (isComment) setCommentReply(null);
+      edit('');
+      ok = true;
+    });
+    setSending(false);
+    return ok;
+  }
 
   async function send(e?: FormEvent) {
     e?.preventDefault();
@@ -596,6 +622,8 @@ export function Inbox({ me }: { me: Me }) {
                   <div key={m.id} className={`msg ${m.direction}${m.auto ? ' auto' : ''}`}>
                     {m.attachment && <AttachmentView a={m.attachment} />}
                     {m.body && <div className="msg-text" dir={textDir(m.body)}>{m.body}</div>}
+                    {m.direction === 'in' && mt?.ready && foreignLang(m.body) && <MessageTranslation key={`${sel.id}-${m.id}`} convId={sel.id} m={m} auto={mt.auto && msgs.indexOf(m) >= msgs.length - 15} />}
+                    {m.direction === 'out' && m.translatedFrom && <SentOriginal text={m.translatedFrom} />}
                     {m.replyMode && <span className={`mchip reply-${m.replyMode}`}>{m.replyMode === 'public' ? 'נענה בפומבי' : 'נענה בפרטי'}</span>}
                     {m.direction === 'in' && !sel.blocked && <ReactionControl msgId={m.id} current={m.ourReaction} by={m.ourReactionBy} onSet={async (emoji) => {
                       try {
@@ -709,6 +737,9 @@ export function Inbox({ me }: { me: Me }) {
                     <label><input type="radio" name="comment-reply" checked={commentReply === 'public'} onChange={() => setCommentReply('public')} /> תגובה ציבורית מתחת לתגובה</label>
                     {commentReply === 'public' && <p className="reply-warn" role="note">התשובה תהיה גלויה לכל מי שרואה את הפוסט. אל תכללו פרטים אישיים, מספרי טלפון או פרטי פנייה.</p>}
                   </fieldset>
+                )}
+                {mt?.ready && convLang !== 'he' && !file && (
+                  <DraftTranslation convId={sel.id} lang={convLang} draft={text} disabled={sending || !!sel.blocked || !!sel.optedOut || (isComment && !commentReply)} onSend={sendTranslated} />
                 )}
                 <div className="composer-row">
                   {!isComment && <button type="button" className="attach" onClick={() => fileRef.current?.click()} aria-label="צירוף קובץ"><Icon name="clip" /></button>}

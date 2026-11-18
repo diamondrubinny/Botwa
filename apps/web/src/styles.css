@@ -924,3 +924,16 @@ dialog.gsearch { width: min(640px, calc(100vw - 1.5rem)); max-width: none; margi
 .identity-card dt { color: var(--muted); }
 /* system status: a level that needs a look */
 td.warn { color: var(--warn); font-weight: 600; }
+
+/* machine translation for the agent (local model) */
+.msg-translation { margin-top: .35rem; padding: .35rem .55rem; border-inline-start: 3px solid var(--accent); background: color-mix(in srgb, var(--surface-2) 80%, transparent); border-radius: 6px; font-size: .92rem; }
+.msg-translation summary { cursor: pointer; }
+.msg-translation .mt-label { display: block; color: var(--muted); font-size: .76rem; margin-bottom: .15rem; }
+.mt-warn { display: block; color: var(--warn); font-weight: 600; font-size: .8rem; margin: .2rem 0 0; }
+.msg-translation-actions { margin-top: .25rem; }
+.link-btn { background: none; border: none; padding: .1rem 0; min-height: 0; color: var(--accent); text-decoration: underline; cursor: pointer; font-size: .85rem; }
+.link-btn:disabled { color: var(--muted); cursor: progress; }
+.draft-translation { margin: .3rem 0; }
+.draft-translation > button { min-height: 36px; }
+.draft-translation-preview { display: grid; gap: .35rem; padding: .5rem; border: 1px solid var(--border); border-radius: 8px; background: var(--surface-2); }
+.draft-translation-preview label { font-size: .85rem; font-weight: 600; }

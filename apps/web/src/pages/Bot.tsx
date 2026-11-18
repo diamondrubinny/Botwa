@@ -2,6 +2,7 @@ import { BotPersona } from '../components/BotPersona';
 import { Translations } from '../components/Translations';
 import { IncidentControl } from '../components/Incident';
 import { AnswerMode } from '../components/AnswerMode';
+import { AgentTranslationSetting } from '../components/Translation';
 import { Loading } from '../components/Loading';
 import { PageTitle } from '../components/Illustration';
 import { useEffect, useState, type FormEvent } from 'react';
@@ -308,6 +309,7 @@ export function Bot({ me }: { me: Me }) {
             <input id="b-kmc" type="number" min={200} max={1500} step={50} value={b.kb.maxChars} onChange={(e) => set({ kb: { ...b.kb, maxChars: Number(e.target.value) } })} />
           </div>
           <AnswerMode mode={b.kb.answerMode ?? 'quote'} canEdit={canEdit} onChange={(m) => set({ kb: { ...b.kb, answerMode: m } })} />
+          <AgentTranslationSetting canEdit={canEdit} />
           <div className="field">
             <label htmlFor="b-kout">שורת סיום מתחת לתשובה (ריק = בלי)</label>
             <input id="b-kout" maxLength={200} value={b.kb.outro ?? ''} onChange={(e) => set({ kb: { ...b.kb, outro: e.target.value } })} />

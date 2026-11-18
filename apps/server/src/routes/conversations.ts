@@ -84,10 +84,12 @@ export function conversationRoutes(app: FastifyInstance, db: Db, mgr: ChannelMan
     if (!(await loadAccessible(db, req.user!, p.data.id))) return reply.code(404).send({ error: 'not_found' });
     const { rows } = await db.query(
       `SELECT m.id, m.direction, (CASE WHEN m.automation = 'form_otp' THEN 'קוד אימות לטופס נשלח (הקוד מוסתר).' ELSE m.body END) AS body, m.sender_user_id AS "senderUserId", COALESCE(u.name_he, u.name) AS "senderName", m.created_at AS "createdAt", m.auto, m.reply_mode AS "replyMode",
+              m.translated_from AS "translatedFrom", tr.body AS "translationHe", tr.numbers_differ AS "translationWarn",
               m.our_reaction AS "ourReaction", CASE WHEN m.our_reaction IS NULL THEN NULL ELSE COALESCE(ru.name_he, ru.name, 'אוטומטית') END AS "ourReactionBy",
               CASE WHEN a.id IS NULL THEN NULL ELSE json_build_object('id', a.id, 'kind', a.kind, 'mime', a.mime, 'size', a.size,
                 'fileName', a.file_name, 'status', a.status, 'detail', a.detail) END AS attachment
          FROM messages m LEFT JOIN users u ON u.id = m.sender_user_id LEFT JOIN users ru ON ru.id = m.our_reaction_by LEFT JOIN attachments a ON a.message_id = m.id
+         LEFT JOIN message_translations tr ON tr.message_id = m.id AND tr.lang = 'he'
         WHERE m.conversation_id = $1 AND ($2::timestamptz IS NULL OR m.created_at < $2)
           AND ($4::text IS NULL OR (m.automation IS DISTINCT FROM 'form_otp' AND m.body ILIKE $4) OR a.file_name ILIKE $4)
         ORDER BY m.created_at DESC LIMIT $3`,
@@ -127,7 +129,8 @@ export function conversationRoutes(app: FastifyInstance, db: Db, mgr: ChannelMan
 
   app.post('/conversations/:id/messages', { preHandler: any, config: { rateLimit: { max: 60, timeWindow: '1 minute' } } }, async (req, reply) => {
     const p = idParam.safeParse(req.params);
-    const b = z.object({ text: z.string().trim().min(1).max(4000), commentReply: z.enum(['public', 'private']).optional() }).safeParse(req.body);
+    // originalText: the agent wrote in Hebrew and sent the machine translation (text); kept so the team sees what was meant
+    const b = z.object({ text: z.string().trim().min(1).max(4000), commentReply: z.enum(['public', 'private']).optional(), originalText: z.string().trim().min(1).max(4000).optional() }).safeParse(req.body);
     if (!p.success || !b.success) return reply.code(400).send({ error: 'bad_request' });
     const u = req.user!;
     const conv = await loadAccessible(db, u, p.data.id);
@@ -155,13 +158,13 @@ export function conversationRoutes(app: FastifyInstance, db: Db, mgr: ChannelMan
       return reply.code(502).send({ error: 'send_failed' });
     }
     const { rows } = await db.query(
-      `INSERT INTO messages (conversation_id, direction, body, external_id, sender_user_id, reply_mode) VALUES ($1,'out',$2,$3,$4,$5)
-       RETURNING id, direction, body, created_at AS "createdAt", reply_mode AS "replyMode"`,
-      [conv.id, b.data.text, sent.externalMessageId ?? null, u.id, comment ? b.data.commentReply : null],
+      `INSERT INTO messages (conversation_id, direction, body, external_id, sender_user_id, reply_mode, translated_from) VALUES ($1,'out',$2,$3,$4,$5,$6)
+       RETURNING id, direction, body, created_at AS "createdAt", reply_mode AS "replyMode", translated_from AS "translatedFrom"`,
+      [conv.id, b.data.text, sent.externalMessageId ?? null, u.id, comment ? b.data.commentReply : null, b.data.originalText && b.data.originalText !== b.data.text ? b.data.originalText : null],
     );
     mgr.notifyMessage(conv.channel_id, conv.id, rows[0].id);
     mgr.hookMessage('message.sent', conv.id, rows[0].id);
-    if (!comment) void learnFromStaff(db, mgr.kb, conv.id, b.data.text).catch(() => undefined);   // a question the bot could not answer: a draft FAQ for approval
+    if (!comment) void learnFromStaff(db, mgr.kb, conv.id, b.data.originalText ?? b.data.text).catch(() => undefined);   // a question the bot could not answer: a draft FAQ for approval
     // Replying claims an unassigned conversation.
     await db.query(
       `UPDATE conversations SET last_message_at = now(), assigned_to = COALESCE(assigned_to, $2), bot_state = 'human' WHERE id = $1`,
