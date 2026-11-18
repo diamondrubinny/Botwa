@@ -519,8 +519,9 @@ describe('safety flow live: areas, template endpoint, placeholders, profile, fil
     async start() { ctxA.events.onStatus('connected'); }
     async stop() {}
     async logout() {}
-    async sendText(_t: string, text: string) { sent.push(text); return { externalMessageId: `s${sent.length}` }; }
+    async sendText(_t: string, text: string) { sent.push(text); return { externalMessageId: `s${++outSeq}` }; }   // unique, like the platform's
   }
+  let outSeq = 0;
   const factory: AdapterFactory = (ty, c) => (ty === 'whatsapp' ? new Fake(c) : null);
   const call = (method: 'GET' | 'POST' | 'PUT' | 'DELETE', url: string, who?: string, payload?: object) =>
     app.inject({ method, url, payload, remoteAddress: `10.68.${Math.floor(++ip / 250)}.${ip % 250}`, headers: { origin: ORIGIN, ...(who ? { cookie: cookies[who]! } : {}) } });
@@ -660,6 +661,30 @@ describe('safety flow live: areas, template endpoint, placeholders, profile, fil
     const c2 = await conv('wa1');
     expect(c2.assigned_to).toBe(ids.o2);                                                     // the chemicals officer chosen in the flow
     expect((await db.query(`SELECT t.name FROM conversation_tags x JOIN tags t ON t.id = x.tag_id WHERE x.conversation_id = $1 ORDER BY t.name`, [c2.id])).rows.map((r) => r.name)).toEqual(['חומ״ס', 'כימיקלים המחייבים ניטור', 'מפגע']);  // the earlier hazard tag stays on the same thread
+  });
+
+  it('a fact on request in every step of the flow, and also after Betty handed over (until a person writes); "עוד" brings another', async () => {
+    await call('PUT', '/settings/bot', 'admin@t.io', { ...DEFAULT_BOT, enabled: true, mode: 'flow' });
+    await say('wa901', 'שלום');
+    expect((await say('wa901', 'בטי תספר לי עובדה מעניינת')).join(' ')).toContain('💡 הידעת?');            // in the middle of the identification
+    for (const t of ['שלום', 'דנה לוי', 'דלג', 'דלג', 'פיסיקה', 'דלג']) await say('wa902', t);
+    expect((await say('wa902', 'תספרי לי עובדה מעניינת')).join(' ')).toContain('💡 הידעת?');             // at the status question
+    await say('wa902', '1');
+    expect((await say('wa902', 'תספרי עובדה מעניינת בבטיחות')).join(' ')).toContain('💡 הידעת?');        // at the topics menu
+    // handed to the team, nobody has written yet: still a fact, with the line that the request is with the team
+    const c = await conv('wa902');
+    await db.query(`UPDATE conversations SET bot_state = 'human' WHERE id = $1`, [c.id]);
+    const f1 = await say('wa902', 'בטי תספרי לי עובדה מעניינת');
+    expect(f1).toHaveLength(1);
+    expect(f1[0]).toContain('💡 הידעת?');
+    expect(f1[0]).toContain('(הפנייה שלך כבר אצל הצוות, ונציג יחזור אליך בהקדם.)');
+    const f2 = await say('wa902', 'עוד');
+    expect(f2[0]).toContain('💡 הידעת?');
+    expect(f2[0]).not.toBe(f1[0]);
+    expect((await conv('wa902')).bot_state).toBe('human');                                             // still with the team
+    // a person wrote: Betty is silent from now on
+    await db.query(`INSERT INTO messages (conversation_id, direction, body, auto) VALUES ($1, 'out', 'שלום, כאן דנה', false)`, [c.id]);
+    expect(await say('wa902', 'תספרי לי עובדה מעניינת')).toEqual([]);
   });
 
   it('numbered menu: a topic routed by area asks for the place and hands over to the officer of that place', async () => {

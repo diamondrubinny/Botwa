@@ -1,3 +1,7 @@
+import { PAIRS_AR } from '../i18n/arabic.js';
+import { arNorm } from '../i18n/lang.js';
+
+const AR = new Map(PAIRS_AR);
 /**
  * "בטי, תספרי לי עובדה מעניינת בבטיחות" / "טיפ בטיחות" / "הידעת?": a short safety fact or tip from a fixed, checked list (no
  * outside service, nothing made up). General, widely accepted safety guidance only; for anything specific the customer is
@@ -48,16 +52,19 @@ export function isFactRequest(text: string | null | undefined): boolean {
   const t = (text ?? '').trim();
   if (!t || t.length > 80) return false;
   if (/^(עוד|עוד אחת|עוד אחד|עוד עובדה|עוד טיפ|עוד בבקשה)[!?. ]*$/.test(t)) return false;   // only right after a fact (see factReply)
-  return (ASK.test(t) && SAFETY.test(t)) || ASK_EN.test(t);
+  return (ASK.test(t) && SAFETY.test(t)) || ASK_EN.test(t) || (/[\u0600-\u06FF]/.test(t) && ASK_AR.test(arNorm(t)));
 }
+// Arabic (after arNorm): "اخبرني حقيقه مثيره", "معلومه مفيده عن السلامه", "هل تعلم", "نصيحه سلامه"
+const ASK_AR = /((حقيقه|معلومه|معلومات) (مثيره|مفيده|جديده|عن السلامه|في السلامه|سلامه)|هل تعلم|نصيحه (سلامه|للسلامه|في السلامه|عن السلامه)|نصائح (سلامه|السلامه))/;
 const ASK_EN = /\b(safety (tip|fact)s?|(fun|interesting|cool) (safety )?fact|did you know|tell me something (interesting|new)|teach me something)\b/i;
 
 /** A fact for the conversation, or null when the message is not such a request. "עוד" counts only right after a fact. */
 export function factReply(text: string | null | undefined, told: string[], lastWasFact: boolean, pick = Math.random): string | null {
   const t = (text ?? '').trim();
-  const more = lastWasFact && /^(עוד|עוד אחת|עוד אחד|עוד עובדה|עוד טיפ|עוד בבקשה|ועוד|more|another( one)?|one more)[!?. ]*$/i.test(t);
+  const more = lastWasFact && /^(עוד|עוד אחת|עוד אחד|עוד עובדה|עוד טיפ|עוד בבקשה|ועוד|more|another( one)?|one more|المزيد|مزيد|كمان|واحده اخرى|واحدة أخرى)[!?.؟ ]*$/i.test(t);
   if (!more && !isFactRequest(t)) return null;
-  const fresh = SAFETY_FACTS.filter((f, i) => !told.some((b) => b.includes(f) || (!!SAFETY_FACTS_EN[i] && b.includes(SAFETY_FACTS_EN[i]!))));
+  // a fact told before, in any language, is not told again until all were told
+  const fresh = SAFETY_FACTS.filter((f, i) => !told.some((b) => b.includes(f) || (!!SAFETY_FACTS_EN[i] && b.includes(SAFETY_FACTS_EN[i]!)) || (!!AR.get(f) && b.includes(AR.get(f)!))));
   const pool = fresh.length ? fresh : SAFETY_FACTS;
   const fact = pool[Math.floor(pick() * pool.length) % pool.length]!;
   return `💡 הידעת?\n${fact}\n\nרוצים עוד? כתבו "עוד". לשאלה על המקרה שלכם, כתבו לנו ונעזור.`;

@@ -1102,9 +1102,9 @@ export class ChannelManager {
     }
     // "מי את?" / "את בוט?" / "מה שלומך?": the bot answers as itself, then picks up the question it was waiting for
     const told = async () => {
-      const r = (await this.db.query(`SELECT body FROM messages WHERE conversation_id = $1 AND direction = 'out' AND (body LIKE '💡 הידעת?%' OR body LIKE '💡 Did you know?%') ORDER BY created_at DESC LIMIT 30`, [convId])).rows.map((x) => x.body as string);
+      const r = (await this.db.query(`SELECT body FROM messages WHERE conversation_id = $1 AND direction = 'out' AND (body LIKE '💡 הידעת?%' OR body LIKE '💡 Did you know?%' OR body LIKE '💡 هل تعلم؟%') ORDER BY created_at DESC LIMIT 30`, [convId])).rows.map((x) => x.body as string);
       const last = (await this.db.query(`SELECT body FROM messages WHERE conversation_id = $1 AND direction = 'out' ORDER BY created_at DESC LIMIT 1`, [convId])).rows[0]?.body as string | undefined;
-      return { r, lastWasFact: !!last && (last.startsWith('💡 הידעת?') || last.startsWith('💡 Did you know?')) };
+      return { r, lastWasFact: !!last && /^💡 (הידעת\?|Did you know\?|هل تعلم؟)/.test(last) };
     };
     const chat = identityReply(text, persona) ?? smallTalkReply(text, persona.name);   // small talk: nothing to lose if the flow opens after it
     const own = chat ?? await officerReply(this.db, text).catch(() => null)
@@ -1534,7 +1534,15 @@ export class ChannelManager {
     let kind = 'officer_info';
     if (!reply && bot?.enabled) {
       const here = smallTalkReply(q, persona.name);
+      // "תספרי לי עובדה מעניינת" while the team has not written yet: a safety fact ("עוד" right after one brings another)
+      const fact = here ? null : await (async () => {
+        const told = (await this.db.query(`SELECT body FROM messages WHERE conversation_id = $1 AND direction = 'out' AND (body LIKE '💡 הידעת?%' OR body LIKE '💡 Did you know?%' OR body LIKE '💡 هل تعلم؟%') ORDER BY created_at DESC LIMIT 30`, [convId])).rows.map((x) => x.body as string);
+        const last = (await this.db.query(`SELECT body FROM messages WHERE conversation_id = $1 AND direction = 'out' ORDER BY created_at DESC LIMIT 1`, [convId])).rows[0]?.body as string | undefined;
+        const lastWasFact = !!last && /^💡 (הידעת\?|Did you know\?|هل تعلم؟)/.test(last);
+        return factReply(c.lang && c.lang !== 'he' ? await fromCustomer(this.db, c.lang, q) : q, told, lastWasFact);
+      })().catch(() => null);
       if (here) { reply = `${here}\n\n${WAITING_NOTE}`; kind = 'waiting_answer'; }
+      else if (fact) { reply = `${fact}\n\n${WAITING_NOTE}`; kind = 'waiting_answer'; }
       else {
         const kb = await this.kbAnswer(bot, null, q.slice(0, BOT_INPUT_MAX), bot.mode === 'flow', undefined, undefined, asLang(c.lang)).catch(() => null);
         if (kb) { reply = `${kb}\n\n${WAITING_NOTE}`; kind = 'waiting_answer'; }
