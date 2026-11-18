@@ -76,6 +76,16 @@ describe('Betty answers who the officer is', () => {
     await db.query(`UPDATE officers SET active = true WHERE name = 'ראשת יחידה לדוגמה'`);
   });
 
+  it('officer questions in Arabic: the topic read from Arabic words; a phone number given by the customer is not a question', async () => {
+    const fire = await officerReply(db, 'من المسؤول عن الحريق؟');
+    expect(fire).toContain('יוסי אש');
+    expect(await officerReply(db, 'ما هاتف مسؤول الغاز؟')).toContain('רינה גז');
+    expect(await officerReply(db, 'من رئيس وحدة السلامة؟')).toContain('ראשת יחידה לדוגמה');
+    expect(await officerReply(db, 'من المسؤول؟')).toContain('על איזה נושא');
+    expect(await officerReply(db, 'رقم هاتفي 0501234567')).toBeNull();
+    expect(await officerReply(db, 'مرحبا، عندي سؤال')).toBeNull();
+  });
+
   it('name, office phone and e-mail; WhatsApp only when allowed', async () => {
     const fire = (await officerReply(db, 'מי הממונה על בטיחות אש ומה הטלפון המשרדי שלו?'))!;
     expect(fire).toContain('יוסי אש');

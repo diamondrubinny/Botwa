@@ -92,11 +92,13 @@ export function authRoutes(app: FastifyInstance, db: Db, cfg: Config) {
 
   app.get('/auth/me', { preHandler: auth }, async (req) => {
     const u = req.user!;
-    const av = await db.query('SELECT available, username, job_title AS "jobTitle", intro_phone AS "introPhone", name_he AS "nameHe", (SELECT floor(extract(epoch FROM a.updated_at))::float8 FROM user_avatars a WHERE a.user_id = users.id) AS "avatarV" FROM users WHERE id = $1', [u.id]);
+    const av = await db.query('SELECT available, username, job_title AS "jobTitle", job_title_en AS "jobTitleEn", job_title_ar AS "jobTitleAr", intro_phone AS "introPhone", name_he AS "nameHe", (SELECT floor(extract(epoch FROM a.updated_at))::float8 FROM user_avatars a WHERE a.user_id = users.id) AS "avatarV" FROM users WHERE id = $1', [u.id]);
     return {
       available: av.rows[0]?.available ?? true,
       username: av.rows[0]?.username as string | undefined,
       jobTitle: (av.rows[0]?.jobTitle as string | null) ?? null,
+      jobTitleEn: (av.rows[0]?.jobTitleEn as string | null) ?? null,
+      jobTitleAr: (av.rows[0]?.jobTitleAr as string | null) ?? null,
       nameHe: (av.rows[0]?.nameHe as string | null) ?? null,
       introPhone: (av.rows[0]?.introPhone as string | null) ?? null,
       avatarV: av.rows[0]?.avatarV != null ? Number(av.rows[0].avatarV) : null,
@@ -118,12 +120,17 @@ export function authRoutes(app: FastifyInstance, db: Db, cfg: Config) {
     const b = z.object({
       nameHe: z.string().trim().max(100).nullable().optional().refine((v) => !v || (v.length >= 2 && /[א-ת]/.test(v)), 'hebrew'),   // omitted = keep
       jobTitle: z.string().trim().max(80).transform((v) => v.replace(/[\r\n]+/g, ' ') || null).nullable(),
+      // the role in English / Arabic for conversations in those languages (omitted = keep, empty = none)
+      jobTitleEn: z.string().trim().max(80).transform((v) => v.replace(/[\r\n]+/g, ' ') || null).nullable().optional(),
+      jobTitleAr: z.string().trim().max(80).transform((v) => v.replace(/[\r\n]+/g, ' ') || null).nullable().optional(),
       introPhone: z.string().trim().max(20).nullable().refine((v) => !v || /^\+?[0-9][0-9 -]{5,18}[0-9]$/.test(v), 'phone').transform((v) => v || null),
     }).safeParse(req.body);
     if (!b.success) return reply.code(400).send({ error: 'bad_request' });
-    const r = await db.query(`UPDATE users SET job_title = $2, intro_phone = $3, name_he = CASE WHEN $5::boolean THEN $4 ELSE name_he END, updated_at = now() WHERE id = $1 RETURNING name_he`,
-      [req.user!.id, b.data.jobTitle, b.data.introPhone, b.data.nameHe || null, b.data.nameHe !== undefined]);
-    return { nameHe: r.rows[0]?.name_he ?? null, jobTitle: b.data.jobTitle, introPhone: b.data.introPhone };
+    const r = await db.query(`UPDATE users SET job_title = $2, intro_phone = $3, name_he = CASE WHEN $5::boolean THEN $4 ELSE name_he END,
+        job_title_en = CASE WHEN $7::boolean THEN $6 ELSE job_title_en END, job_title_ar = CASE WHEN $9::boolean THEN $8 ELSE job_title_ar END, updated_at = now()
+      WHERE id = $1 RETURNING name_he, job_title_en, job_title_ar`,
+      [req.user!.id, b.data.jobTitle, b.data.introPhone, b.data.nameHe || null, b.data.nameHe !== undefined, b.data.jobTitleEn ?? null, b.data.jobTitleEn !== undefined, b.data.jobTitleAr ?? null, b.data.jobTitleAr !== undefined]);
+    return { nameHe: r.rows[0]?.name_he ?? null, jobTitle: b.data.jobTitle, jobTitleEn: r.rows[0]?.job_title_en ?? null, jobTitleAr: r.rows[0]?.job_title_ar ?? null, introPhone: b.data.introPhone };
   });
 
   // Agents mark themselves on/off duty (affects automatic routing only).

@@ -1,3 +1,4 @@
+import { arNorm } from '../i18n/lang.js';
 import type { Db } from '../db.js';
 
 /**
@@ -108,8 +109,31 @@ const isHeadTopic = (topic: string) => /(ראש|ראשת|מנהל|מנהלת|hea
 export const HEAD_UNKNOWN = 'הפרטים של ראש יחידת הבטיחות לא מוגדרים אצלי כרגע. אפשר לכתוב כאן את הפנייה, והיא תועבר לצוות היחידה.';
 
 /** Betty's answer to a question about who is responsible for a topic, or null when the message is not such a question. */
+/**
+ * An officer question in Arabic ("من المسؤول عن الليزر؟", "ما هاتف مسؤول السلامة؟", "من رئيس وحدة السلامة؟"), read as the Hebrew
+ * question with the topic words the officers list uses; null when it is not such a question. The answer is translated on the way out.
+ */
+const ASK_AR = /(من|مين) (هو |هي )?(ال)?مسؤول|(ال)?مسؤول عن|مسؤول(ه)? (ال)?سلامه|(رقم )?هاتف|تلفون|بريد|ايميل|(كيف|وين|اين) (اتواصل|اتصل|احكي|اجد) (مع )?|(لمن|لمين) (اتوجه|اتصل|اكتب)/;
+const ALIASES_AR: [RegExp, string][] = [
+  [/ليزر/, 'לייזרים'], [/اسبست|اسبستوس/, 'אסבסט'], [/اشعاع|اشعه|مشع/, 'קרינה'], [/حريق|حرائق|نار|اطفاء|مطفا|طفايه|رشاش|دخان/, 'אש מתזים כיבוי'],
+  [/غاز|اسطوان/, 'גזים'], [/كيمي|مواد خطره|ماده خطره|نفايات/, 'כימיקלים חומ"ס'], [/كهرب/, 'חשמל'], [/ارتفاع|سلم|سقالات|سطح/, 'גובה סולמות'],
+  [/مصعد|مصاعد/, 'מעליות'], [/بيولوج|احياء|جراثيم|فيروس/, 'ביולוגית biosafety'], [/ضجيج|ضوضاء/, 'רעש'], [/رافع|رفع/, 'הרמה'], [/تدريب|دوره/, 'הדרכות'],
+  [/صحه مهنيه|قياس|رصد/, 'גיהות ניטור'], [/خطر|مخاطر/, 'מפגעים'], [/حمل|حامل|رضاع/, 'עבודת נשים'],
+];
+function arabicOfficerQuestion(text: string): string | null {
+  if (!/[\u0600-\u06FF]/.test(text)) return null;
+  const a = arNorm(text.replace(/[؟?!.,،:;()]/g, ' '));
+  if (/(من|مين|ما|شو) (هو |هي )?(رئيس|رئيسه|مدير|مديره) (ال)?وحده/.test(a) || /(هاتف|رقم|بريد) (رئيس|رئيسه|مدير|مديره) (ال)?وحده/.test(a)) return 'מי ראש יחידת הבטיחות?';
+  if (!ASK_AR.test(a)) return null;
+  const topics = ALIASES_AR.filter(([re]) => re.test(a)).map(([, he]) => he);
+  if (topics.length) return `מי הממונה על ${topics.join(' ')}?`;
+  // no topic: only an explicit question about an officer ("رقم هاتفي 050…" is the customer's own number, not a question)
+  return /مسؤول|لمن|لمين/.test(a) ? 'מי הממונה?' : null;
+}
+
 export async function officerReply(db: Db, text: string | null | undefined): Promise<string | null> {
   if (!text || text.length > 160) return null;
+  text = arabicOfficerQuestion(text) ?? text;
   text = fixOfficerTypos(text);
   const head = isHeadQuestion(text);
   if (!head && !ASK.test(text) && !ASK_EN.test(text)) return null;

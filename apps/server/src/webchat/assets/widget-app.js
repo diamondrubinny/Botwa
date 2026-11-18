@@ -5,7 +5,8 @@
   var app = document.getElementById('app');
   var T = {
     he: { sugLabel: 'שאלות נפוצות מתאימות', sugCount: ' שאלות נפוצות מתאימות. חצים למעלה ולמטה לבחירה, Enter לתשובה.', faq: 'תשובה מהמאגר', faqHint: 'לא מה שחיפשתם? כתבו לנו ונחזור אליכם.', loading: 'טוען…', send: 'שליחה', msg: 'כתבו הודעה…', msgLabel: 'ההודעה שלכם', start: 'התחלת שיחה', name: 'שם', email: 'אימייל', phone: 'טלפון', optional: ' (לא חובה)', close: 'סגירת הצ׳אט', you: 'אתם', team: 'הצוות', bot: 'הבוט', consent: 'יש לאשר כדי להמשיך.', required: 'שדה חובה', badEmail: 'כתובת אימייל לא תקינה', badPhone: 'מספר טלפון לא תקין', failed: 'השליחה נכשלה. נסו שוב.', offline: 'לא ניתן להתחבר כרגע. נסו שוב מאוחר יותר.', limit: 'שלחתם הרבה הודעות. נסו שוב בעוד רגע.', privacy: 'מדיניות הפרטיות', log: 'שיחה', newmsg: 'הודעה חדשה', social: 'אפשר גם לכתוב לנו ב:', botTag: 'בוט', reacted: 'הצוות הגיב', ext: ' (נפתח מחוץ לצ׳אט)', nets: { whatsapp: 'WhatsApp', messenger: 'Messenger', instagram: 'Instagram', telegram: 'Telegram', email: 'אימייל', phone: 'טלפון' } },
-    en: { sugLabel: 'Matching common questions', sugCount: ' matching common questions. Use up and down arrows, Enter for the answer.', faq: 'Answer from our help center', faqHint: 'Not what you were looking for? Write to us and we will get back to you.', loading: 'Loading…', send: 'Send', msg: 'Type a message…', msgLabel: 'Your message', start: 'Start chat', name: 'Name', email: 'Email', phone: 'Phone', optional: ' (optional)', close: 'Close chat', you: 'You', team: 'Team', bot: 'Bot', consent: 'Please accept to continue.', required: 'Required', badEmail: 'Invalid email address', badPhone: 'Invalid phone number', failed: 'Sending failed. Please try again.', offline: 'Cannot connect right now. Please try again later.', limit: 'You are sending too fast. Try again in a moment.', privacy: 'Privacy policy', log: 'Conversation', newmsg: 'New message', social: 'You can also reach us on:', botTag: 'bot', reacted: 'The team reacted', ext: ' (opens outside this chat)', nets: { whatsapp: 'WhatsApp', messenger: 'Messenger', instagram: 'Instagram', telegram: 'Telegram', email: 'Email', phone: 'Phone' } }
+    en: { sugLabel: 'Matching common questions', sugCount: ' matching common questions. Use up and down arrows, Enter for the answer.', faq: 'Answer from our help center', faqHint: 'Not what you were looking for? Write to us and we will get back to you.', loading: 'Loading…', send: 'Send', msg: 'Type a message…', msgLabel: 'Your message', start: 'Start chat', name: 'Name', email: 'Email', phone: 'Phone', optional: ' (optional)', close: 'Close chat', you: 'You', team: 'Team', bot: 'Bot', consent: 'Please accept to continue.', required: 'Required', badEmail: 'Invalid email address', badPhone: 'Invalid phone number', failed: 'Sending failed. Please try again.', offline: 'Cannot connect right now. Please try again later.', limit: 'You are sending too fast. Try again in a moment.', privacy: 'Privacy policy', log: 'Conversation', newmsg: 'New message', social: 'You can also reach us on:', botTag: 'bot', reacted: 'The team reacted', ext: ' (opens outside this chat)', nets: { whatsapp: 'WhatsApp', messenger: 'Messenger', instagram: 'Instagram', telegram: 'Telegram', email: 'Email', phone: 'Phone' }, defTitle: 'Chat with the team', defSubtitle: 'We usually answer within minutes', defWelcome: 'Hello! How can we help?' },
+    ar: { sugLabel: 'أسئلة شائعة مناسبة', sugCount: ' أسئلة شائعة مناسبة. استخدموا الأسهم للأعلى والأسفل للاختيار، وEnter للإجابة.', faq: 'إجابة من قاعدة المعلومات', faqHint: 'ليس ما تبحثون عنه؟ اكتبوا لنا وسنعود إليكم.', loading: 'جارٍ التحميل…', send: 'إرسال', msg: 'اكتبوا رسالة…', msgLabel: 'رسالتكم', start: 'بدء المحادثة', name: 'الاسم', email: 'البريد الإلكتروني', phone: 'الهاتف', optional: ' (اختياري)', close: 'إغلاق المحادثة', you: 'أنتم', team: 'الطاقم', bot: 'الروبوت', consent: 'يجب الموافقة للمتابعة.', required: 'حقل إلزامي', badEmail: 'عنوان بريد إلكتروني غير صالح', badPhone: 'رقم هاتف غير صالح', failed: 'فشل الإرسال. حاولوا مرة أخرى.', offline: 'لا يمكن الاتصال حاليًا. حاولوا لاحقًا.', limit: 'أرسلتم رسائل كثيرة. حاولوا بعد لحظة.', privacy: 'سياسة الخصوصية', log: 'محادثة', newmsg: 'رسالة جديدة', social: 'يمكنكم أيضًا مراسلتنا عبر:', botTag: 'روبوت', reacted: 'الطاقم تفاعل', ext: ' (يُفتح خارج المحادثة)', nets: { whatsapp: 'WhatsApp', messenger: 'Messenger', instagram: 'Instagram', telegram: 'Telegram', email: 'البريد الإلكتروني', phone: 'الهاتف' }, defTitle: 'محادثة مع الطاقم', defSubtitle: 'عادةً نرد خلال دقائق', defWelcome: 'مرحبًا! كيف يمكننا المساعدة؟' }
   };
   var L = T.he, cfg = null, token = null, identity = null, after = 0, polling = false, shown = {}, started = false, formShownAt = Date.now();
   var els = {};
@@ -82,6 +83,16 @@
     return svg;
   }
 
+  var HE_DEFAULTS = { title: 'צ׳אט עם הצוות', subtitle: 'בדרך כלל עונים תוך דקות', welcome: 'שלום! איך אפשר לעזור?' };
+  var lang = 'he';
+  /** "auto": by the visitor's browser languages, Hebrew first if it is among them (Israelis often run an English browser), then Arabic, else English */
+  function pickLang(setting) {
+    if (setting === 'he' || setting === 'en' || setting === 'ar') return setting;
+    var list = (navigator.languages && navigator.languages.length ? navigator.languages : [navigator.language || 'he']).map(function (l) { return String(l || '').toLowerCase().slice(0, 2); });
+    if (list.indexOf('he') >= 0 || list.indexOf('iw') >= 0) return 'he';
+    if (list.indexOf('ar') >= 0) return 'ar';
+    return 'en';
+  }
   function textDir(t) {
     var he = (t.match(/[\u0590-\u05FF\u0600-\u06FF]/g) || []).length, en = (t.match(/[A-Za-z]/g) || []).length;
     if (!he && !en) return document.documentElement.dir || 'rtl';
@@ -225,7 +236,7 @@
       var text = ta.value.trim(); if (!text) return;
       btn.disabled = true; err.textContent = '';
       var extra = pending; pending = null;
-      api('POST', '/widget/messages', Object.assign({ text: text }, extra || {}), true)
+      api('POST', '/widget/messages', Object.assign({ text: text, lang: lang }, extra || {}), true)
         .then(function () { ta.value = ''; if (!started) { started = true; parent({ type: 'botwa:started' }); } poll(); })
         .catch(function (er) { pending = extra; err.textContent = er.status === 429 ? L.limit : L.failed; })
         .then(function () { btn.disabled = false; ta.focus(); });
@@ -296,8 +307,14 @@
 
   function init() {
     api('GET', '/widget/config?key=' + encodeURIComponent(key)).then(function (c) {
-      cfg = c; L = T[c.design.language] || T.he;
-      document.documentElement.lang = c.design.language; document.documentElement.dir = c.design.language === 'he' ? 'rtl' : 'ltr';
+      cfg = c; lang = pickLang(c.design.language); L = T[lang] || T.he;
+      // the unit's texts as they are; texts still at the Hebrew defaults are shown in the interface language
+      if (lang !== 'he') {
+        if (c.design.title === HE_DEFAULTS.title) c.design.title = L.defTitle;
+        if (c.design.subtitle === HE_DEFAULTS.subtitle) c.design.subtitle = L.defSubtitle;
+        if (c.design.welcome === HE_DEFAULTS.welcome) c.design.welcome = L.defWelcome;
+      }
+      document.documentElement.lang = lang; document.documentElement.dir = lang === 'en' ? 'ltr' : 'rtl';
       document.title = c.design.title;
       document.documentElement.style.setProperty('--c', c.design.color); document.documentElement.style.setProperty('--on', c.textColor);
       return session();

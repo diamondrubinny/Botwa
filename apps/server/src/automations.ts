@@ -94,9 +94,9 @@ export interface AutoSender {
   onAssigned?: ((conversationId: string, userId: string) => void) | null;
 }
 
-type ConvRow = AccessibleConversation & { contact_name: string | null; channel_label: string; agent_name: string | null; agent_name_plain?: string | null; agent_title: string | null; agent_phone: string | null };
+type ConvRow = AccessibleConversation & { contact_name: string | null; channel_label: string; agent_name: string | null; agent_name_plain?: string | null; agent_title: string | null; agent_title_en?: string | null; agent_title_ar?: string | null; agent_phone: string | null };
 const CONV = `SELECT c.id, c.channel_id, c.assigned_to, c.status, ct.external_id, ct.blocked, ct.opted_out, ch.type AS channel_type,
-                     ct.display_name AS contact_name, ch.label AS channel_label, COALESCE(u.name_he, u.name) AS agent_name, u.name AS agent_name_plain, u.job_title AS agent_title, u.intro_phone AS agent_phone
+                     ct.display_name AS contact_name, ch.label AS channel_label, COALESCE(u.name_he, u.name) AS agent_name, u.name AS agent_name_plain, u.job_title AS agent_title, u.job_title_en AS agent_title_en, u.job_title_ar AS agent_title_ar, u.intro_phone AS agent_phone
                 FROM conversations c JOIN contacts ct ON ct.id = c.contact_id JOIN channels ch ON ch.id = c.channel_id LEFT JOIN users u ON u.id = c.assigned_to`;
 /** comment threads (public posts) never get automatic messages */
 const NOT_COMMENT = `ct.external_id !~ '@(fb|ig)comment$'`;
@@ -117,7 +117,9 @@ export async function sendAutomatic(db: Db, out: AutoSender, conv: ConvRow, body
   const hasHe = (v: string | null | undefined) => !!v && /[\u05D0-\u05EA]/.test(v);
   const plain = conv.agent_name_plain && !hasHe(conv.agent_name_plain) && !conv.agent_name_plain.includes('@') ? conv.agent_name_plain : null;
   const agentName = foreign ? (plain ?? conv.agent_name ?? await localize(db, lang, 'הצוות')) : (conv.agent_name ?? 'הצוות');
-  const agentTitle = foreign && hasHe(conv.agent_title) ? null : conv.agent_title;
+  // the role in the conversation's language when the person wrote one; a Hebrew-only role is left out
+  const own = lang === 'en' ? conv.agent_title_en : lang === 'ar' ? conv.agent_title_ar : null;
+  const agentTitle = foreign ? (own || (hasHe(conv.agent_title) ? null : conv.agent_title)) : conv.agent_title;
   const rendered = renderCanned(await localize(db, lang, body), { customerName: conv.contact_name, agentName, agentTitle, agentPhone: conv.agent_phone, hours, channelLabel: conv.channel_label });
   // what the variables brought in Hebrew (the working hours) is translated as far as the dictionary goes
   const textOut = foreign ? await localize(db, lang, rendered) : rendered;

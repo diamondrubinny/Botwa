@@ -206,7 +206,7 @@ describe('conversation automations', () => {
     // the identification answers at the top of the conversation: only the known fields, never other profile keys
     await db.query(`UPDATE contacts SET profile = $2 WHERE id = (SELECT contact_id FROM conversations WHERE id = $1)`,
       [hz.id, JSON.stringify({ fullName: 'נועם לוי', building: 'מאייר', room: '', pi: 'פרופ׳ כהן', secretNote: 'x', status: 'סטודנט/ית' })]);
-    expect((await call(`/conversations/${hz.id}/profile`)).json()).toEqual({ lang: 'he', fields: [
+    expect((await call(`/conversations/${hz.id}/profile`)).json()).toEqual({ lang: 'he', langLocked: false, fields: [
       { key: 'fullName', label: 'שם מלא', value: 'נועם לוי' }, { key: 'building', label: 'בניין', value: 'מאייר' },
       { key: 'pi', label: 'PI / ראש יחידה', value: 'פרופ׳ כהן' }, { key: 'status', label: 'סטטוס', value: 'סטודנט/ית' }] });
     expect((await call(`/conversations/00000000-0000-4000-8000-000000000000/profile`)).statusCode).toBe(404);

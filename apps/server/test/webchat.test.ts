@@ -208,6 +208,23 @@ describe('website chat widget', () => {
     expect((await db.query(`SELECT max(length(body))::int AS n FROM messages`)).rows[0].n).toBeLessThanOrEqual(2000);
   });
 
+  it('the chat in Arabic (or automatic): a first message too short to tell ("hi") starts the conversation in the chat\'s language; the text decides after that', async () => {
+    const { designSchema } = await import('../src/webchat/config.js');
+    expect(designSchema.parse({ language: 'ar' }).language).toBe('ar');
+    expect(designSchema.parse({ language: 'auto' }).language).toBe('auto');
+    expect(() => designSchema.parse({ language: 'fr' })).toThrow();
+    const t = (await pub('POST', '/widget/session', undefined, { key })).json().token as string;
+    expect((await pub('POST', '/widget/messages', t, { text: 'hi', name: 'سارة', consent: true, lang: 'fr' })).statusCode).toBe(400);
+    expect((await pub('POST', '/widget/messages', t, { text: 'hi', name: 'سارة', consent: true, lang: 'ar' })).statusCode).toBe(200);
+    const conv = (await db.query(`SELECT c.id, c.lang FROM conversations c JOIN contacts ct ON ct.id = c.contact_id WHERE ct.display_name = 'سارة'`)).rows[0];
+    expect(conv.lang).toBe('ar');
+    // writing in Hebrew: the text decides (the chat's language only fills in when the text cannot tell)
+    await pub('POST', '/widget/messages', t, { text: 'שלום, יש לי שאלה', lang: 'ar' });
+    expect((await db.query(`SELECT lang FROM conversations WHERE id = $1`, [conv.id])).rows[0].lang).toBe('he');
+    await pub('POST', '/widget/messages', t, { text: '?', lang: 'ar' });
+    expect((await db.query(`SELECT lang FROM conversations WHERE id = $1`, [conv.id])).rows[0].lang).toBe('he');          // a language is already known
+  });
+
   it('staff replies reach the visitor (long poll wakes at once); only own conversation is visible; agent first name is shown', async () => {
     const conv = (await db.query(`SELECT id FROM conversations`)).rows[0].id as string;
     const first = (await pub('GET', '/widget/messages?after=0', token)).json().messages as { seq: number; direction: string; text: string }[];

@@ -24,7 +24,7 @@ const JOINS = `JOIN contacts ct ON ct.id = c.contact_id JOIN channels ch ON ch.i
  *  - suggested: the same phone or e-mail that a customer TYPED (unverified): shown only as a suggestion that a person confirms,
  *    because a wrong link would show one person's history next to another's.
  */
-export function peopleRoutes(app: FastifyInstance, db: Db) {
+export function peopleRoutes(app: FastifyInstance, db: Db, mgrRef?: { setConversationLang(convId: string, lang: 'he' | 'en' | 'ar'): Promise<unknown> }) {
   const any = requireAuth(db);
 
   /** may this user act on this contact? through its conversation's access rule; a contact without a conversation: managers only */
@@ -42,13 +42,31 @@ export function peopleRoutes(app: FastifyInstance, db: Db) {
     const p = idParam.safeParse(req.params);
     if (!p.success) return reply.code(400).send({ error: 'bad_request' });
     if (!(await loadAccessible(db, req.user!, p.data.id))) return reply.code(404).send({ error: 'not_found' });
-    const r = (await db.query(`SELECT ct.profile, c.lang FROM conversations c JOIN contacts ct ON ct.id = c.contact_id WHERE c.id = $1`, [p.data.id])).rows[0] as { profile: Record<string, unknown> | null; lang: string | null } | undefined;
+    const r = (await db.query(`SELECT ct.profile, c.lang, c.lang_locked FROM conversations c JOIN contacts ct ON ct.id = c.contact_id WHERE c.id = $1`, [p.data.id])).rows[0] as { profile: Record<string, unknown> | null; lang: string | null; lang_locked: boolean } | undefined;
     const prof = r?.profile ?? {};
     const fields = PROFILE_FIELDS.flatMap(([key, label]) => {
       const v = prof[key];
       return typeof v === 'string' && v.trim() && v.trim().length <= 200 ? [{ key, label, value: v.trim() }] : [];
     });
-    return { fields, lang: r?.lang === 'en' || r?.lang === 'ar' ? r.lang : 'he' };
+    return { fields, lang: r?.lang === 'en' || r?.lang === 'ar' ? r.lang : 'he', langLocked: !!r?.lang_locked };
+  });
+
+  /**
+   * The conversation's language set by a person (the automatic detection got it wrong): Betty answers in it from the next message
+   * and the detection leaves it alone; "auto" hands it back to the detection. Same access rule as the conversation; audited.
+   */
+  app.post('/conversations/:id/lang', { preHandler: any, config: { rateLimit: { max: 30, timeWindow: '1 minute' } } }, async (req, reply) => {
+    const p = idParam.safeParse(req.params);
+    const b = z.object({ lang: z.enum(['he', 'en', 'ar', 'auto']) }).strict().safeParse(req.body);
+    if (!p.success || !b.success) return reply.code(400).send({ error: 'bad_request' });
+    if (!(await loadAccessible(db, req.user!, p.data.id))) return reply.code(404).send({ error: 'not_found' });
+    if (b.data.lang === 'auto') await db.query(`UPDATE conversations SET lang_locked = false WHERE id = $1`, [p.data.id]);
+    else {
+      await mgrRef?.setConversationLang(p.data.id, b.data.lang);
+      await db.query(`UPDATE conversations SET lang = $2, lang_locked = true WHERE id = $1`, [p.data.id, b.data.lang]);
+    }
+    await audit(db, { actorId: req.user!.id, action: 'conversation.lang', target: p.data.id, ip: req.ip, meta: { lang: b.data.lang } });
+    return { ok: true, lang: b.data.lang };
   });
 
   app.get('/conversations/:id/related', { preHandler: any }, async (req, reply) => {

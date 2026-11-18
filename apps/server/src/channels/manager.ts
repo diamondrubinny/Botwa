@@ -409,7 +409,7 @@ export class ChannelManager {
             m = { ...m, text: 'תפריט', menuPage: undefined };
           }
           // the customer's language (Hebrew or English): Betty answers in it, and the conversation shows it as a tag
-          if (r.messageId && !m.media && m.text && !isCommentContact(m.externalContactId)) await this.noteLanguage(r.conversationId, m.text).catch(() => undefined);
+          if (r.messageId && !m.media && m.text && !isCommentContact(m.externalContactId)) await this.noteLanguage(r.conversationId, m.text, m.langHint).catch(() => undefined);
           // a form filled inside WhatsApp: handled by the forms module (signed PDF), never by the bot
           if (m.flowReply && r.messageId) {
             await this.onFlowReply?.({ channelId, conversationId: r.conversationId, externalContactId: m.externalContactId, messageId: r.messageId, responseJson: m.flowReply.responseJson }).catch(() => undefined);
@@ -880,9 +880,18 @@ export class ChannelManager {
   async say(convId: string, text: string): Promise<string> { return localize(this.db, await this.langOf(convId), text); }
 
   /** The customer wrote in Hebrew or in English: remember it on the conversation; an English one gets an "English" tag the team sees. */
-  async noteLanguage(convId: string, text: string): Promise<Lang | null> {
-    const lang = detectLang(text);
+  async noteLanguage(convId: string, text: string, hint?: Lang): Promise<Lang | null> {
+    // a language a person chose for the conversation stays until they set it back to automatic
+    const cur = (await this.db.query(`SELECT lang, lang_locked FROM conversations WHERE id = $1`, [convId])).rows[0] as { lang: string | null; lang_locked: boolean } | undefined;
+    if (cur?.lang_locked) return asLang(cur.lang);
+    // the text decides; when it cannot ("hi", "?"), the chat's interface language does, but only for a conversation with no language yet
+    const lang = detectLang(text) ?? (hint && hint !== 'he' && !cur?.lang ? hint : null);
     if (!lang) return null;
+    return this.setConversationLang(convId, lang);
+  }
+
+  /** Set the conversation's language and its tag ("English" / "العربية"; Hebrew has none). Returns the language. */
+  async setConversationLang(convId: string, lang: Lang): Promise<Lang> {
     const r = await this.db.query(`UPDATE conversations SET lang = $2 WHERE id = $1 AND lang IS DISTINCT FROM $2 RETURNING id`, [convId, lang]);
     if (!r.rowCount) return lang;
     // Hebrew is the default: an English conversation gets the tag "English", an Arabic one "العربية"; writing in another language

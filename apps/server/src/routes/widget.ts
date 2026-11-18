@@ -139,7 +139,7 @@ export function widgetRoutes(app: FastifyInstance, db: Db, mgr: ChannelManager, 
     const pk = (await db.query('SELECT public_key FROM webchat_configs WHERE channel_id = $1', [v.channel_id])).rows[0]?.public_key as string | undefined;
     const s = pk ? await site(pk) : null;
     if (!s) return reply.code(404).send({ error: 'not_found' });
-    const b = z.object({ text: z.string().max(4100), name: z.string().max(120).optional(), email: z.string().max(260).optional(), phone: z.string().max(40).optional(), consent: z.boolean().optional(), hp: z.string().max(200).optional() }).safeParse(req.body);
+    const b = z.object({ text: z.string().max(4100), name: z.string().max(120).optional(), email: z.string().max(260).optional(), phone: z.string().max(40).optional(), consent: z.boolean().optional(), hp: z.string().max(200).optional(), lang: z.enum(['he', 'en', 'ar']).optional() }).safeParse(req.body);
     if (!b.success) return reply.code(400).send({ error: 'bad_request' });
     if (b.data.hp) return { ok: true }; // honeypot filled: a bot. Pretend it worked.
     const text = clean(b.data.text, s.behavior.maxLength);
@@ -159,7 +159,7 @@ export function widgetRoutes(app: FastifyInstance, db: Db, mgr: ChannelManager, 
 
     const externalMessageId = `wc-${randomUUID()}`;
     // later messages carry no name: the placeholder is only for a first message without one, so it never replaces a real name
-    await adapter.ingest({ externalContactId: contactId(v), contactName: name || (first ? `מבקר באתר #${v.id.slice(0, 4)}` : undefined), externalMessageId, text, timestamp: new Date() });
+    await adapter.ingest({ externalContactId: contactId(v), contactName: name || (first ? `מבקר באתר #${v.id.slice(0, 4)}` : undefined), externalMessageId, text, timestamp: new Date(), ...(b.data.lang ? { langHint: b.data.lang } : {}) });
     const row = (await db.query(`SELECT m.seq, m.conversation_id FROM messages m JOIN conversations c ON c.id = m.conversation_id JOIN contacts ct ON ct.id = c.contact_id WHERE ct.channel_id = $1 AND m.external_id = $2`, [s.channelId, externalMessageId])).rows[0];
     if (first && row) {
       const bits = [email && `אימייל: ${email}`, phone && `טלפון: ${phone}`, v.identity_id && `מזהה לקוח מאומת: ${v.identity_id}`, s.behavior.consentText && 'אישר את ההצהרה באתר'].filter(Boolean);

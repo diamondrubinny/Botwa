@@ -23,6 +23,8 @@ export interface InboundMessage {
   userId?: string;
   /** WhatsApp Flows: the answers of a form filled in WhatsApp (the "response_json" of an nfm_reply message) */
   flowReply?: { responseJson: string };
+  /** the website chat's interface language: the conversation's language when the message itself does not tell (e.g. "hi", "?") */
+  langHint?: 'he' | 'en' | 'ar';
   /** a tap on the "more topics" row of a long list menu: show that page of the last menu (not an answer for the bot) */
   menuPage?: number;
   externalMessageId: string;

@@ -115,6 +115,26 @@ describe('the handler introduces themselves to the customer', () => {
     expect(intro).not.toContain('ממונת');
   });
 
+  it('the role in English when the person wrote one; the conversation language set by hand stays until "automatic"', async () => {
+    expect((await call('avi@t.io', 'PUT', '/auth/me/intro', { jobTitle: 'נציג שירות', jobTitleEn: 'Service agent', jobTitleAr: 'موظف خدمة', introPhone: null })).json()).toMatchObject({ jobTitleEn: 'Service agent', jobTitleAr: 'موظف خدمة' });
+    expect((await call('avi@t.io', 'GET', '/auth/me')).json()).toMatchObject({ jobTitleEn: 'Service agent', jobTitleAr: 'موظف خدمة' });
+    expect((await call('avi@t.io', 'PUT', '/auth/me/intro', { jobTitle: 'נציג שירות', introPhone: null })).json()).toMatchObject({ jobTitleEn: 'Service agent' });   // omitted: kept
+    await say('972500000216', 'Hello, a question about gas cylinders');
+    const conv = await convOf('972500000216');
+    await call('admin@t.io', 'POST', `/conversations/${conv}/assign`, { userId: ids['avi@t.io'] });
+    expect(await intros(conv)).toEqual(["Hello יוסי, this is Avi Levi, Service agent. I'll be handling your request from now on and will get back to you soon."]);
+    // the language by hand: Arabic, kept while the customer writes Hebrew; back to automatic: the text decides again
+    expect((await call('admin@t.io', 'POST', `/conversations/${conv}/lang`, { lang: 'fr' })).statusCode).toBe(400);
+    expect((await call('admin@t.io', 'POST', `/conversations/${conv}/lang`, { lang: 'ar' })).json()).toEqual({ ok: true, lang: 'ar' });
+    await say('972500000216', 'שלום, אני כותב בעברית');
+    expect((await call('admin@t.io', 'GET', `/conversations/${conv}/profile`)).json()).toMatchObject({ lang: 'ar', langLocked: true });
+    expect((await db.query(`SELECT t.name FROM conversation_tags x JOIN tags t ON t.id = x.tag_id WHERE x.conversation_id = $1`, [conv])).rows.map((r) => r.name)).toContain('العربية');
+    await call('admin@t.io', 'POST', `/conversations/${conv}/lang`, { lang: 'auto' });
+    await say('972500000216', 'עוד שאלה בעברית');
+    expect((await call('admin@t.io', 'GET', `/conversations/${conv}/profile`)).json()).toMatchObject({ lang: 'he', langLocked: false });
+    expect((await db.query(`SELECT count(*)::int AS n FROM audit_log WHERE action = 'conversation.lang' AND target = $1`, [conv])).rows[0].n).toBe(2);
+  });
+
   it('never to a blocked customer', async () => {
     await say('972500000204', 'שאלה');
     const conv = await convOf('972500000204');
