@@ -56,7 +56,7 @@ export function isFactRequest(text: string | null | undefined): boolean {
 }
 // Arabic (after arNorm): "اخبرني حقيقه مثيره", "معلومه مفيده عن السلامه", "هل تعلم", "نصيحه سلامه"
 const ASK_AR = /((حقيقه|معلومه|معلومات) (مثيره|مفيده|جديده|عن السلامه|في السلامه|سلامه)|هل تعلم|نصيحه (سلامه|للسلامه|في السلامه|عن السلامه)|نصائح (سلامه|السلامه))/;
-const ASK_EN = /\b(safety (tip|fact)s?|(fun|interesting|cool) (safety )?fact|did you know|tell me something (interesting|new)|teach me something)\b/i;
+const ASK_EN = /\b(safety (fun |cool |interesting )?(tip|fact)s?|(fun|interesting|cool|random) (safety )?(fact|tip)s?|facts? about safety|did you know|tell me something (interesting|new)|teach me something)\b/i;
 
 /** A fact for the conversation, or null when the message is not such a request. "עוד" counts only right after a fact. */
 export function factReply(text: string | null | undefined, told: string[], lastWasFact: boolean, pick = Math.random): string | null {

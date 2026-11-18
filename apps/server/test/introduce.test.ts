@@ -101,6 +101,20 @@ describe('the handler introduces themselves to the customer', () => {
     await call('admin@t.io', 'PUT', '/settings/automations', base);
   });
 
+  it('in an English conversation: the account name in Latin letters and no Hebrew-only role, never Hebrew inside the English sentence', async () => {
+    await say('972500000214', 'Hello, I have a question about lab safety');
+    const conv = await convOf('972500000214');
+    await call('admin@t.io', 'POST', `/conversations/${conv}/assign`, { userId: ids['avi@t.io'] });
+    expect(await intros(conv)).toEqual(["Hello יוסי, this is Avi Levi. I'll be handling your request from now on and will get back to you soon."]);
+    // a person with a Hebrew name only: the name as it is (better than none), still without the Hebrew role
+    await say('972500000215', 'Hi, a question about chemicals please');
+    const c2 = await convOf('972500000215');
+    await call('admin@t.io', 'POST', `/conversations/${c2}/assign`, { userId: ids['dana@t.io'] });
+    const [intro] = await intros(c2);
+    expect(intro).toContain('this is דנה כהן.');
+    expect(intro).not.toContain('ממונת');
+  });
+
   it('never to a blocked customer', async () => {
     await say('972500000204', 'שאלה');
     const conv = await convOf('972500000204');
