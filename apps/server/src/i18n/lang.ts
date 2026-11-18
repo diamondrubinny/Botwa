@@ -1,17 +1,23 @@
 /**
- * The language a customer writes in: Hebrew or English, by counting letters (addresses, e-mails, numbers and emoji do not
- * count). A message with too few letters to tell (a number, "ok", an emoji) does not change the conversation's language.
+ * The language a customer writes in: Hebrew, English or Arabic, by counting letters (addresses, e-mails, numbers and emoji do not
+ * count). A message with too few letters to tell (a number, "ok", an emoji, one Arabic word inside Hebrew) does not change the
+ * conversation's language.
  */
-export type Lang = 'he' | 'en';
+export type Lang = 'he' | 'en' | 'ar';
+export const LANGS: readonly Lang[] = ['he', 'en', 'ar'];
+export const asLang = (v: unknown): Lang => (v === 'en' || v === 'ar' ? v : 'he');
 
 export function detectLang(text: string | null | undefined): Lang | null {
   if (!text) return null;
   const t = text.replace(/https?:\/\/\S+|www\.\S+|\S+@\S+\.\S+/gi, ' ');
   const he = (t.match(/[א-ת]/g) ?? []).length;
   const en = (t.match(/[A-Za-z]/g) ?? []).length;
+  const ar = (t.match(/[\u0621-\u063A\u0641-\u064A\u0671-\u06D3\u06FA-\u06FF]/g) ?? []).length;
+  // Arabic: more Arabic letters than Hebrew ones, and at least a short word ("شكرا", "مرحبا"), not one letter inside Hebrew
+  if (ar >= 3 && ar > he && ar >= en / 2) return 'ar';
   if (he >= 2 && he >= en / 2) return 'he';
   // English: real words (not a lone "ok"/"hi" mixed into Hebrew, not a code like "BOTWA-1234")
-  if (en >= 3 && he === 0 && /[a-z]{2,}/i.test(t) && !/^\s*botwa[-\s]?\d+\s*$/i.test(t)) return 'en';
+  if (en >= 3 && he === 0 && ar === 0 && /[a-z]{2,}/i.test(t) && !/^\s*botwa[-\s]?\d+\s*$/i.test(t)) return 'en';
   if (en >= 12 && en > he * 4) return 'en';
   return null;
 }
@@ -47,3 +53,6 @@ export function withDirectionMarks(text: string): string {
     return firstStrong(line) === dir ? line : mark + line;
   }).join('\n');
 }
+
+/** Arabic as it is typed in practice: without diacritics and tatweel, one alef, ي for ى, ه for ة (for matching only). */
+export const arNorm = (s: string) => s.replace(/[\u064B-\u0652\u0670\u0640]/g, '').replace(/[أإآ]/g, 'ا').replace(/ى/g, 'ي').replace(/ة/g, 'ه').replace(/\s+/g, ' ').trim();

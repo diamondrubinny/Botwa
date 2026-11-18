@@ -57,8 +57,8 @@ function AttachmentView({ a }: { a: Attachment }) {
 const textDir = (t: string): 'rtl' | 'ltr' => { const he = (t.match(/[\u0590-\u05FF]/g) ?? []).length, en = (t.match(/[A-Za-z]/g) ?? []).length; return !en || (he > 0 && he * 3 >= en) ? 'rtl' : 'ltr'; };
 
 /** Tags Betty puts on by herself, offered as one-click filters when they exist. */
-const QUICK_TAGS = ['דחוף', 'זקוק לליווי', 'English'];
-const QUICK_LABEL: Record<string, string> = { 'דחוף': '🚨 דחוף', 'זקוק לליווי': '💛 זקוק לליווי', 'English': 'English' };
+const QUICK_TAGS = ['דחוף', 'זקוק לליווי', 'English', 'العربية'];
+const QUICK_LABEL: Record<string, string> = { 'דחוף': '🚨 דחוף', 'זקוק לליווי': '💛 זקוק לליווי', 'English': 'English', 'العربية': 'العربية (ערבית)' };
 
 export function Inbox({ me }: { me: Me }) {
   const isManager = can(me, 'inbox.view_all');

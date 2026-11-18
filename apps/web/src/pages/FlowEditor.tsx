@@ -8,11 +8,14 @@ import { errText } from '../strings';
  * "In English" fields: the English wording of a text in the flow (for customers who write in English). Stored in the bot's one
  * Hebrew → English dictionary (Bot > English translation), keyed by the Hebrew text; saved together with the flow.
  */
-interface EnCtx { show: boolean; get: (he: string) => string; set: (he: string, en: string) => void; toggle: (v: boolean) => void }
+type TL = 'en' | 'ar';
+interface EnCtx { show: boolean; get: (he: string, lang?: TL) => string; set: (he: string, value: string, lang?: TL) => void; toggle: (v: boolean) => void }
+/** translations of both languages in one map: "en|<hebrew>", "ar|<hebrew>" */
+const tk = (lang: TL, he: string) => `${lang}|${he}`;
 const EnContext = createContext<EnCtx>({ show: false, get: () => '', set: () => undefined, toggle: () => undefined });
 function EnToggle() {
   const en = useContext(EnContext);
-  return <div className="field"><label><input type="checkbox" role="switch" style={{ width: 'auto', minHeight: 'auto' }} checked={en.show} onChange={(e) => en.toggle(e.target.checked)} /> גם באנגלית (ללקוחות שכותבים באנגלית)</label></div>;
+  return <div className="field"><label><input type="checkbox" role="switch" style={{ width: 'auto', minHeight: 'auto' }} checked={en.show} onChange={(e) => en.toggle(e.target.checked)} /> גם באנגלית ובערבית (ללקוחות שכותבים בשפות האלה)</label></div>;
 }
 const hasHebrew = (s: string) => /[\u05D0-\u05EA]/.test(s);
 function EnField({ he, id, rows = 1, maxLength = 1500 }: { he: string; id: string; rows?: number; maxLength?: number }) {
@@ -20,16 +23,26 @@ function EnField({ he, id, rows = 1, maxLength = 1500 }: { he: string; id: strin
   const prev = useRef(he);
   // the Hebrew text was edited: its English goes with it (unless the new text already has its own)
   useEffect(() => {
-    if (prev.current !== he) { const old = en.get(prev.current); if (old && !en.get(he)) en.set(he, old); prev.current = he; }
+    if (prev.current !== he) {
+      for (const l of ['en', 'ar'] as const) { const old = en.get(prev.current, l); if (old && !en.get(he, l)) en.set(he, old, l); }
+      prev.current = he;
+    }
   }, [he]);  // eslint-disable-line react-hooks/exhaustive-deps
   if (!en.show || !he.trim() || !hasHebrew(he)) return null;
-  const v = en.get(he);
   return (
-    <div className="field en-field">
-      <label htmlFor={id}>באנגלית <span className="hint">(ללקוחות שכותבים באנגלית{v ? '' : '; ריק = יישלח בעברית'})</span></label>
-      {rows > 1 ? <textarea id={id} dir="ltr" lang="en" rows={rows} maxLength={maxLength} value={v} placeholder="English…" onChange={(e) => en.set(he, e.target.value)} />
-        : <input id={id} dir="ltr" lang="en" maxLength={maxLength} value={v} placeholder="English…" onChange={(e) => en.set(he, e.target.value)} />}
-    </div>
+    <>
+      {([['en', 'באנגלית', 'ltr', 'English…'], ['ar', 'בערבית', 'rtl', 'العربية…']] as const).map(([l, name, dir, ph]) => {
+        const v = en.get(he, l);
+        const fid = l === 'en' ? id : `${id}-ar`;
+        return (
+          <div key={l} className="field en-field">
+            <label htmlFor={fid}>{name} <span className="hint">(ללקוחות שכותבים {name}{v ? '' : '; ריק = יישלח בעברית'})</span></label>
+            {rows > 1 ? <textarea id={fid} dir={dir} lang={l} rows={rows} maxLength={maxLength} value={v} placeholder={ph} onChange={(e) => en.set(he, e.target.value, l)} />
+              : <input id={fid} dir={dir} lang={l} maxLength={maxLength} value={v} placeholder={ph} onChange={(e) => en.set(he, e.target.value, l)} />}
+          </div>
+        );
+      })}
+    </>
   );
 }
 
@@ -124,7 +137,7 @@ export function FlowEditor({ me }: { me: Me }) {
   const [enMap, setEnMap] = useState<Record<string, string>>({});
   const [enEdits, setEnEdits] = useState<Record<string, string>>({});
   const [showEn, setShowEn] = useState(() => { try { return localStorage.getItem('botwa.flow.en') === '1'; } catch { return false; } });
-  const enCtx: EnCtx = { show: showEn, get: (he) => (Object.hasOwn(enEdits, he) ? enEdits[he]! : enMap[he] ?? ''), set: (he, en) => setEnEdits((x) => ({ ...x, [he]: en })), toggle: (v) => { setShowEn(v); try { localStorage.setItem('botwa.flow.en', v ? '1' : '0'); } catch { /* private mode */ } } };
+  const enCtx: EnCtx = { show: showEn, get: (he, l = 'en') => { const k = tk(l, he); return Object.hasOwn(enEdits, k) ? enEdits[k]! : enMap[k] ?? ''; }, set: (he, v, l = 'en') => setEnEdits((x) => ({ ...x, [tk(l, he)]: v })), toggle: (v) => { setShowEn(v); try { localStorage.setItem('botwa.flow.en', v ? '1' : '0'); } catch { /* private mode */ } } };
   const [open, setOpen] = useState<string | null>(null);
   const [tab, setTab] = useState<'edit' | 'test'>('edit');
   const [addType, setAddType] = useState<Node['type']>('message');
@@ -168,8 +181,12 @@ export function FlowEditor({ me }: { me: Me }) {
       const d = await api<{ mode: 'menu' | 'flow'; flow: Flow | null; problems: string[]; unfinished?: string[] }>('GET', '/flow').catch(() => null);
       if (d) { setMode(d.mode); setFlow(d.flow); setSaved(JSON.stringify(d.flow)); setProblems(d.problems); setUnfin(d.unfinished ?? []); }
       setRefs(await api<Refs>('GET', '/flow/refs').catch(() => ({ users: [], tags: [] })));
-      const tr = await api<{ items: { he: string; en: string }[] }>('GET', '/settings/translations').catch(() => null);
-      if (tr) setEnMap(Object.fromEntries(tr.items.filter((x) => x.en).map((x) => [x.he, x.en])));
+      const m: Record<string, string> = {};
+      for (const l of ['en', 'ar'] as const) {
+        const tr = await api<{ items: { he: string; en: string }[] }>('GET', `/settings/translations?lang=${l}`).catch(() => null);
+        for (const x of tr?.items ?? []) if (x.en) m[tk(l, x.he)] = x.en;
+      }
+      setEnMap(m);
       loaded.current = true;
     })();
   }, []);
@@ -184,7 +201,10 @@ export function FlowEditor({ me }: { me: Me }) {
     try {
       await api('PUT', '/flow', { flow });
       if (Object.keys(enEdits).length) {
-        await api('PATCH', '/settings/translations', { entries: enEdits });
+        for (const l of ['en', 'ar'] as const) {
+          const entries = Object.fromEntries(Object.entries(enEdits).filter(([k]) => k.startsWith(`${l}|`)).map(([k, v]) => [k.slice(3), v]));
+          if (Object.keys(entries).length) await api('PATCH', `/settings/translations?lang=${l}`, { entries });
+        }
         setEnMap((m) => { const n = { ...m }; for (const [k, v] of Object.entries(enEdits)) { if (v.trim()) n[k] = v.trim(); else delete n[k]; } return n; });
         setEnEdits({});
       }

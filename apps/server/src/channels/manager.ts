@@ -50,8 +50,8 @@ import { FlowProblem, sendFlowRequest } from '../forms/flows.js';
 import { dueReminders, reminderText } from '../safety/inspections.js';
 import { officerReply, officerUserFor } from '../safety/whoIs.js';
 import { comfortText, detectDistress, stillHereText, type Distress } from '../empathy.js';
-import { detectLang, withDirectionMarks, type Lang } from '../i18n/lang.js';
-import { dictionary, fromEnglish, localize } from '../i18n/translate.js';
+import { asLang, detectLang, withDirectionMarks, type Lang } from '../i18n/lang.js';
+import { dictionary, fromCustomer, isTarget, localize } from '../i18n/translate.js';
 import { factReply } from '../safety/facts.js';
 import { hoursSummary } from '../canned.js';
 import { staffMessage } from '../staff/assistant.js';
@@ -278,7 +278,7 @@ export class ChannelManager {
   onFlowReply?: (a: { channelId: string; conversationId: string; externalContactId: string; messageId: string; responseJson: string }) => Promise<void>;
 
   /** A menu as buttons or a list. Returns false when the channel cannot, or the menu does not fit, or Meta refuses it: the caller then sends the numbered text. */
-  async sendMenu(channelId: string, externalContactId: string, body: string, options: { id: string; title: string }[], opts?: { lang?: 'he' | 'en'; page?: number }): Promise<{ externalMessageId?: string } | null> {
+  async sendMenu(channelId: string, externalContactId: string, body: string, options: { id: string; title: string }[], opts?: { lang?: Lang; page?: number }): Promise<{ externalMessageId?: string } | null> {
     const a = this.adapters.get(channelId);
     if (!a?.sendInteractive || this.statuses.get(channelId) !== 'connected') return null;
     await this.assertNotPaused(channelId);
@@ -296,7 +296,7 @@ export class ChannelManager {
     const parsed = last.map((x) => (x.body ? parseNumberedMenu(x.body) : null)).find((x) => !!x);
     if (!parsed) return false;
     const lang = await this.langOf(convId);
-    return !!(await this.sendMenu(channelId, ext, page === 0 ? parsed.body : (lang === 'en' ? 'More topics:' : 'נושאים נוספים:'), parsed.options, { lang, page }));
+    return !!(await this.sendMenu(channelId, ext, page === 0 ? parsed.body : (lang === 'en' ? 'More topics:' : lang === 'ar' ? 'مواضيع أخرى:' : 'נושאים נוספים:'), parsed.options, { lang, page }));
   }
 
   private statusSince = new Map<string, number>();
@@ -434,7 +434,8 @@ export class ChannelManager {
           // an emergency: the numbers to call at once and an urgent hand-over, before anything else (no greeting, menu or GIF)
           if (r.messageId && !stop && !m.media && bot?.emergency.enabled && !isCommentContact(m.externalContactId) && isEmergency(m.text)) {
             // in English: the unit's own English text when it wrote one (its Hebrew text may have changed from the built-in one)
-            const emText = (await this.langOf(r.conversationId)) === 'en' && bot.emergency.textEn ? bot.emergency.textEn : bot.emergency.text;
+            const emLang = await this.langOf(r.conversationId);
+            const emText = emLang === 'en' && bot.emergency.textEn ? bot.emergency.textEn : emLang === 'ar' && bot.emergency.textAr ? bot.emergency.textAr : bot.emergency.text;
             await this.emergency(channelId, r.conversationId, m.externalContactId, r.messageId, emText).catch(() => undefined);
             this.emit({ channelId, type: 'message', conversationId: r.conversationId, messageId: r.messageId });
             this.onInbound?.(r.conversationId);
@@ -873,7 +874,7 @@ export class ChannelManager {
 
   /** The conversation's language (Hebrew unless the customer writes in English). */
   async langOf(convId: string): Promise<Lang> {
-    return ((await this.db.query('SELECT lang FROM conversations WHERE id = $1', [convId]).catch(() => ({ rows: [] as { lang: string }[] }))).rows[0]?.lang === 'en' ? 'en' : 'he');
+    return asLang((await this.db.query('SELECT lang FROM conversations WHERE id = $1', [convId]).catch(() => ({ rows: [] as { lang: string }[] }))).rows[0]?.lang);
   }
   /** A message of Betty's in the conversation's language (so the stored copy is exactly what the customer got). */
   async say(convId: string, text: string): Promise<string> { return localize(this.db, await this.langOf(convId), text); }
@@ -884,12 +885,15 @@ export class ChannelManager {
     if (!lang) return null;
     const r = await this.db.query(`UPDATE conversations SET lang = $2 WHERE id = $1 AND lang IS DISTINCT FROM $2 RETURNING id`, [convId, lang]);
     if (!r.rowCount) return lang;
-    // Hebrew is the default: only an English conversation gets a tag ("English"); writing in Hebrew again takes it off
-    if (lang === 'en') {
-      await this.db.query(`INSERT INTO tags (name) SELECT 'English' WHERE NOT EXISTS (SELECT 1 FROM tags WHERE lower(name) = 'english')`).catch(() => undefined);
-      await this.db.query(`INSERT INTO conversation_tags (conversation_id, tag_id) SELECT $1, id FROM tags WHERE lower(name) = 'english' ON CONFLICT DO NOTHING`, [convId]);
-    } else {
-      await this.db.query(`DELETE FROM conversation_tags WHERE conversation_id = $1 AND tag_id IN (SELECT id FROM tags WHERE lower(name) = 'english')`, [convId]);
+    // Hebrew is the default: an English conversation gets the tag "English", an Arabic one "العربية"; writing in another language
+    // moves the tag (one language tag at a time)
+    const TAG: Partial<Record<Lang, string>> = { en: 'English', ar: 'العربية' };
+    const want = TAG[lang];
+    const others = Object.values(TAG).filter((t) => t !== want).map((t) => t!.toLowerCase());
+    await this.db.query(`DELETE FROM conversation_tags WHERE conversation_id = $1 AND tag_id IN (SELECT id FROM tags WHERE lower(name) = ANY($2::text[]))`, [convId, others]);
+    if (want) {
+      await this.db.query(`INSERT INTO tags (name) SELECT $1::text WHERE NOT EXISTS (SELECT 1 FROM tags WHERE lower(name) = lower($1::text))`, [want]).catch(() => undefined);
+      await this.db.query(`INSERT INTO conversation_tags (conversation_id, tag_id) SELECT $1, id FROM tags WHERE lower(name) = lower($2::text) ON CONFLICT DO NOTHING`, [convId, want]);
     }
     return lang;
   }
@@ -908,8 +912,8 @@ export class ChannelManager {
       this.db.query(`SELECT ct.profile->>'fullName' AS full_name, ct.display_name FROM conversations c JOIN contacts ct ON ct.id = c.contact_id WHERE c.id = $1`, [convId]).then((r) => r.rows[0]).catch(() => undefined),
     ]);
     // in English, the bot's name as translated ("בטי" → "Betty")
-    const persona = persona0 && lang === 'en' ? { ...persona0, name: (await dictionary(this.db)).exact.get(persona0.name?.trim() ?? '') ?? persona0.name } : persona0;
-    return { botName: persona?.name, fullName: cleanName(nameHint) || cleanName(row?.full_name) || cleanName(row?.display_name), greeting: greetingFor(await this.dayPartNow(), lang), skipIntro: await this.knowsBot(convId, persona?.name) };
+    const persona = persona0 && isTarget(lang) ? { ...persona0, name: (await dictionary(this.db, lang)).exact.get(persona0.name?.trim() ?? '') ?? persona0.name } : persona0;
+    return { botName: persona?.name, fullName: cleanName(nameHint) || cleanName(row?.full_name) || cleanName(row?.display_name), greeting: greetingFor(await this.dayPartNow(), lang), skipIntro: await this.knowsBot(convId, persona?.name), lang };
   }
 
   /** conversations whose customer just called the bot by name (cleared after a few minutes) */
@@ -944,11 +948,11 @@ export class ChannelManager {
   /** The bot's replies of one step; when the last is its menu and the channel can show buttons or a list, send the menu that way (the text is kept in the conversation either way). */
   private async botSayAll(channelId: string, convId: string, ext: string, bot: BotConfig, rawReplies: string[], menu: boolean | undefined, nameHint?: string): Promise<void> {
     const lang = await this.langOf(convId);
-    const localized = lang === 'en' ? await Promise.all(rawReplies.map((r) => localize(this.db, lang, r))) : rawReplies;
+    const localized = isTarget(lang) ? await Promise.all(rawReplies.map((r) => localize(this.db, lang, r))) : rawReplies;
     const replies = localized.some((r) => r.includes('{')) ? await this.botTextContext(convId, nameHint, lang).then((c) => localized.map((r) => renderBotText(r, c))) : localized;
     // the first thing the bot says in a conversation includes that it is a bot, not a person (said once; the setting can change or clear it)
     if (bot.disclosure && replies.length) {
-      const d = lang === 'en' ? await localize(this.db, lang, bot.disclosure) : bot.disclosure;
+      const d = isTarget(lang) ? await localize(this.db, lang, bot.disclosure) : bot.disclosure;
       if (!(await this.db.query(`SELECT 1 FROM messages WHERE conversation_id = $1 AND direction = 'out' AND auto AND created_at > now() - interval '12 hours' AND position($2 in body) > 0 LIMIT 1`, [convId, d])).rowCount) { const first = replies[0]!; const cut = first.indexOf('\n\n'); replies[0] = cut > 0 ? `${first.slice(0, cut)}\n\n${d}${first.slice(cut)}` : `${first}\n\n${d}`; }   // after the opening line: a menu keeps its options last
     }
     for (let i = 0; i < replies.length; i++) {
@@ -988,7 +992,7 @@ export class ChannelManager {
       onFound?.(a.sourceId);
       const worded = await this.wordAnswer(bot, t, a);
       // an English conversation answered from a Hebrew entry: say so (the line is translated with the rest of the message)
-      return lang === 'en' && a.lang !== 'en' ? `${worded}\n\n${KB_HEBREW_NOTE}` : worded;
+      return isTarget(lang) && a.lang !== lang ? `${worded}\n\n${KB_HEBREW_NOTE}` : worded;
     } catch { return null; }
   }
 
@@ -1063,7 +1067,7 @@ export class ChannelManager {
     const c = rows[0];
     if (!c || c.assigned_to) return; // a person already owns this conversation
     // English commands and option names are read as the Hebrew ones the flow knows ("menu" → "תפריט", "Lasers" → "לייזרים")
-    if (c.lang === 'en' && text) { text = await fromEnglish(this.db, text); rawText = text; }
+    if (isTarget(c.lang) && text) { text = await fromCustomer(this.db, c.lang, text); rawText = text; }
     if (c.bot_state === 'human') return; // handed over (or stopped by the loop guard): silent, no reactions either, until a person closes it
     if (text !== null && text.trim() === '[unsupported message type]') text = null;
 
@@ -1085,15 +1089,15 @@ export class ChannelManager {
     // the bot's own name is not part of the question ("היי בטי" is a greeting, "בטי, מה זה…" searches "מה זה…")
     const persona = (await loadPersona(this.db).catch(() => null)) ?? { name: '', role: '' };
     // called by her name: she knows the customer knows who she is, so no "כאן בטי מיחידת הבטיחות" in what she says next
-    if (mentionsName(text, persona.name) || (c.lang === 'en' && mentionsName(text, (await dictionary(this.db)).exact.get(persona.name?.trim() ?? '')))) this.namedBy.set(convId, Date.now());
+    if (mentionsName(text, persona.name) || (isTarget(c.lang) && mentionsName(text, (await dictionary(this.db, c.lang)).exact.get(persona.name?.trim() ?? '')))) this.namedBy.set(convId, Date.now());
     // a message that tries to override her rules or make her reveal them: a fixed polite answer, never fed to a model
     if (text && detectInjection(text)) { await this.injectionAttempt(channelId, convId, ext, bot); return; }
     if (text && text.length > BOT_INPUT_MAX) text = text.slice(0, BOT_INPUT_MAX);
     if (rawText && rawText.length > BOT_INPUT_MAX) rawText = rawText.slice(0, BOT_INPUT_MAX);
     text = withoutBotName(text, persona.name);
     rawText = withoutBotName(rawText, persona.name);
-    if (c.lang === 'en') {   // "Betty, are you there?": her English name is not part of the question either
-      const en = (await dictionary(this.db)).exact.get(persona.name?.trim() ?? '');
+    if (isTarget(c.lang)) {   // "Betty, are you there?" / "بيتي، هل أنت هنا؟": her translated name is not part of the question either
+      const en = (await dictionary(this.db, c.lang)).exact.get(persona.name?.trim() ?? '');
       if (en) { text = withoutBotName(text, en); rawText = withoutBotName(rawText, en); }
     }
     // "מי את?" / "את בוט?" / "מה שלומך?": the bot answers as itself, then picks up the question it was waiting for
@@ -1154,7 +1158,7 @@ export class ChannelManager {
 
     let searched = false;
     let answeredFrom: string | null = null;
-    const kbText = c.bot_state === 'area' ? null : await this.kbAnswer(bot, c.bot_state, text, false, async () => { searched = true; await rx.set('working'); }, (id) => { answeredFrom = id; }, c.lang === 'en' ? 'en' : 'he');
+    const kbText = c.bot_state === 'area' ? null : await this.kbAnswer(bot, c.bot_state, text, false, async () => { searched = true; await rx.set('working'); }, (id) => { answeredFrom = id; }, asLang(c.lang));
     const d = decide(bot, { state: c.bot_state, invalid: c.bot_invalid, item: c.bot_item }, text, kbText);
     const stepStart: Date = (await this.db.query('SELECT now() AS t')).rows[0].t;   // database clock, like the messages' own times
     await this.botSayAll(channelId, convId, ext, bot, d.replies, d.menu);
@@ -1475,7 +1479,8 @@ export class ChannelManager {
     if (!i.active || !i.startedAt) return false;
     const already = (await this.db.query(`SELECT 1 FROM messages WHERE conversation_id = $1 AND automation = 'incident' AND created_at >= $2 LIMIT 1`, [convId, i.startedAt])).rowCount;
     if (already) return false;
-    const body = (await this.langOf(convId)) === 'en' && i.textEn ? i.textEn : i.text;
+    const iLang = await this.langOf(convId);
+    const body = iLang === 'en' && i.textEn ? i.textEn : iLang === 'ar' && i.textAr ? i.textAr : i.text;
     const sent = await this.sendText(channelId, ext, body, { background: true }).catch(() => ({} as { externalMessageId?: string }));
     const ins = await this.db.query(`INSERT INTO messages (conversation_id, direction, body, external_id, auto, automation) VALUES ($1,'out',$2,$3,true,'incident') ON CONFLICT DO NOTHING RETURNING id`, [convId, body, sent.externalMessageId ?? null]);
     if (ins.rows[0]) { this.notifyMessage(channelId, convId, ins.rows[0].id); this.hookMessage('message.sent', convId, ins.rows[0].id); }
@@ -1531,7 +1536,7 @@ export class ChannelManager {
       const here = smallTalkReply(q, persona.name);
       if (here) { reply = `${here}\n\n${WAITING_NOTE}`; kind = 'waiting_answer'; }
       else {
-        const kb = await this.kbAnswer(bot, null, q.slice(0, BOT_INPUT_MAX), bot.mode === 'flow', undefined, undefined, c.lang === 'en' ? 'en' : 'he').catch(() => null);
+        const kb = await this.kbAnswer(bot, null, q.slice(0, BOT_INPUT_MAX), bot.mode === 'flow', undefined, undefined, asLang(c.lang)).catch(() => null);
         if (kb) { reply = `${kb}\n\n${WAITING_NOTE}`; kind = 'waiting_answer'; }
       }
     }
@@ -1619,7 +1624,7 @@ export class ChannelManager {
     let searched = false, found = false;
     let answeredFrom: string | null = null;
     const row = (await this.db.query('SELECT c.flow_state, c.lang, ct.profile, ct.display_name, ct.claimed_email, ct.claimed_phone FROM conversations c JOIN contacts ct ON ct.id = c.contact_id WHERE c.id = $1', [convId])).rows[0];
-    const convLang: Lang = row?.lang === 'en' ? 'en' : 'he';
+    const convLang: Lang = asLang(row?.lang);
     const st = row?.flow_state as FlowState | null;
     const hours = await loadBusinessHours(this.db);
     const ctx: FlowContext = {

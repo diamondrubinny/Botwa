@@ -2,7 +2,7 @@ import { feedbackFor, isFlagged, isLiked } from '../learn.js';
 import { createHash } from 'node:crypto';
 import type { Config } from '../config.js';
 import type { Db } from '../db.js';
-import { detectLang } from '../i18n/lang.js';
+import { detectLang, type Lang } from '../i18n/lang.js';
 import type { MediaService } from '../media/store.js';
 import { matchOptionLexical } from '../flow/match.js';
 import { checkUrl, FetchError, safeGet, type Fetched } from './fetch.js';
@@ -479,7 +479,7 @@ export class KnowledgeBase {
   }
   invalidateSynonyms(): void { this.synCache.at = 0; }
 
-  async search(question: string, opts: { audience: 'bot' | 'staff' | 'any'; limit?: number; categoryId?: string; lang?: 'he' | 'en' } = { audience: 'any' }): Promise<Hit[]> {
+  async search(question: string, opts: { audience: 'bot' | 'staff' | 'any'; limit?: number; categoryId?: string; lang?: Lang } = { audience: 'any' }): Promise<Hit[]> {
     const tokens = queryTokens(question).slice(0, 14);
     const sem = await this.semanticCandidates(question).catch(() => new Map<string, { q: number; p: number; chunkId: number | null }>());
     if (tokens.length === 0 && sem.size === 0) return [];
@@ -547,7 +547,7 @@ export class KnowledgeBase {
   }
 
   /** The answer the bot may give: only a confident match (coverage over a threshold and at least two matching words, or an exact FAQ question). */
-  async answer(question: string, s: AnswerSettings, audience: 'bot' | 'staff' = 'bot', via: 'bot' | 'staff' | 'test' = 'bot', lang?: 'he' | 'en'): Promise<(Hit & { text: string; passage?: string; note?: string; others?: Hit[]; lang?: 'he' | 'en' | null }) | null> {
+  async answer(question: string, s: AnswerSettings, audience: 'bot' | 'staff' = 'bot', via: 'bot' | 'staff' | 'test' = 'bot', lang?: Lang): Promise<(Hit & { text: string; passage?: string; note?: string; others?: Hit[]; lang?: Lang | null }) | null> {
     // entries in the customer's language first; when they hold no confident answer, the whole knowledge base
     let hits = lang ? await this.search(question, { audience, limit: 3, lang }) : [];
     if (!lang || !isConfident(hits[0], hits[1], s.minScore)) hits = await this.search(question, { audience, limit: 3 });

@@ -298,6 +298,42 @@ describe('official channel: menus as buttons and message templates', () => {
     expect((await db.query(`SELECT bot_state FROM conversations WHERE id = $1`, [c2])).rows[0].bot_state).not.toBe('human');
   });
 
+  it('Arabic: Betty answers in Arabic, the menu sits behind "☰ القائمة", Arabic commands work, the conversation gets an "العربية" tag, an emergency gets the numbers in Arabic', async () => {
+    await call('PUT', '/settings/bot', 'adm', { ...DEFAULT_BOT, enabled: true, interactiveMenus: true, items: [{ title: 'שעות פעילות', answer: 'א׳–ה׳ 09:00–17:00' }, { title: 'דיווח על מפגע', answer: 'שלחו תמונה של המפגע או תארו אותו בכתב:' }, { title: 'לייזרים', answer: 'x' }], humanOption: true });
+    const texts = () => sent.filter((s) => s.body.type === 'text').map((s) => (s.body.text as { body: string }).body);
+    sent.length = 0;
+    await hook(inbound('wamid.AR1', '972501110009', { type: 'text', text: { body: 'مرحبا، عندي سؤال' } }));
+    await new Promise((r) => setTimeout(r, 80));
+    const menu = sent.find((s) => s.body.type === 'interactive')!.body.interactive as { body: { text: string }; action: { button: string; sections: { rows: { id: string; title: string }[] }[] } };
+    expect(menu.action.button).toBe('☰ القائمة');
+    expect(menu.body.text).toContain('معكم');                                                 // "{ברכה}! כאן {בוט}…" in Arabic
+    expect(menu.body.text).not.toMatch(/[א-ת]{3,}/);                                          // no Hebrew left
+    expect(menu.body.text).toContain('أنا روبوت محادثة ولست موظفة بشرية');                  // the bot disclosure, in Arabic
+    expect(menu.action.sections[0]!.rows.map((r) => r.title)).toEqual(['ساعات العمل', 'الإبلاغ عن خطر', 'الليزر', 'موظف بشري']);
+    const conv = (await db.query(`SELECT conversation_id FROM messages WHERE external_id = 'wamid.AR1'`)).rows[0].conversation_id;
+    expect((await db.query(`SELECT lang FROM conversations WHERE id = $1`, [conv])).rows[0].lang).toBe('ar');
+    expect((await db.query(`SELECT t.name FROM conversation_tags x JOIN tags t ON t.id = x.tag_id WHERE x.conversation_id = $1`, [conv])).rows.map((r) => r.name)).toContain('العربية');
+    // a tap on a row, then an Arabic command
+    sent.length = 0;
+    await hook(inbound('wamid.AR2', '972501110009', { type: 'interactive', interactive: { type: 'list_reply', list_reply: { id: '1', title: 'ساعات العمل' } } }));
+    await new Promise((r) => setTimeout(r, 80));
+    expect(texts().join('\n')).toContain('الأحد–الخميس 09:00–17:00');
+    sent.length = 0;
+    await hook(inbound('wamid.AR3', '972501110009', { type: 'text', text: { body: 'قائمة' } }));
+    await new Promise((r) => setTimeout(r, 80));
+    expect(sent.some((s) => s.body.type === 'interactive')).toBe(true);
+    // an emergency in Arabic: the numbers, in Arabic, at once
+    sent.length = 0;
+    await hook(inbound('wamid.AR4', '972501110009', { type: 'text', text: { body: 'يوجد حريق في المختبر! ساعدوني' } }));
+    await new Promise((r) => setTimeout(r, 80));
+    expect(texts().join('\n')).toContain('اتصلوا فورًا بنجمة داود الحمراء (الإسعاف) 101');
+    // writing in Hebrew again: back to Hebrew, the tag moves off
+    await hook(inbound('wamid.AR5', '972501110009', { type: 'text', text: { body: 'תודה רבה' } }));
+    await new Promise((r) => setTimeout(r, 80));
+    expect((await db.query(`SELECT lang FROM conversations WHERE id = $1`, [conv])).rows[0].lang).toBe('he');
+    expect((await db.query(`SELECT t.name FROM conversation_tags x JOIN tags t ON t.id = x.tag_id WHERE x.conversation_id = $1`, [conv])).rows.map((r) => r.name)).not.toContain('العربية');
+  });
+
   it('two or three short options become reply buttons; when Meta refuses, or the setting is off, the numbered text is sent instead', async () => {
     await call('PUT', '/settings/bot', 'adm', { ...DEFAULT_BOT, enabled: true, items: [{ title: 'שעות', answer: 'a' }, { title: 'מיקום', answer: 'b' }], humanOption: false });
     sent.length = 0;

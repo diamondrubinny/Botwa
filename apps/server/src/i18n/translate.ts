@@ -1,7 +1,14 @@
 import type { Db } from '../db.js';
 import { ADVICE, ADVICE_DEFAULT, ADVICE_DEFAULT_EN, ADVICE_EN } from '../empathy.js';
 import { SAFETY_FACTS, SAFETY_FACTS_EN } from '../safety/facts.js';
-import type { Lang } from './lang.js';
+import { PAIRS_AR } from './arabic.js';
+import { arNorm, type Lang } from './lang.js';
+export { arNorm };
+
+/** The languages Betty translates into (Hebrew is the source). */
+export type Target = 'en' | 'ar';
+export const TARGETS: readonly Target[] = ['en', 'ar'];
+export const isTarget = (l: unknown): l is Target => l === 'en' || l === 'ar';
 
 /**
  * Betty in English: one Hebrew → English dictionary for everything she sends. Defaults below (her fixed messages, the safety
@@ -204,7 +211,8 @@ const PAIRS: [string, string][] = [
 ];
 
 /** The built-in dictionary (with the safety facts and the first advice for hazards). */
-export function defaultEntries(): Map<string, string> {
+export function defaultEntries(target: Target = 'en'): Map<string, string> {
+  if (target === 'ar') return new Map(PAIRS_AR);
   const m = new Map(PAIRS);
   SAFETY_FACTS.forEach((f, i) => { if (SAFETY_FACTS_EN[i]) m.set(f, SAFETY_FACTS_EN[i]!); });
   ADVICE.forEach(([, he], i) => { if (ADVICE_EN[i]) m.set(he, ADVICE_EN[i]!); });
@@ -212,10 +220,10 @@ export function defaultEntries(): Map<string, string> {
   return m;
 }
 
-export interface Dictionary { exact: Map<string, string>; patterns: { re: RegExp; to: string }[] }
+export interface Dictionary { exact: Map<string, string>; patterns: { re: RegExp; to: string }[]; target: Target }
 
 const esc = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-export function buildDictionary(entries: Map<string, string>): Dictionary {
+export function buildDictionary(entries: Map<string, string>, target: Target = 'en'): Dictionary {
   const exact = new Map<string, string>();
   const patterns: { re: RegExp; to: string }[] = [];
   for (const [he, en] of entries) {
@@ -229,11 +237,14 @@ export function buildDictionary(entries: Map<string, string>): Dictionary {
   }
   // longer (more specific) patterns first
   patterns.sort((a, b) => b.re.source.length - a.re.source.length);
-  return { exact, patterns };
+  return { exact, patterns, target };
 }
 
-const DAYS_EN: Record<string, string> = { 'א׳': 'Sun', 'ב׳': 'Mon', 'ג׳': 'Tue', 'ד׳': 'Wed', 'ה׳': 'Thu', 'ו׳': 'Fri', 'ש׳': 'Sat' };
-const LETTER_EN: Record<string, string> = { 'א': 'a', 'ב': 'b', 'ג': 'c' };
+const DAYS: Record<Target, Record<string, string>> = {
+  en: { 'א׳': 'Sun', 'ב׳': 'Mon', 'ג׳': 'Tue', 'ד׳': 'Wed', 'ה׳': 'Thu', 'ו׳': 'Fri', 'ש׳': 'Sat' },
+  ar: { 'א׳': 'الأحد', 'ב׳': 'الإثنين', 'ג׳': 'الثلاثاء', 'ד׳': 'الأربعاء', 'ה׳': 'الخميس', 'ו׳': 'الجمعة', 'ש׳': 'السبت' },
+};
+const LETTERS: Record<Target, Record<string, string>> = { en: { 'א': 'a', 'ב': 'b', 'ג': 'c' }, ar: { 'א': 'أ', 'ב': 'ب', 'ג': 'ج' } };
 
 /** One piece (a line or less): exact, then a pattern (its changing parts translated by themselves), then a list item or a leading emoji. */
 function piece(s: string, d: Dictionary, depth = 0): string {
@@ -248,17 +259,17 @@ function piece(s: string, d: Dictionary, depth = 0): string {
     }
     // "1. text", "0. text", "א. text"
     const item = /^(\d{1,2}|[אבג])([.)]\s+)(.+)$/.exec(t);
-    if (item) return s.replace(t, `${LETTER_EN[item[1]!] ?? item[1]}${item[2]}${piece(item[3]!, d, depth + 1)}`);
+    if (item) return s.replace(t, `${LETTERS[d.target ?? 'en'][item[1]!] ?? item[1]}${item[2]}${piece(item[3]!, d, depth + 1)}`);
     // a leading emoji or bullet
     const lead = /^([\p{Extended_Pictographic}\u{FE0F}\u{200D}•*\-–\s]+)(.+)$/u.exec(t);
     if (lead && lead[1]!.trim()) return s.replace(t, `${lead[1]}${piece(lead[2]!, d, depth + 1)}`);
   }
   // working hours ("א׳–ה׳ 09:00–17:00")
-  if (/^[א-ש]׳/.test(t) && /\d{1,2}:\d{2}/.test(t)) return s.replace(t, t.replace(/[א-ש]׳/g, (x) => DAYS_EN[x] ?? x));
+  if (/^[א-ש]׳/.test(t) && /\d{1,2}:\d{2}/.test(t)) return s.replace(t, t.replace(/[א-ש]׳/g, (x) => DAYS[d.target ?? 'en'][x] ?? x));
   return s;
 }
 
-/** A whole message in English, as far as the dictionary goes. */
+/** A whole message in the dictionary's language, as far as the dictionary goes. */
 export function translateWith(text: string, d: Dictionary): string {
   if (!text || !/[א-ת]/.test(text)) return text;
   const whole = piece(text, d);
@@ -270,52 +281,75 @@ export function translateWith(text: string, d: Dictionary): string {
 }
 
 // ---- stored translations (the unit's edits) ------------------------------------------------------------------------------
-let cache: { at: number; dict: Dictionary } | null = null;
-export const invalidateTranslations = () => { cache = null; };
+const cache = new Map<Target, { at: number; dict: Dictionary }>();
+export const invalidateTranslations = () => { cache.clear(); };
+/** the settings row of a language's edits: "translations_en", "translations_ar" */
+export const overridesKey = (target: Target) => `translations_${target}`;
 
-export async function loadOverrides(db: Db): Promise<Record<string, string>> {
-  const v = (await db.query(`SELECT value FROM settings WHERE key = 'translations_en'`)).rows[0]?.value as { entries?: Record<string, string> } | undefined;
+export async function loadOverrides(db: Db, target: Target = 'en'): Promise<Record<string, string>> {
+  const v = (await db.query(`SELECT value FROM settings WHERE key = $1`, [overridesKey(target)])).rows[0]?.value as { entries?: Record<string, string> } | undefined;
   return v?.entries && typeof v.entries === 'object' ? v.entries : {};
 }
 
-export async function dictionary(db: Db): Promise<Dictionary> {
-  if (cache && Date.now() - cache.at < 30_000) return cache.dict;
-  const entries = defaultEntries();
-  for (const [he, en] of Object.entries(await loadOverrides(db).catch(() => ({})))) {
-    if (typeof en === 'string' && en.trim()) entries.set(he, en); else entries.delete(he);   // an empty entry switches a default off
+export async function dictionary(db: Db, target: Target = 'en'): Promise<Dictionary> {
+  const c = cache.get(target);
+  if (c && Date.now() - c.at < 30_000) return c.dict;
+  const entries = defaultEntries(target);
+  for (const [he, tr] of Object.entries(await loadOverrides(db, target).catch(() => ({})))) {
+    if (typeof tr === 'string' && tr.trim()) entries.set(he, tr); else entries.delete(he);   // an empty entry switches a default off
   }
-  cache = { at: Date.now(), dict: buildDictionary(entries) };
-  return cache.dict;
+  const dict = buildDictionary(entries, target);
+  cache.set(target, { at: Date.now(), dict });
+  return dict;
 }
 
-/** The text in the conversation's language (Hebrew texts are only translated when the conversation is in English). */
+/** The text in the conversation's language (Hebrew texts are only translated when the conversation is in English or Arabic). */
 export async function localize(db: Db, lang: Lang | null | undefined, text: string): Promise<string> {
-  if (lang !== 'en' || !text) return text;
-  return translateWith(text, await dictionary(db));
+  if (!isTarget(lang) || !text) return text;
+  return translateWith(text, await dictionary(db, lang));
 }
 
 /**
- * English words for Betty's commands and answers, read as the Hebrew ones the flow understands: "menu", "back", "agent", "skip",
- * "yes"/"no", "more". A menu option written in English (its translation) is read as the option itself.
+ * Betty's commands and answers in English or Arabic, read as the Hebrew ones the flow understands: "menu" / "قائمة", "back" /
+ * "رجوع", "agent" / "موظف", "skip" / "تخطي", "yes"/"no" / "نعم"/"لا", "more" / "المزيد". A menu option written in the
+ * conversation's language (its translation) is read as the option itself.
  */
-const COMMANDS: [RegExp, string][] = [
-  [/^(main\s+)?menu$|^start\s*over$/i, 'תפריט'],
-  [/^(go\s+)?back$|^previous$/i, 'אחורה'],
-  [/^(agent|human|person|representative|talk to (a |an )?(person|human|agent)|operator)$/i, 'נציג'],
-  [/^skip$/i, 'דלג'],
-  [/^(yes|yeah|yep|y)$/i, 'כן'],
-  [/^(no|nope|n)$/i, 'לא'],
-  [/^(more|another( one)?|one more)$/i, 'עוד'],
-];
-export async function fromEnglish(db: Db, text: string): Promise<string> {
-  const t = text.trim().replace(/[.!?]+$/, '');
-  for (const [re, he] of COMMANDS) if (re.test(t)) return he;
-  if (/^[a-c]$/i.test(t)) return { a: 'א', b: 'ב', c: 'ג' }[t.toLowerCase()]!;   // "did you mean" letters
-  const d = await dictionary(db);
-  const lower = t.toLowerCase();
-  for (const [he, en] of d.exact) if (en.toLowerCase() === lower && he.length <= 80) return he;   // an option's English label
+const COMMANDS: Record<Target, [RegExp, string][]> = {
+  en: [
+    [/^(main\s+)?menu$|^start\s*over$/i, 'תפריט'],
+    [/^(go\s+)?back$|^previous$/i, 'אחורה'],
+    [/^(agent|human|person|representative|talk to (a |an )?(person|human|agent)|operator)$/i, 'נציג'],
+    [/^skip$/i, 'דלג'],
+    [/^(yes|yeah|yep|y)$/i, 'כן'],
+    [/^(no|nope|n)$/i, 'לא'],
+    [/^(more|another( one)?|one more)$/i, 'עוד'],
+  ],
+  // (compared after arNorm: no diacritics or tatweel, one form of alef, ي for ى, ه for ة)
+  ar: [
+    [/^(ال)?قائمه( (ال)?رئيسيه)?$|^ابدا من جديد$/, 'תפריט'],
+    [/^(رجوع|ارجع|عوده|السابق|للخلف)$/, 'אחורה'],
+    [/^((ال)?موظف|موظفه|ممثل|ممثله|انسان|شخص|(اريد|بدي|ممكن) (موظف|ممثل|انسان|شخص)|(التحدث|الحديث|احكي) مع (موظف|انسان|شخص))$/, 'נציג'],
+    [/^(تخطي|تخطى|تجاوز|تخط)$/, 'דלג'],
+    [/^(نعم|ايوه|اه|اكيد|اجل)$/, 'כן'],
+    [/^(لا|كلا)$/, 'לא'],
+    [/^((ال)?مزيد|كمان|اخر|واحد اخر|غيره)$/, 'עוד'],
+  ],
+};
+const AR_LETTERS: Record<string, string> = { 'ا': 'א', 'ب': 'ב', 'ج': 'ג' };
+
+export async function fromCustomer(db: Db, lang: Lang | null | undefined, text: string): Promise<string> {
+  if (!isTarget(lang)) return text;
+  const raw = text.trim().replace(/[.!?؟]+$/, '');
+  const t = lang === 'ar' ? arNorm(raw) : raw;
+  for (const [re, he] of COMMANDS[lang]) if (re.test(t)) return he;
+  if (lang === 'en' && /^[a-c]$/i.test(t)) return { a: 'א', b: 'ב', c: 'ג' }[t.toLowerCase()]!;   // "did you mean" letters
+  if (lang === 'ar' && AR_LETTERS[t]) return AR_LETTERS[t]!;
+  const d = await dictionary(db, lang);
+  const key = lang === 'ar' ? t : t.toLowerCase();
+  for (const [he, tr] of d.exact) if ((lang === 'ar' ? arNorm(tr) : tr.toLowerCase()) === key && he.length <= 80) return he;   // an option's label
   return text;
 }
+export const fromEnglish = (db: Db, text: string) => fromCustomer(db, 'en', text);
 
 /**
  * A starting point for the panel (never sent as is): the text translated as far as the dictionary goes, also sentence by sentence,

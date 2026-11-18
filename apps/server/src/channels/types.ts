@@ -70,7 +70,7 @@ export interface ChannelAdapter {
   /** React to a customer's message with an emoji (empty string removes our reaction). Best effort; not every platform has it. */
   react?(externalContactId: string, externalMessageId: string, emoji: string): Promise<void>;
   /** A menu as tappable buttons or a list (official WhatsApp only). Throws when it does not fit: the caller sends the numbered text instead. */
-  sendInteractive?(externalContactId: string, body: string, options: { id: string; title: string }[], opts?: { lang?: 'he' | 'en'; page?: number }): Promise<{ externalMessageId?: string }>;
+  sendInteractive?(externalContactId: string, body: string, options: { id: string; title: string }[], opts?: { lang?: 'he' | 'en' | 'ar'; page?: number }): Promise<{ externalMessageId?: string }>;
   /** WhatsApp groups this number is a member of (id like 1203630...@g.us). */
   listGroups?(): Promise<{ id: string; name: string; size: number }[]>;
   sendMedia?(externalContactId: string, media: OutboundMedia): Promise<{ externalMessageId?: string }>;

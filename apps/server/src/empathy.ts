@@ -1,3 +1,4 @@
+import { arNorm } from './i18n/lang.js';
 /**
  * A customer under stress: worried or frightened ("אני לחוצה", "מפחד", "לא יודע מה לעשות") or upset after waiting ("כבר שעה
  * מחכה", "אף אחד לא עונה"). Betty acknowledges the feeling, hands the inquiry to a person (the officer for the topic when
@@ -29,13 +30,16 @@ const has = (t: string, w: string) => new RegExp(`\\s[והשכ]?${w.replace(/[.*
 /** The same feelings in English. */
 const WORRIED_EN = /\b(stressed|stressful|scared|afraid|frightened|terrified|worried|anxious|panic(king)?|freaking out|nervous|i don'?t know what to do|what do i do now)\b/i;
 const UPSET_EN = /\b(no ?one (is )?(answering|replying|answers|replies)|nobody (is )?(answering|replying|answers|replies|gets back)|(been )?waiting (for )?(hours|ages|so long|forever)|still no (answer|reply)|frustrat(ed|ing)|annoy(ed|ing)|unacceptable|ridiculous|fed up|angry|furious|disappointed)\b/i;
+const WORRIED_AR = /(خايف|خايفه|خائف|خائفه|قلقان|قلقانه|قلق جدا|متوتر|متوتره|مرعوب|مرعوبه|مذعور|لا اعرف ماذا افعل|مش عارف شو اعمل|مش عارفه شو اعمل|ما بعرف شو اعمل|ماذا افعل الان)/;
+const UPSET_AR = /(لا احد يرد|لا احد يجيب|ما حدا برد|ما حدا رد|ما حدا بيرد|بستني من ساعه|انتظر من ساعه|انتظر منذ ساعات|من ساعات|محبط|محبطه|مزعج|غير مقبول|زهقت|طفح الكيل|زعلان|زعلانه|غاضب|غاضبه)/;
 export function detectDistress(text: string | null | undefined): Distress | null {
   if (!text || text.length > 600) return null;
   if (detectHazard(text)) return 'hazard';
   // the technical senses are taken out first; what is left decides
   const t = norm(text).replace(new RegExp(TECHNICAL.source, 'g'), ' ');
-  if (WORRIED.some((w) => has(t, w)) || WORRIED_EN.test(t)) return 'worried';
-  if (UPSET.some((w) => has(t, w)) || UPSET_EN.test(t)) return 'upset';
+  const a = /[\u0600-\u06FF]/.test(t) ? arNorm(t) : '';
+  if (WORRIED.some((w) => has(t, w)) || WORRIED_EN.test(t) || (a && WORRIED_AR.test(a))) return 'worried';
+  if (UPSET.some((w) => has(t, w)) || UPSET_EN.test(t) || (a && UPSET_AR.test(a))) return 'upset';
   return null;
 }
 
@@ -49,8 +53,19 @@ const QUESTION_EN = /^\s(what|how|who|where|when|which|is|are|do|does|can|could|
 const HAZARD = /(^|\s)(ה|ו|ש|ב)?(סכנה|סכנת|מפגע|מפגעים|בסכנה|מסוכן|מסוכנת|לא בטוח|לא בטוחה|לא בטיחותי|לא בטיחותית|דליפה|דולף|דולפת|נזילה|קצר חשמלי|חוט חשוף|חוטים חשופים)(?=\s)/;
 const QUESTION = /^\s(מה|איך|האם|מי|איפה|כמה|למה|אילו|איזה|איזו|באיזה|מתי|ממתי|מהו|מהי|מהם)\s/;
 const NOT_REPORT = /חומרים מסוכנים|חומ"ס|פסולת מסוכנת|עבודה מסוכנת|עבודות מסוכנות|סקר סיכונים|הערכת סיכונים|ניהול סיכונים/;
+// Arabic (after arNorm): a hazard here, unless it is a general question ("ما هي المواد الخطره؟")
+const HAZARD_AR = /(^|\s)(ال|و|في|ب)?(خطر|خطير|خطيره|غير امن|غير امنه|تسرب|تسريب|يسرب|بيسرب|ماس كهربائي|سلك مكشوف|اسلاك مكشوفه|شرار|شراره)(?=\s|$)/;
+const QUESTION_AR = /^\s*(ما|ماذا|كيف|هل|من|اين|وين|متى|كم|لماذا|ليش|اي|شو)\s/;
 export function detectHazard(text: string | null | undefined): boolean {
   if (!text || text.length > 400) return false;
+  if (/[\u0600-\u06FF]/.test(text)) {
+    const a = ` ${arNorm(text.replace(/[!?؟.,،:;()]/g, ' '))} `;
+    if (HAZARD_AR.test(a)) {
+      if (QUESTION_AR.test(a) && !/(يوجد|فيه|هنا|الان|حاليا|عندنا|بالغرفه|في الغرفه|في المختبر|بالمختبر|بالمبني)/.test(a.replace(QUESTION_AR, ' '))) return false;
+      if (/مواد خطره|نفايات خطره|تقييم (ال)?مخاطر|ماده خطره/.test(a) && !/تسرب|انسكب|الان|هنا/.test(a)) return false;
+      return true;
+    }
+  }
   const t = norm(text).replace(/([א-ת])\1+/g, '$1');   // "ססכנה" (a letter typed twice) is still "סכנה"
   const en = HAZARD_EN.test(t);
   if (!HAZARD.test(t) && !en) return false;

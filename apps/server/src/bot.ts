@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { arNorm } from './i18n/lang.js';
 import { DEFAULT_EMERGENCY_TEXT } from './emergency.js';
 import type { Db } from './db.js';
 
@@ -18,6 +19,10 @@ const GREET_TAIL = new Set(['טוב', 'טובים', 'רב', 'וברכה', 'לכ�
 export function isGreeting(text: string | null): boolean {
   if (!text) return false;
   const w = text.toLowerCase().replace(/[!.,?׳'"״:;()\u{1F300}-\u{1FAFF}\u2600-\u27BF]/gu, ' ').split(/\s+/).filter(Boolean);
+  if (/[\u0600-\u06FF]/.test(text)) {   // Arabic: "مرحبا", "السلام عليكم", "صباح الخير", "اهلا وسهلا"
+    const a = arNorm(text.replace(/[!.,?؟،:;()\u{1F300}-\u{1FAFF}\u2600-\u27BF]/gu, ' ')).split(' ').filter(Boolean);
+    return a.length >= 1 && a.length <= 5 && a.some((x) => GREET_HEAD_AR.has(x)) && a.every((x) => GREET_HEAD_AR.has(x) || GREET_TAIL_AR.has(x));
+  }
   return w.length >= 1 && w.length <= 4 && w.some((x) => GREET_HEAD.has(x)) && w.every((x) => GREET_HEAD.has(x) || GREET_TAIL.has(x));
 }
 
@@ -26,6 +31,12 @@ const THANKS = ['תודה', 'תודות', 'תנקס', 'טנקס', 'מודה', '�
   'כל הכבוד', 'יישר כוח', 'ישר כוח', 'תותחים', 'תותח', 'תותחית', 'מלכים', 'מלכה', 'מלך', 'שירות מעולה', 'שירות מצוין', 'עזרתם מאוד', 'great', 'awesome', 'amazing', 'great service'];
 /** words that make it a question, a complaint or a request rather than a thank-you ("תודה, אבל זה לא עובד", "אחלה, ומה עם…") */
 const NOT_THANKS = new Set(['לא', 'אבל', 'בעיה', 'עדיין', 'למה', 'מתי', 'איך', 'מה', 'איפה', 'כמה', 'האם', 'אשמח', 'צריך', 'צריכה', 'אפשר', 'תוכלו', 'תוכל', 'תשלחו', 'שלחו', 'but', 'not', 'no', 'why', 'how', 'what', 'when', 'please']);
+// Arabic, as normalised by arNorm (ه for ة, one alef)
+const GREET_HEAD_AR = new Set(['مرحبا', 'مرحبتين', 'اهلا', 'اهلين', 'هلا', 'السلام', 'سلام', 'صباح', 'مساء', 'هاي', 'هلو']);
+const GREET_TAIL_AR = new Set(['عليكم', 'عليكو', 'الخير', 'النور', 'وسهلا', 'ورحمه', 'الله', 'وبركاته', 'يا', 'جميعا', 'بيتي', 'مجددا', 'كمان']);
+const THANKS_AR = ['شكرا', 'شكرا جزيلا', 'شكرا كثير', 'الف شكر', 'مشكور', 'مشكوره', 'مشكورين', 'يعطيك العافيه', 'يعطيكم العافيه', 'الله يعطيك العافيه', 'تسلم', 'تسلمي', 'تسلموا',
+  'ممتاز', 'رائع', 'خدمه ممتازه', 'بارك الله فيك', 'بارك الله فيكم', 'جزاك الله خير', 'جزاكم الله خير', 'كل الاحترام'];
+const NOT_THANKS_AR = new Set(['لا', 'لكن', 'بس', 'لماذا', 'ليش', 'متى', 'كيف', 'ماذا', 'شو', 'وين', 'اين', 'كم', 'هل', 'ممكن', 'اريد', 'بدي', 'مشكله', 'لسا', 'لسه', 'زال']);
 const THANKS_EMOJI = /[\u{1F64F}\u{2764}\u{1F496}\u{1F497}\u{1F49C}\u{1F499}\u{1F49A}\u{1F49B}\u{1F9E1}\u{1F90D}\u{1F44F}\u{1F970}\u{1F60D}\u{1F618}\u{1F64C}\u{1F4AA}]/u;
 /**
  * A message that thanks or praises the service ("תודה רבה", "אתם אחלה", "אחלה שירות", "אין עליכם", "🙏"): short, no question,
@@ -37,6 +48,13 @@ export function isThanks(text: string | null): boolean {
   if (!t || t.length > 120 || /[?؟]/.test(t)) return false;
   // emoji only (🙏, ❤️, 👏…): thanks when one of them is a thank-you / love sign
   if (!/[\p{L}\p{N}]/u.test(t)) return THANKS_EMOJI.test(t);
+  if (/[\u0600-\u06FF]/.test(t)) {   // Arabic: "شكرا", "شكراً جزيلاً", "يعطيك العافية"; not with a question, a "but" or a request
+    const a = arNorm(t.replace(/[!.,،:;()\-–—~*]/g, ' ').replace(/[\p{Extended_Pictographic}\u{FE0F}\u{200D}]/gu, ' ')).replace(/(.)\1{2,}/g, '$1').split(' ').filter(Boolean)
+      .map((w) => (w.length > 3 && w.startsWith('و') && THANKS_AR.some((p) => p.startsWith(w.slice(1))) ? w.slice(1) : w));
+    if (!a.length || a.length > 12 || a.some((w) => NOT_THANKS_AR.has(w))) return false;
+    const line = ` ${a.join(' ')} `;
+    return THANKS_AR.some((p) => line.includes(` ${p} `));
+  }
   const words = t.toLowerCase().replace(/([\u0590-\u05FFa-z])\1{2,}/g, '$1')   // "תודהההה" -> "תודה"
     .replace(/[!.,׳'"״:;()\-–—~*]/g, ' ').replace(/[\p{Extended_Pictographic}\u{FE0F}\u{200D}\u{1F3FB}-\u{1F3FF}]/gu, ' ').split(/\s+/).filter(Boolean)
     .map((w) => (w.length > 3 && /^[ו][\u0590-\u05FF]/.test(w) && THANKS.includes(w.slice(1)) ? w.slice(1) : w));   // "ותודה" -> "תודה"
@@ -102,7 +120,8 @@ export const botSchema = z.object({
   /** automatic emoji reactions on the customer's message: "working" while the bot searches, then "done" / "noAnswer", or "handoff" when a person takes over */
   reactions: z.object({ enabled: z.boolean(), /** react to every message the bot handles (not only to searches) */ ackAll: z.boolean().default(false), working: emoji, done: emoji, noAnswer: emoji, handoff: emoji, /** a greeting (שלום, היי…) gets this reaction and nothing else; empty = none */ greeting: emoji.default('👋'), /** a thank-you or praise (תודה, אתם אחלה, אין עליכם) gets this reaction, also when a person handles the chat; empty = none */ thanks: emoji.default('❤️') }).default(() => ({ ...DEFAULT_REACTIONS })),
   /** a message about an emergency (danger, injury, fire, leak…): the emergency numbers at once and an urgent hand-over to a person (emergency.ts) */
-  emergency: z.object({ enabled: z.boolean(), text: z.string().trim().min(10).max(800), /** the same in English, for customers who write in English (empty: the built-in translation) */ textEn: z.string().trim().max(800).default('') }).default(() => ({ enabled: true, text: DEFAULT_EMERGENCY_TEXT, textEn: '' })),
+  emergency: z.object({ enabled: z.boolean(), text: z.string().trim().min(10).max(800), /** the same in English, for customers who write in English (empty: the built-in translation) */ textEn: z.string().trim().max(800).default(''),
+    /** the same in Arabic (empty: the built-in translation) */ textAr: z.string().trim().max(800).default('') }).default(() => ({ enabled: true, text: DEFAULT_EMERGENCY_TEXT, textEn: '', textAr: '' })),
   /** a stressed or upset customer: an acknowledging answer, a person at once and follow-ups until a person answers (empathy.ts) */
   empathy: z.object({ enabled: z.boolean() }).default(() => ({ enabled: true })),
   /** an urgent conversation (emergency, hazard report) nobody from the team answered within `minutes`: to the backup person, else an available manager */
@@ -144,7 +163,7 @@ export const DEFAULT_BOT: BotConfig = {
   kb: { enabled: false, minScore: 0.6, maxChars: 700, showSource: true, intro: 'מצאתי את זה במאגר המידע שלנו:', answerMode: 'quote', outro: 'אם צריך הבהרה או עזרה נוספת, אפשר לכתוב כאן, או לבקש נציג.' },
   reactions: { ...DEFAULT_REACTIONS },
   gifs: { ...DEFAULT_GIFS },
-  emergency: { enabled: true, text: DEFAULT_EMERGENCY_TEXT, textEn: '' },
+  emergency: { enabled: true, text: DEFAULT_EMERGENCY_TEXT, textEn: '', textAr: '' },
   empathy: { enabled: true },
   defaultOfficerUserId: null,
   escalation: { enabled: true, minutes: 15, backupUserId: null, sendPhoto: false },

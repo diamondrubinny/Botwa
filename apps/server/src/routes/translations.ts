@@ -6,11 +6,11 @@ import { loadAutomations } from '../automations.js';
 import { loadBot } from '../bot.js';
 import type { Db } from '../db.js';
 import { loadFlow } from '../flow/store.js';
-import { buildDictionary, defaultEntries, invalidateTranslations, loadOverrides, suggestTranslation } from '../i18n/translate.js';
+import { buildDictionary, defaultEntries, invalidateTranslations, isTarget, loadOverrides, overridesKey, suggestTranslation, type Target } from '../i18n/translate.js';
 import { loadBusinessHours } from './settings.js';
 
 /**
- * Bot > English translation: every Hebrew text Betty may send (from the flow, the bot settings, the automatic messages and the
+ * Bot > translations (English, Arabic): every Hebrew text Betty may send (from the flow, the bot settings, the automatic messages and the
  * working hours, plus her own built-in messages), with its English wording: the built-in one, the unit's own, or none yet.
  */
 const he = (s: unknown): s is string => typeof s === 'string' && /[א-ת]/.test(s) && s.trim().length > 0;
@@ -39,13 +39,18 @@ async function sources(db: Db): Promise<Map<string, string>> {
   return out;
 }
 
+/** which language: ?lang=en (the default, as before) or ?lang=ar */
+const targetOf = (q: unknown): Target | null => { const l = (q as { lang?: unknown } | undefined)?.lang; return l === undefined ? 'en' : isTarget(l) ? l : null; };
+
 export function translationRoutes(app: FastifyInstance, db: Db) {
-  app.get('/settings/translations', { preHandler: requireAuth(db, 'bot.view') }, async () => {
-    const defs = defaultEntries();
-    const custom = await loadOverrides(db);
+  app.get('/settings/translations', { preHandler: requireAuth(db, 'bot.view') }, async (req, reply) => {
+    const lang = targetOf(req.query);
+    if (!lang) return reply.code(400).send({ error: 'bad_request' });
+    const defs = defaultEntries(lang);
+    const custom = await loadOverrides(db, lang);
     const used = await sources(db);
     const keys = new Set<string>([...used.keys(), ...Object.keys(custom), ...defs.keys()]);
-    const dict = buildDictionary(new Map([...defs, ...Object.entries(custom).filter(([, v]) => v)]));
+    const dict = buildDictionary(new Map([...defs, ...Object.entries(custom).filter(([, v]) => v)]), lang);
     const items = [...keys].map((text) => ({
       he: text,
       en: Object.hasOwn(custom, text) ? custom[text]! : defs.get(text) ?? '',
@@ -56,37 +61,40 @@ export function translationRoutes(app: FastifyInstance, db: Db) {
     })).map((i) => ({ ...i, suggest: !i.en && i.used ? suggestTranslation(i.he, dict) : null }));
     // what is in use and has no English first, then what is in use, then the rest
     items.sort((x, y) => Number(!!y.used && !y.en) - Number(!!x.used && !x.en) || Number(y.used) - Number(x.used) || x.where.localeCompare(y.where, 'he'));
-    return { items, missing: items.filter((i) => i.used && !i.en).length };
+    // "en" holds the translation in the chosen language (the field name is kept for the existing screen)
+    return { lang, items, missing: items.filter((i) => i.used && !i.en).length };
   });
 
   // a few entries from the flow editor (its "in English" fields): merged into the unit's own; an empty value goes back to the
   // built-in wording (or to none)
   app.patch('/settings/translations', { preHandler: requireAuth(db, 'bot.manage'), config: { rateLimit: { max: 30, timeWindow: '1 minute' } } }, async (req, reply) => {
     const b = z.object({ entries: z.record(z.string().trim().min(1).max(2000), z.string().trim().max(2000)) }).safeParse(req.body);
-    if (!b.success || Object.keys(b.data.entries).length > 500) return reply.code(400).send({ error: 'bad_request' });
-    const defs = defaultEntries();
-    const cur = await loadOverrides(db);
+    const lang = targetOf(req.query);
+    if (!b.success || !lang || Object.keys(b.data.entries).length > 500) return reply.code(400).send({ error: 'bad_request' });
+    const defs = defaultEntries(lang);
+    const cur = await loadOverrides(db, lang);
     for (const [k, v] of Object.entries(b.data.entries)) {
       if (!v || defs.get(k) === v) delete cur[k]; else cur[k] = v;
     }
-    await db.query(`INSERT INTO settings (key, value) VALUES ('translations_en', $1) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()`, [{ entries: cur }]);
+    await db.query(`INSERT INTO settings (key, value) VALUES ($2, $1) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()`, [{ entries: cur }, overridesKey(lang)]);
     invalidateTranslations();
-    await audit(db, { actorId: req.user!.id, action: 'settings.translations', ip: req.ip, meta: { changed: Object.keys(b.data.entries).length, from: 'flow' } });
+    await audit(db, { actorId: req.user!.id, action: 'settings.translations', ip: req.ip, meta: { lang, changed: Object.keys(b.data.entries).length, from: 'flow' } });
     return { ok: true };
   });
 
   app.put('/settings/translations', { preHandler: requireAuth(db, 'bot.manage'), config: { rateLimit: { max: 20, timeWindow: '1 minute' } } }, async (req, reply) => {
     const b = z.object({ entries: z.record(z.string().trim().min(1).max(2000), z.string().trim().max(2000)) }).safeParse(req.body);
-    if (!b.success || Object.keys(b.data.entries).length > 3000) return reply.code(400).send({ error: 'bad_request' });
-    const defs = defaultEntries();
+    const lang = targetOf(req.query);
+    if (!b.success || !lang || Object.keys(b.data.entries).length > 3000) return reply.code(400).send({ error: 'bad_request' });
+    const defs = defaultEntries(lang);
     // only what differs from the built-in wording is stored (an empty value switches a built-in translation off)
     const entries: Record<string, string> = {};
     for (const [k, v] of Object.entries(b.data.entries)) {
       if (defs.has(k) ? defs.get(k) !== v : v !== '') entries[k] = v;
     }
-    await db.query(`INSERT INTO settings (key, value) VALUES ('translations_en', $1) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()`, [{ entries }]);
+    await db.query(`INSERT INTO settings (key, value) VALUES ($2, $1) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()`, [{ entries }, overridesKey(lang)]);
     invalidateTranslations();
-    await audit(db, { actorId: req.user!.id, action: 'settings.translations', ip: req.ip, meta: { custom: Object.keys(entries).length } });
+    await audit(db, { actorId: req.user!.id, action: 'settings.translations', ip: req.ip, meta: { lang, custom: Object.keys(entries).length } });
     return { ok: true, custom: Object.keys(entries).length };
   });
 }

@@ -1,3 +1,4 @@
+import { arNorm } from './i18n/lang.js';
 /**
  * An emergency in a customer's message: danger to life, injury, fire, smoke, gas or chemical leak, explosion, electric shock.
  * Such a message gets the emergency numbers at once and goes to a person urgently, before anything else the bot does (no
@@ -19,12 +20,25 @@ const SIGNS_EN = [
   'not breathing', "can't breathe", 'cannot breathe', 'electric shock', 'electrocuted', ' ambulance', 'chemical spill', 'chemical burn', ' spilled ', ' trapped ',
   'stuck in the elevator', 'stuck in the lift', ' collapsed',
 ];
+/** The same signs in Arabic, as normalised by arNorm (ه for ة, one alef). */
+const SIGNS_AR = [
+  'طوارئ', 'النجده', 'الحقوني', 'ساعدوني', 'حريق', 'في نار', 'اشتعلت', 'دخان كثيف', 'يطلع دخان', 'يخرج دخان', 'في دخان', 'مليان دخان',
+  'تسرب غاز', 'تسريب غاز', 'ريحه غاز', 'رائحه غاز', 'انفجار', 'انفجر', 'لا يتنفس', 'لا تتنفس', 'ما بيتنفس', 'ما بتتنفس', 'صعوبه في التنفس', 'يختنق', 'تختنق',
+  'فاقد الوعي', 'فاقده الوعي', 'فقد الوعي', 'فقدت الوعي', 'اغمي عليه', 'اغمي عليها', 'صعقه كهربائيه', 'انصعق', 'انصعقت', 'مكهرب',
+  'مصاب', 'مصابه', 'مصابين', 'اصابه بالغه', 'جريح', 'جرحي', 'نزيف', 'ينزف', 'تنزف', 'اسعاف', 'حرق كيميائي', 'انسكاب ماده', 'انسكبت ماده', 'تسرب ماده', 'تسرب كيميائي',
+  'انهيار', 'انهار', ' عالق ', ' عالقه ', 'عالق في المصعد', 'عالقه في المصعد', ' محصور ',
+];
 export function isEmergency(text: string | null | undefined): boolean {
   if (!text) return false;
   const t = ` ${text.toLowerCase().replace(/[״“”]/g, '"').replace(/[׳’]/g, "'").replace(/[!?.,:;()‎‏]/g, ' ').replace(/\s+/g, ' ').trim()} `;
   if (/גלאי (ה)?עשן|תרגיל|(נוהל|נוהלי|נהלי|תכנית|תוכנית|יציאת|יציאות|תאורת|ערכת|ציוד|טלפון|טלפוני|מספר|מספרי|שעת|מצב) (ה)?חירום (של|ב|במעבדה|בבניין)|(נוהל|נוהלי|נהלי|תכנית|תוכנית|יציאת|יציאות|תאורת|ערכת|ציוד|טלפוני|מספרי) (ה)?חירום/.test(t) && !/הצילו|עכשיו|כרגע|דחוף/.test(t)) return false;   // asking about procedures and equipment
   if (/emergency (exit|exits|procedure|procedures|number|numbers|plan|lighting|kit|equipment)|fire (drill|safety|door|doors|extinguisher|extinguishers|alarm test|training|exit)|smoke (detector|detectors|alarm)/.test(t) && !/help|now|right now|urgent/.test(t)) return false;
-  return SIGNS.some((w) => t.includes(w)) || SIGNS_EN.some((w) => t.includes(w));
+  if (SIGNS.some((w) => t.includes(w)) || SIGNS_EN.some((w) => t.includes(w))) return true;
+  if (!/[\u0600-\u06FF]/.test(t)) return false;
+  const a = ` ${arNorm(t)} `;
+  // asking about exits, plans, numbers or drills is not an emergency happening now
+  if (/(مخرج|مخارج|خطه|خطط|رقم|ارقام|هاتف|انوار|معدات|حقيبه|تمرين|تدريب|اجراءات|نظام) (ال)?طوارئ|طفايه|مطفاه|كاشف (ال)?دخان|تمرين|تدريب/.test(a) && !/الان|حالا|هلا|ساعدوني|النجده|بسرعه/.test(a)) return false;
+  return SIGNS_AR.some((w) => a.includes(w));
 }
 
 export const DEFAULT_EMERGENCY_TEXT = '🚨 אם יש סכנת חיים, פציעה, שריפה או דליפה: התקשרו מיד למד"א 101, לכבאות והצלה 102 או למשטרה 100, והתרחקו מהמקום אם זה בטוח.\nהעברתי את הפנייה בדחיפות לצוות היחידה.';

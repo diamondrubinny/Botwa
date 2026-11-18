@@ -7,6 +7,7 @@ import { sendBlock, type AccessibleConversation } from './access.js';
 import { loadSending } from './channels/sender.js';
 import { FOLLOW_UP_AFTER, followUpText } from './empathy.js';
 import { localize } from './i18n/translate.js';
+import { arNorm } from './i18n/lang.js';
 import { hoursSummary } from './canned.js';
 import { autoAssign } from './routing.js';
 
@@ -154,10 +155,13 @@ const NOT_CLOSE = new Set(['לא', 'אל', 'עדיין', 'אבל', 'עוד', 'ל
  * The customer says the matter is settled or asks to close it ("הסתדרתי", "הסתדר, תודה", "תסגרו את הקריאה", "אפשר לסגור"):
  * short, and with no question, "not yet", "but" or "don't close" in it.
  */
+/** "انحلت المشكله", "تم الحل", "اغلقوا الطلب" (after arNorm); not with "لا" / "لسا" / "لكن" */
+const SOLVED_AR = /(^|\s)(انحلت|اتحلت|انحل|اتحل|تم الحل|تم حلها|حليتها|زبطت|ضبطت|اغلقوا (الطلب|المحادثه|الطلبيه)|ممكن (تغلقوا|اغلاق) (الطلب|المحادثه)|سكروا (الطلب|المحادثه))(\s|$)/;
 export function isCloseRequest(textIn: string | null): boolean {
   if (!textIn) return false;
   const t = textIn.trim();
   if (!t || t.length > 140 || /[?؟]/.test(t)) return false;
+  if (/[\u0600-\u06FF]/.test(t)) { const a = arNorm(t.replace(/[!.,،:;()]/g, ' ')); return SOLVED_AR.test(a) && !/(^|\s)(لا|لم|لسا|لسه|لكن|بس|مش|ما زال)(\s|$)/.test(a); }
   const words = t.toLowerCase().replace(/[!.,׳"״:;()\-–—~*]/g, ' ').replace(/[\p{Extended_Pictographic}\u{FE0F}\u{200D}\u{1F3FB}-\u{1F3FF}]/gu, ' ')
     .split(/\s+/).filter(Boolean)
     .map((w) => (w.length > 3 && /^[וש][\u0590-\u05FF]/.test(w) && [...SOLVED, ...CLOSE_VERB, ...NOT_CLOSE].includes(w.slice(1)) ? w.slice(1) : w));   // "ותסגרו" -> "תסגרו"
@@ -238,9 +242,16 @@ export async function thankForFeedback(db: Db, out: AutoSender, convId: string):
  * 'done' (got it / nothing else: close kindly), 'more' (yes, something else: they will write it), or null (anything else: a new
  * question or request, handled as usual).
  */
+/** the same answers in Arabic (after arNorm): "لا" / "لم يصلني رد" → missing, "نعم" / "وصلني" → done, "عندي سؤال اخر" → more */
+const REMINDER_AR: [RegExp, 'missing' | 'done' | 'more'][] = [
+  [/^(لا|كلا|ليس بعد|مش بعد|لسا|لسه|لم (احصل|يصلني|يردوا|يرد)|ما (وصلني|اجاني|حدا رد|رد علي حدا|ردوا)|لا لم|ما زلت انتظر|لسا بستني|لسه مستني|لم يصلني رد|ما وصلني رد)( (شي|شيء|رد|بعد|ابدا))?$/, 'missing'],
+  [/^(نعم|اه|ايوه|اجل|وصلني|وصلني الرد|حصلت|تم|نعم شكرا|نعم وصلني|لا شكرا|شكرا|كل شي تمام|تمام)( شكرا| شكرا جزيلا)?$/, 'done'],
+  [/^(عندي سؤال (اخر|ثاني)|سؤال (اخر|ثاني)|نعم عندي سؤال|في عندي سؤال)$/, 'more'],
+];
 export function reminderAnswer(textIn: string | null | undefined): 'missing' | 'done' | 'more' | null {
-  const t = (textIn ?? '').toLowerCase().replace(/[!.,?״"׳'():;\-–—\u{1F300}-\u{1FAFF}\u2600-\u27BF\u{FE0F}]/gu, ' ').replace(/\s+/g, ' ').trim();
+  const t = (textIn ?? '').toLowerCase().replace(/[!.,?״"׳'():;\-–—\u{1F300}-\u{1FAFF}\u2600-\u27BF\u{FE0F}؟،]/gu, ' ').replace(/\s+/g, ' ').trim();
   if (!t || t.length > 120) return null;
+  if (/[\u0600-\u06FF]/.test(t)) { const a = arNorm(t); return REMINDER_AR.find(([re]) => re.test(a))?.[1] ?? null; }
   if (/(^|\s)(לא|עוד לא|עדיין לא)\s+(קיבלתי|קבלתי|קיבלנו|קיבלו|ענו|ענית|ענה|חזרו|חזר|חזרת|התקבלה|הגיעה|הגיע)|(^|\s)(אף אחד|איש) לא (ענה|חזר|התקשר)|לא קיבלתי (שום )?(תשובה|מענה)|עדיין מחכ|(^|\s)(עוד|עדיין) לא$|^לא ממש$|^(לא|no|nope)$|didn ?t (get|receive)|did not (get|receive)|(no|not) (an )?(answer|reply|response)( yet)?|not yet|still waiting|nobody (answered|replied|got back)/.test(t)) return 'missing';
   if (/^(כן|yes|yep|לא תודה|לא צריך|אין צורך|זהו|זה הכל|זה הכול|הכל טוב|הכול טוב|הכל בסדר|הכול בסדר|קיבלתי|קבלתי|כן קיבלתי|כן קיבלתי תודה|קיבלתי תודה|כן תודה|כן תודה רבה|קיבלתי תודה רבה|no|no thanks|nope|nothing else|got it|yes thanks|yes thank you|all good)( תודה| תודה רבה| thanks| thank you)?$/.test(t)) return 'done';
   if (/^(כן יש|יש|יש לי עוד שאלה|יש עוד שאלה|עוד שאלה|yes there is|i have another question)$/.test(t)) return 'more';

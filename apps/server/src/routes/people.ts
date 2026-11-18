@@ -48,7 +48,7 @@ export function peopleRoutes(app: FastifyInstance, db: Db) {
       const v = prof[key];
       return typeof v === 'string' && v.trim() && v.trim().length <= 200 ? [{ key, label, value: v.trim() }] : [];
     });
-    return { fields, lang: r?.lang === 'en' ? 'en' : 'he' };
+    return { fields, lang: r?.lang === 'en' || r?.lang === 'ar' ? r.lang : 'he' };
   });
 
   app.get('/conversations/:id/related', { preHandler: any }, async (req, reply) => {
