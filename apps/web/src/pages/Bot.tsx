@@ -16,7 +16,7 @@ interface BotCfg {
   catchupHours?: number;
   interactiveMenus?: boolean;
   gifs?: { enabled: boolean; greeting: boolean; thanks: boolean; handoff: boolean; close: boolean; cooldownMinutes: number };
-  emergency?: { enabled: boolean; text: string; textEn?: string; textAr?: string };
+  emergency?: { enabled: boolean; text: string; textEn?: string; textAr?: string; textRu?: string };
   empathy?: { enabled: boolean };
   escalation?: { enabled: boolean; minutes: number; backupUserId: string | null; sendPhoto?: boolean };
   defaultOfficerUserId?: string | null;
@@ -218,20 +218,25 @@ export function Bot({ me }: { me: Me }) {
         <fieldset disabled={!canEdit}>
           <legend>מצב חירום</legend>
           <p className="hint" id="em-h">הודעה שנראית כמו מצב חירום (חירום, הצילו, שריפה, עשן, דליפת גז או חומר, פיצוץ, פצוע, לא נושם, התחשמלות, אמבולנס…) מקבלת מיד את ההודעה הזו, לפני כל דבר אחר: בלי ברכה, תפריט או GIF. השיחה מסומנת "דחוף" ועוברת לנציג (גם מחוץ לשעות הפעילות), ונשלחת התראה למנהלים. שאלות על נהלים וציוד ("איפה יציאות החירום?", "גלאי עשן") לא נחשבות חירום.</p>
-          <div className="field"><label><input type="checkbox" role="switch" style={{ width: 'auto', minHeight: 'auto' }} aria-describedby="em-h" checked={b.emergency?.enabled ?? true} onChange={(e) => set({ emergency: { text: b.emergency?.text ?? '', textEn: b.emergency?.textEn ?? '', textAr: b.emergency?.textAr ?? '', enabled: e.target.checked } })} /> טיפול אוטומטי במצב חירום</label></div>
+          <div className="field"><label><input type="checkbox" role="switch" style={{ width: 'auto', minHeight: 'auto' }} aria-describedby="em-h" checked={b.emergency?.enabled ?? true} onChange={(e) => set({ emergency: { text: b.emergency?.text ?? '', textEn: b.emergency?.textEn ?? '', textAr: b.emergency?.textAr ?? '', textRu: b.emergency?.textRu ?? '', enabled: e.target.checked } })} /> טיפול אוטומטי במצב חירום</label></div>
           <div className="field">
             <label htmlFor="em-t">ההודעה ללקוח (כדאי להוסיף את מספר מוקד הביטחון של המוסד)</label>
-            <textarea id="em-t" rows={4} maxLength={800} value={b.emergency?.text ?? ''} onChange={(e) => set({ emergency: { enabled: b.emergency?.enabled ?? true, text: e.target.value, textEn: b.emergency?.textEn ?? '', textAr: b.emergency?.textAr ?? '' } })} />
+            <textarea id="em-t" rows={4} maxLength={800} value={b.emergency?.text ?? ''} onChange={(e) => set({ emergency: { enabled: b.emergency?.enabled ?? true, text: e.target.value, textEn: b.emergency?.textEn ?? '', textAr: b.emergency?.textAr ?? '', textRu: b.emergency?.textRu ?? '' } })} />
           </div>
           <div className="field">
             <label htmlFor="em-en">ההודעה באנגלית (ללקוחות שכותבים באנגלית)</label>
-            <textarea id="em-en" dir="ltr" lang="en" rows={3} maxLength={800} aria-describedby="em-en-h" value={b.emergency?.textEn ?? ''} placeholder="🚨 If there is danger to life… call the Technion emergency centre …, Magen David Adom 101, Fire and Rescue 102 or the Police 100…" onChange={(e) => set({ emergency: { enabled: b.emergency?.enabled ?? true, text: b.emergency?.text ?? '', textEn: e.target.value, textAr: b.emergency?.textAr ?? '' } })} />
+            <textarea id="em-en" dir="ltr" lang="en" rows={3} maxLength={800} aria-describedby="em-en-h" value={b.emergency?.textEn ?? ''} placeholder="🚨 If there is danger to life… call the Technion emergency centre …, Magen David Adom 101, Fire and Rescue 102 or the Police 100…" onChange={(e) => set({ emergency: { enabled: b.emergency?.enabled ?? true, text: b.emergency?.text ?? '', textEn: e.target.value, textAr: b.emergency?.textAr ?? '', textRu: b.emergency?.textRu ?? '' } })} />
             <p className="hint" id="em-en-h">אם שיניתם את ההודעה בעברית (למשל הוספתם את מספר מוקד הביטחון), כתבו כאן את אותה הודעה באנגלית. אם השדה ריק, נשלח התרגום המובנה של ההודעה המקורית.</p>
           </div>
           <div className="field">
             <label htmlFor="em-ar">ההודעה בערבית (ללקוחות שכותבים בערבית)</label>
-            <textarea id="em-ar" dir="rtl" lang="ar" rows={3} maxLength={800} aria-describedby="em-ar-h" value={b.emergency?.textAr ?? ''} placeholder="🚨 إذا كان هناك خطر على الحياة… اتصلوا بمركز الطوارئ في التخنيون …، نجمة داود الحمراء 101، الإطفاء 102 أو الشرطة 100…" onChange={(e) => set({ emergency: { enabled: b.emergency?.enabled ?? true, text: b.emergency?.text ?? '', textEn: b.emergency?.textEn ?? '', textAr: e.target.value } })} />
+            <textarea id="em-ar" dir="rtl" lang="ar" rows={3} maxLength={800} aria-describedby="em-ar-h" value={b.emergency?.textAr ?? ''} placeholder="🚨 إذا كان هناك خطر على الحياة… اتصلوا بمركز الطوارئ في التخنيون …، نجمة داود الحمراء 101، الإطفاء 102 أو الشرطة 100…" onChange={(e) => set({ emergency: { enabled: b.emergency?.enabled ?? true, text: b.emergency?.text ?? '', textEn: b.emergency?.textEn ?? '', textAr: e.target.value, textRu: b.emergency?.textRu ?? '' } })} />
             <p className="hint" id="em-ar-h">אם שיניתם את ההודעה בעברית (למשל הוספתם את מספר מוקד הביטחון), כתבו כאן את אותה הודעה בערבית. אם השדה ריק, נשלח התרגום המובנה של ההודעה המקורית (טיוטה, לבדיקה של דובר/ת ערבית).</p>
+          </div>
+          <div className="field">
+            <label htmlFor="em-ru">ההודעה ברוסית (ללקוחות שכותבים ברוסית)</label>
+            <textarea id="em-ru" dir="ltr" lang="ru" rows={3} maxLength={800} aria-describedby="em-ru-h" value={b.emergency?.textRu ?? ''} placeholder="🚨 Если есть угроза жизни… звоните в центр экстренной помощи Техниона …, «Маген Давид Адом» 101, пожарные 102 или полиция 100…" onChange={(e) => set({ emergency: { enabled: b.emergency?.enabled ?? true, text: b.emergency?.text ?? '', textEn: b.emergency?.textEn ?? '', textAr: b.emergency?.textAr ?? '', textRu: e.target.value } })} />
+            <p className="hint" id="em-ru-h">אם שיניתם את ההודעה בעברית (למשל הוספתם את מספר מוקד הביטחון), כתבו כאן את אותה הודעה ברוסית. אם השדה ריק, נשלח התרגום המובנה של ההודעה המקורית (טיוטה, לבדיקה של דובר/ת רוסית).</p>
           </div>
           <h3 id="resp-h">ממונה אחראי בהעברה לאדם</h3>
           <p className="hint" id="resp-d">כשבטי מעבירה שיחה לאדם, היא תמיד משייכת אותה לממונה בטיחות אחראי ולא לנציג לא משויך: קודם לממונה הנושא (לפי ההודעה או נושא הפנייה), אחר כך לממונה האזור או הבניין שהלקוח ציין, אחר כך לממונה שנבחר כאן, אחר כך לממונה החלופי שלמטה, ולבסוף לממונה בטיחות כלשהו שיש לו חשבון, הפחות עמוס. נוספת הערה בשיחה שמסבירה למה הפנייה שויכה אליו.</p>

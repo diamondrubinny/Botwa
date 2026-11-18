@@ -86,6 +86,14 @@ describe('Betty answers who the officer is', () => {
     expect(await officerReply(db, 'مرحبا، عندي سؤال')).toBeNull();
   });
 
+  it('officer questions in Russian', async () => {
+    expect(await officerReply(db, 'Кто ответственный за пожарную безопасность?')).toContain('יוסי אש');
+    expect(await officerReply(db, 'Телефон ответственного по газу')).toContain('רינה גז');
+    expect(await officerReply(db, 'Кто руководитель отдела безопасности?')).toContain('ראשת יחידה לדוגמה');
+    expect(await officerReply(db, 'Кто ответственный?')).toContain('על איזה נושא');
+    expect(await officerReply(db, 'Мой телефон 0501234567')).toBeNull();
+  });
+
   it('name, office phone and e-mail; WhatsApp only when allowed', async () => {
     const fire = (await officerReply(db, 'מי הממונה על בטיחות אש ומה הטלפון המשרדי שלו?'))!;
     expect(fire).toContain('יוסי אש');

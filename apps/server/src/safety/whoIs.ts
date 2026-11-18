@@ -1,4 +1,4 @@
-import { arNorm } from '../i18n/lang.js';
+import { arNorm, ruNorm } from '../i18n/lang.js';
 import type { Db } from '../db.js';
 
 /**
@@ -131,9 +131,27 @@ function arabicOfficerQuestion(text: string): string | null {
   return /مسؤول|لمن|لمين/.test(a) ? 'מי הממונה?' : null;
 }
 
+/** The same in Russian (after ruNorm): "кто ответственный за лазеры?", "телефон ответственного по газу", "кто руководитель отдела безопасности?" */
+const ASK_RU = /(кто|кто такой|кто такая) (ответственн|отвечает)|ответственн(ый|ая|ого|ой) (за|по)|отвечает за|(телефон|почта|email|контакт)(ы)? (ответственн|сотрудника по)|как связаться с ответственн|к кому (обратиться|обращаться)/;
+const ALIASES_RU: [RegExp, string][] = [
+  [/лазер/, 'לייזרים'], [/асбест/, 'אסבסט'], [/излучен|радиац|рентген/, 'קרינה'], [/пожар|огон|огнетуш|спринклер|дым/, 'אש מתזים כיבוי'],
+  [/газ|баллон/, 'גזים'], [/хими|опасн(ые|ых) веществ|отход/, 'כימיקלים חומ"ס'], [/электр/, 'חשמל'], [/высот|лестниц|леса|крыш/, 'גובה סולמות'],
+  [/лифт/, 'מעליות'], [/биолог|микроб|вирус/, 'ביולוגית biosafety'], [/шум/, 'רעש'], [/кран|подъем|погрузчик/, 'הרמה'], [/обучен|курс|инструктаж/, 'הדרכות'],
+  [/гигиен|замер/, 'גיהות ניטור'], [/опасност/, 'מפגעים'], [/беремен|кормлен/, 'עבודת נשים'],
+];
+function russianOfficerQuestion(text: string): string | null {
+  if (!/[\u0400-\u04FF]/.test(text)) return null;
+  const r = ruNorm(text.replace(/[?!.,:;()«»]/g, ' '));
+  if (/(кто|кто такой|кто такая|телефон|контакт(ы)?) (руководител|начальник|глав|заведующ)\S* (отдела|подразделения|службы)/.test(r)) return 'מי ראש יחידת הבטיחות?';
+  if (!ASK_RU.test(r)) return null;
+  const topics = ALIASES_RU.filter(([re]) => re.test(r)).map(([, he]) => he);
+  if (topics.length) return `מי הממונה על ${topics.join(' ')}?`;
+  return /ответственн|к кому/.test(r) ? 'מי הממונה?' : null;
+}
+
 export async function officerReply(db: Db, text: string | null | undefined): Promise<string | null> {
   if (!text || text.length > 160) return null;
-  text = arabicOfficerQuestion(text) ?? text;
+  text = arabicOfficerQuestion(text) ?? russianOfficerQuestion(text) ?? text;
   text = fixOfficerTypos(text);
   const head = isHeadQuestion(text);
   if (!head && !ASK.test(text) && !ASK_EN.test(text)) return null;

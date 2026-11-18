@@ -1,3 +1,4 @@
+import { ruNorm } from './i18n/lang.js';
 import { arNorm } from './i18n/lang.js';
 /**
  * An emergency in a customer's message: danger to life, injury, fire, smoke, gas or chemical leak, explosion, electric shock.
@@ -28,12 +29,25 @@ const SIGNS_AR = [
   'مصاب', 'مصابه', 'مصابين', 'اصابه بالغه', 'جريح', 'جرحي', 'نزيف', 'ينزف', 'تنزف', 'اسعاف', 'حرق كيميائي', 'انسكاب ماده', 'انسكبت ماده', 'تسرب ماده', 'تسرب كيميائي',
   'انهيار', 'انهار', ' عالق ', ' عالقه ', 'عالق في المصعد', 'عالقه في المصعد', ' محصور ',
 ];
+/** The same signs in Russian, as normalised by ruNorm (lower case, е for ё). */
+const SIGNS_RU = [
+  'помогите', 'спасите', ' sos ', 'чрезвычайн', 'пожар', ' горит ', ' горят ', 'загорел', 'задымлен', 'сильный дым', 'идет дым', 'валит дым', 'полно дыма',
+  'утечка газа', 'утечка газ', 'пахнет газом', 'запах газа', 'взрыв', 'взорвал', 'не дышит', 'трудно дышать', 'не может дышать', 'задыхает',
+  'без сознания', 'потерял сознание', 'потеряла сознание', 'упал в обморок', 'упала в обморок', 'ударило током', 'удар током', 'поражение током',
+  ' ранен ', ' ранена ', ' ранены ', 'тяжело пострада', 'кровотечен', 'истекает кровью', 'сильно кровит', 'скорую', 'скорая', 'химический ожог', 'обжегся', 'обожглась',
+  'разлив', 'пролилось вещество', 'пролил вещество', 'утечка химик', 'утечка вещества', 'обрушен', 'обрушил', 'застрял в лифте', 'застряла в лифте', ' заперт ', ' заперта ',
+];
 export function isEmergency(text: string | null | undefined): boolean {
   if (!text) return false;
   const t = ` ${text.toLowerCase().replace(/[״“”]/g, '"').replace(/[׳’]/g, "'").replace(/[!?.,:;()‎‏]/g, ' ').replace(/\s+/g, ' ').trim()} `;
   if (/גלאי (ה)?עשן|תרגיל|(נוהל|נוהלי|נהלי|תכנית|תוכנית|יציאת|יציאות|תאורת|ערכת|ציוד|טלפון|טלפוני|מספר|מספרי|שעת|מצב) (ה)?חירום (של|ב|במעבדה|בבניין)|(נוהל|נוהלי|נהלי|תכנית|תוכנית|יציאת|יציאות|תאורת|ערכת|ציוד|טלפוני|מספרי) (ה)?חירום/.test(t) && !/הצילו|עכשיו|כרגע|דחוף/.test(t)) return false;   // asking about procedures and equipment
   if (/emergency (exit|exits|procedure|procedures|number|numbers|plan|lighting|kit|equipment)|fire (drill|safety|door|doors|extinguisher|extinguishers|alarm test|training|exit)|smoke (detector|detectors|alarm)/.test(t) && !/help|now|right now|urgent/.test(t)) return false;
   if (SIGNS.some((w) => t.includes(w)) || SIGNS_EN.some((w) => t.includes(w))) return true;
+  if (/[\u0400-\u04FF]/.test(t)) {   // Russian (after ruNorm)
+    const r = ` ${ruNorm(t)} `;
+    if (/(запасн|аварийн|эвакуац|план эвакуации|номер|телефон|учени|тренировк|огнетушител|датчик дыма|инструкци)/.test(r) && !/(сейчас|помогите|спасите|срочно|горит)/.test(r)) return false;
+    return SIGNS_RU.some((w) => r.includes(w));
+  }
   if (!/[\u0600-\u06FF]/.test(t)) return false;
   const a = ` ${arNorm(t)} `;
   // asking about exits, plans, numbers or drills is not an emergency happening now

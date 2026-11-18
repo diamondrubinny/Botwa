@@ -1,3 +1,4 @@
+import { ruNorm } from './i18n/lang.js';
 import { arNorm } from './i18n/lang.js';
 /**
  * A customer under stress: worried or frightened ("אני לחוצה", "מפחד", "לא יודע מה לעשות") or upset after waiting ("כבר שעה
@@ -32,12 +33,17 @@ const WORRIED_EN = /\b(stressed|stressful|scared|afraid|frightened|terrified|wor
 const UPSET_EN = /\b(no ?one (is )?(answering|replying|answers|replies)|nobody (is )?(answering|replying|answers|replies|gets back)|(been )?waiting (for )?(hours|ages|so long|forever)|still no (answer|reply)|frustrat(ed|ing)|annoy(ed|ing)|unacceptable|ridiculous|fed up|angry|furious|disappointed)\b/i;
 const WORRIED_AR = /(خايف|خايفه|خائف|خائفه|قلقان|قلقانه|قلق جدا|متوتر|متوتره|مرعوب|مرعوبه|مذعور|لا اعرف ماذا افعل|مش عارف شو اعمل|مش عارفه شو اعمل|ما بعرف شو اعمل|ماذا افعل الان)/;
 const UPSET_AR = /(لا احد يرد|لا احد يجيب|ما حدا برد|ما حدا رد|ما حدا بيرد|بستني من ساعه|انتظر من ساعه|انتظر منذ ساعات|من ساعات|محبط|محبطه|مزعج|غير مقبول|زهقت|طفح الكيل|زعلان|زعلانه|غاضب|غاضبه)/;
+const WORRIED_RU = /(боюсь|страшно|испуган|напуган|волнуюсь|переживаю|тревожно|в панике|паникую|не знаю,? что делать|что мне (теперь )?делать)/;
+const UPSET_RU = /(никто не (отвечает|ответил|ответил|перезвонил)|жду уже|уже час жду|часами жду|жду целый день|раздражает|возмутительно|недопустимо|безобразие|надоело|злюсь|разочарован)/;
 export function detectDistress(text: string | null | undefined): Distress | null {
   if (!text || text.length > 600) return null;
   if (detectHazard(text)) return 'hazard';
   // the technical senses are taken out first; what is left decides
   const t = norm(text).replace(new RegExp(TECHNICAL.source, 'g'), ' ');
   const a = /[\u0600-\u06FF]/.test(t) ? arNorm(t) : '';
+  const r = /[\u0400-\u04FF]/.test(t) ? ruNorm(t) : '';
+  if (r && WORRIED_RU.test(r)) return 'worried';
+  if (r && UPSET_RU.test(r)) return 'upset';
   if (WORRIED.some((w) => has(t, w)) || WORRIED_EN.test(t) || (a && WORRIED_AR.test(a))) return 'worried';
   if (UPSET.some((w) => has(t, w)) || UPSET_EN.test(t) || (a && UPSET_AR.test(a))) return 'upset';
   return null;
@@ -56,8 +62,19 @@ const NOT_REPORT = /חומרים מסוכנים|חומ"ס|פסולת מסוכנ�
 // Arabic (after arNorm): a hazard here, unless it is a general question ("ما هي المواد الخطره؟")
 const HAZARD_AR = /(^|\s)(ال|و|في|ب)?(خطر|خطير|خطيره|غير امن|غير امنه|تسرب|تسريب|يسرب|بيسرب|ماس كهربائي|سلك مكشوف|اسلاك مكشوفه|شرار|شراره)(?=\s|$)/;
 const QUESTION_AR = /^\s*(ما|ماذا|كيف|هل|من|اين|وين|متى|كم|لماذا|ليش|اي|شو)\s/;
+// Russian (after ruNorm): a hazard here, unless it is a general question ("какие вещества опасны?")
+const HAZARD_RU = /(опасно|опасность|опасн(ый|ая|ое|ые) |небезопасн|утечк|протека|течет|короткое замыкание|оголенн(ый|ые) провод|голые провода|искрит)/;
+const QUESTION_RU = /^\s*(что|как|кто|где|когда|сколько|почему|какие|какой|какая|можно ли|есть ли)\s/;
 export function detectHazard(text: string | null | undefined): boolean {
   if (!text || text.length > 400) return false;
+  if (/[\u0400-\u04FF]/.test(text)) {
+    const r = ` ${ruNorm(text.replace(/[!?.,:;()«»]/g, ' '))} `;
+    if (HAZARD_RU.test(r)) {
+      if (QUESTION_RU.test(r) && !/(здесь|тут|сейчас|у нас|в комнате|в лаборатории|в здании|есть)/.test(r.replace(QUESTION_RU, ' '))) return false;
+      if (/опасн(ые|ых) (вещества|веществ|отходы|отходов)|оценка рисков/.test(r) && !/утечк|пролил|сейчас|здесь/.test(r)) return false;
+      return true;
+    }
+  }
   if (/[\u0600-\u06FF]/.test(text)) {
     const a = ` ${arNorm(text.replace(/[!?؟.,،:;()]/g, ' '))} `;
     if (HAZARD_AR.test(a)) {

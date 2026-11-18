@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react';
 import { api } from '../api';
 
-type Lang = 'he' | 'en' | 'ar';
+type Lang = 'he' | 'en' | 'ar' | 'ru';
 interface Profile { fields: { key: string; label: string; value: string }[]; lang: Lang; langLocked?: boolean }
-const LANG_NAME: Record<Lang, string> = { he: 'עברית', en: 'English', ar: 'العربية (ערבית)' };
+const LANG_NAME: Record<Lang, string> = { he: 'עברית', en: 'English', ar: 'العربية (ערבית)', ru: 'Русский (רוסית)' };
 
 /**
  * What the customer told Betty when identifying, at the top of the conversation, and the conversation's language: detected
@@ -37,11 +37,11 @@ export function IdentityCard({ convId, refresh }: { convId: string; refresh?: un
             <select id={`idc-lang-${convId}`} value={choice} aria-describedby={`idc-lang-h-${convId}`} style={{ width: 'auto', minHeight: 'auto', padding: '.1rem .4rem' }}
               onChange={async (e) => {
                 const lang = e.target.value as Lang | 'auto';
-                try { await api('POST', `/conversations/${convId}/lang`, { lang }); setMsg(lang === 'auto' ? 'השפה תזוהה שוב לפי מה שהלקוח כותב.' : `בטי תענה ב${lang === 'he' ? 'עברית' : lang === 'en' ? 'אנגלית' : 'ערבית'} מההודעה הבאה.`); await load(); }
+                try { await api('POST', `/conversations/${convId}/lang`, { lang }); setMsg(lang === 'auto' ? 'השפה תזוהה שוב לפי מה שהלקוח כותב.' : `בטי תענה ב${lang === 'he' ? 'עברית' : lang === 'en' ? 'אנגלית' : lang === 'ar' ? 'ערבית' : 'רוסית'} מההודעה הבאה.`); await load(); }
                 catch { setMsg('השינוי לא נשמר.'); }
               }}>
               <option value="auto">אוטומטית ({LANG_NAME[p.lang]})</option>
-              {(['he', 'en', 'ar'] as const).map((l) => <option key={l} value={l}>{LANG_NAME[l]} (קבוע)</option>)}
+              {(['he', 'en', 'ar', 'ru'] as const).map((l) => <option key={l} value={l}>{LANG_NAME[l]} (קבוע)</option>)}
             </select>
             <span id={`idc-lang-h-${convId}`} className="sr-only">השפה שבה בטי עונה ללקוח. שפה קבועה לא משתנה לפי מה שהלקוח כותב.</span>
           </dd>

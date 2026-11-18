@@ -139,7 +139,7 @@ export function widgetRoutes(app: FastifyInstance, db: Db, mgr: ChannelManager, 
     const pk = (await db.query('SELECT public_key FROM webchat_configs WHERE channel_id = $1', [v.channel_id])).rows[0]?.public_key as string | undefined;
     const s = pk ? await site(pk) : null;
     if (!s) return reply.code(404).send({ error: 'not_found' });
-    const b = z.object({ text: z.string().max(4100), name: z.string().max(120).optional(), email: z.string().max(260).optional(), phone: z.string().max(40).optional(), consent: z.boolean().optional(), hp: z.string().max(200).optional(), lang: z.enum(['he', 'en', 'ar']).optional() }).safeParse(req.body);
+    const b = z.object({ text: z.string().max(4100), name: z.string().max(120).optional(), email: z.string().max(260).optional(), phone: z.string().max(40).optional(), consent: z.boolean().optional(), hp: z.string().max(200).optional(), lang: z.enum(['he', 'en', 'ar', 'ru']).optional() }).safeParse(req.body);
     if (!b.success) return reply.code(400).send({ error: 'bad_request' });
     if (b.data.hp) return { ok: true }; // honeypot filled: a bot. Pretend it worked.
     const text = clean(b.data.text, s.behavior.maxLength);

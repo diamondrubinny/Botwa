@@ -24,7 +24,7 @@ const JOINS = `JOIN contacts ct ON ct.id = c.contact_id JOIN channels ch ON ch.i
  *  - suggested: the same phone or e-mail that a customer TYPED (unverified): shown only as a suggestion that a person confirms,
  *    because a wrong link would show one person's history next to another's.
  */
-export function peopleRoutes(app: FastifyInstance, db: Db, mgrRef?: { setConversationLang(convId: string, lang: 'he' | 'en' | 'ar'): Promise<unknown> }) {
+export function peopleRoutes(app: FastifyInstance, db: Db, mgrRef?: { setConversationLang(convId: string, lang: 'he' | 'en' | 'ar' | 'ru'): Promise<unknown> }) {
   const any = requireAuth(db);
 
   /** may this user act on this contact? through its conversation's access rule; a contact without a conversation: managers only */
@@ -48,7 +48,7 @@ export function peopleRoutes(app: FastifyInstance, db: Db, mgrRef?: { setConvers
       const v = prof[key];
       return typeof v === 'string' && v.trim() && v.trim().length <= 200 ? [{ key, label, value: v.trim() }] : [];
     });
-    return { fields, lang: r?.lang === 'en' || r?.lang === 'ar' ? r.lang : 'he', langLocked: !!r?.lang_locked };
+    return { fields, lang: r?.lang === 'en' || r?.lang === 'ar' || r?.lang === 'ru' ? r.lang : 'he', langLocked: !!r?.lang_locked };
   });
 
   /**
@@ -57,7 +57,7 @@ export function peopleRoutes(app: FastifyInstance, db: Db, mgrRef?: { setConvers
    */
   app.post('/conversations/:id/lang', { preHandler: any, config: { rateLimit: { max: 30, timeWindow: '1 minute' } } }, async (req, reply) => {
     const p = idParam.safeParse(req.params);
-    const b = z.object({ lang: z.enum(['he', 'en', 'ar', 'auto']) }).strict().safeParse(req.body);
+    const b = z.object({ lang: z.enum(['he', 'en', 'ar', 'ru', 'auto']) }).strict().safeParse(req.body);
     if (!p.success || !b.success) return reply.code(400).send({ error: 'bad_request' });
     if (!(await loadAccessible(db, req.user!, p.data.id))) return reply.code(404).send({ error: 'not_found' });
     if (b.data.lang === 'auto') await db.query(`UPDATE conversations SET lang_locked = false WHERE id = $1`, [p.data.id]);

@@ -1,4 +1,4 @@
-import { arNorm } from './i18n/lang.js';
+import { arNorm, ruNorm } from './i18n/lang.js';
 /**
  * "מתי חוזרים אליי?", "מה קורה עם הפנייה שלי?", "מישהו שם?": a customer whose inquiry is already with the team asks how it is
  * going. Short messages only, so a new question that merely contains such words is left to the normal handling.
@@ -7,12 +7,14 @@ const ASKS = /(מתי (חוזרים|תחזרו|יחזרו|תחזור|תחזרי|
 /** The same questions in English. */
 const ASKS_EN = /(when will (you|someone|somebody|anyone) (get back|reply|answer|respond|call)|any (update|news)|(is )?(any ?one|any ?body|someone) (there|answering|here)|still waiting|how (much )?long (will|do i|should|until)|why (is )?(no ?one|nobody|isn'?t anyone) (answering|replying|getting back)|what('?s| is) (happening|going on) with my (request|ticket|inquiry))/i;
 /** Arabic (after arNorm): "متى سيردون؟", "وين الرد", "شو وضع طلبي", "حدا رح يرد؟" */
+/** Russian (after ruNorm): "когда мне ответят?", "где ответ", "что с моей заявкой" */
+const ASKS_RU = /когда (мне )?(ответят|ответите|свяжутся|перезвонят)|где (ответ|ваш ответ)|что с (моей заявкой|моим обращением|заявкой|обращением)|кто-нибудь ответит|почему не отвечаете/;
 const ASKS_AR = /(متي|امتى|امتي) (سيردون|سترد|ترد|يردوا|يرد|بتردوا|بترد|رح يرد|حدا يرد|تتصلون|يتصل)|(وين|اين) (الرد|ردكم)|(شو|ما) (وضع|هو وضع|صار ب|صار مع) ?(طلبي|البلاغ|بلاغي|الطلب)|(حدا|احد) (رح|سوف) يرد|لم يرد احد بعد/;
 export function isWaitingQuestion(text: string | null | undefined): boolean {
   if (!text) return false;
   if (/^\s*[?？]+\s*$/.test(text)) return true;                  // a lone "?" while waiting: "is anyone there?"
   const t = text.trim().toLowerCase().replace(/[!.,״"׳:;()‎‏]/g, ' ').replace(/\s+/g, ' ').replace(/אליי/g, 'אלי');
-  return t.length <= 80 && t.split(' ').length <= 10 && (ASKS.test(t) || ASKS_EN.test(t) || (/[\u0600-\u06FF]/.test(t) && ASKS_AR.test(arNorm(t.replace(/[؟،]/g, ' ')))));
+  return t.length <= 80 && t.split(' ').length <= 10 && (ASKS.test(t) || ASKS_EN.test(t) || (/[\u0600-\u06FF]/.test(t) && ASKS_AR.test(arNorm(t.replace(/[؟،]/g, ' ')))) || (/[\u0400-\u04FF]/.test(t) && ASKS_RU.test(ruNorm(t))));
 }
 
 /**

@@ -8,6 +8,7 @@ export function IntroCard({ me, onChanged }: { me: Me; onChanged: () => void }) 
   const [title, setTitle] = useState(me.jobTitle ?? '');
   const [titleEn, setTitleEn] = useState(me.jobTitleEn ?? '');
   const [titleAr, setTitleAr] = useState(me.jobTitleAr ?? '');
+  const [titleRu, setTitleRu] = useState(me.jobTitleRu ?? '');
   const latinName = /[A-Za-z]/.test(me.name) && !/[א-ת]/.test(me.name) && !me.name.includes('@');
   const [phone, setPhone] = useState(me.introPhone ?? '');
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
@@ -20,7 +21,7 @@ export function IntroCard({ me, onChanged }: { me: Me; onChanged: () => void }) 
     e.preventDefault();
     if (!phoneOk || !heOk) return;
     setBusy(true); setMsg(null);
-    try { await api('PUT', '/auth/me/intro', { nameHe: nameHe.trim() || null, jobTitle: title.trim() || null, jobTitleEn: titleEn.trim() || null, jobTitleAr: titleAr.trim() || null, introPhone: phone.trim() || null }); setMsg({ ok: true, text: 'נשמר.' }); onChanged(); }
+    try { await api('PUT', '/auth/me/intro', { nameHe: nameHe.trim() || null, jobTitle: title.trim() || null, jobTitleEn: titleEn.trim() || null, jobTitleAr: titleAr.trim() || null, jobTitleRu: titleRu.trim() || null, introPhone: phone.trim() || null }); setMsg({ ok: true, text: 'נשמר.' }); onChanged(); }
     catch (er) { setMsg({ ok: false, text: errText(er instanceof ApiError ? er.code : 'generic') }); }
     finally { setBusy(false); }
   }
@@ -38,8 +39,10 @@ export function IntroCard({ me, onChanged }: { me: Me; onChanged: () => void }) 
         <div className="field"><label htmlFor="intro-title-en">התפקיד באנגלית (לשיחות באנגלית, לא חובה)</label>
           <input id="intro-title-en" maxLength={80} dir="ltr" lang="en" value={titleEn} placeholder="Safety officer, Faculty of Chemistry" onChange={(e) => setTitleEn(e.target.value)} aria-describedby="intro-langs-h" /></div>
         <div className="field"><label htmlFor="intro-title-ar">התפקיד בערבית (לשיחות בערבית, לא חובה)</label>
-          <input id="intro-title-ar" maxLength={80} dir="rtl" lang="ar" value={titleAr} placeholder="مسؤولة السلامة، كلية الكيمياء" onChange={(e) => setTitleAr(e.target.value)} aria-describedby="intro-langs-h" />
-          <p id="intro-langs-h" className="hint">בשיחה באנגלית או בערבית ההודעה משתמשת בשם החשבון באותיות לטיניות{latinName ? ` (${me.name})` : ' (כרגע אין כזה: מנהל המערכת יכול לעדכן את "שם" החשבון לאותיות לטיניות)'} ובתפקיד בשפה הזו. בלי תפקיד בשפה הזו, התפקיד בעברית לא נכלל.</p></div>
+          <input id="intro-title-ar" maxLength={80} dir="rtl" lang="ar" value={titleAr} placeholder="مسؤولة السلامة، كلية الكيمياء" onChange={(e) => setTitleAr(e.target.value)} aria-describedby="intro-langs-h" /></div>
+        <div className="field"><label htmlFor="intro-title-ru">התפקיד ברוסית (לשיחות ברוסית, לא חובה)</label>
+          <input id="intro-title-ru" maxLength={80} dir="ltr" lang="ru" value={titleRu} placeholder="Специалист по безопасности, химический факультет" onChange={(e) => setTitleRu(e.target.value)} aria-describedby="intro-langs-h" />
+          <p id="intro-langs-h" className="hint">בשיחה באנגלית, בערבית או ברוסית ההודעה משתמשת בשם החשבון באותיות לטיניות{latinName ? ` (${me.name})` : ' (כרגע אין כזה: מנהל המערכת יכול לעדכן את "שם" החשבון לאותיות לטיניות)'} ובתפקיד בשפה הזו. בלי תפקיד בשפה הזו, התפקיד בעברית לא נכלל.</p></div>
         <div className="field"><label htmlFor="intro-phone">טלפון עבודה להצגה (לא חובה)</label>
           <input id="intro-phone" type="tel" inputMode="tel" dir="ltr" maxLength={20} value={phone} onChange={(e) => setPhone(e.target.value)} aria-invalid={!phoneOk} aria-describedby="intro-phone-h" />
           <p id="intro-phone-h" className={phoneOk ? 'hint' : 'error'}>{phoneOk ? 'מוצג רק בהודעות שמשתמשות ב-{טלפון נציג}. אל תמלאו טלפון פרטי.' : 'מספר טלפון לא תקין (ספרות, רווחים, מקפים, ואפשר + בהתחלה).'}</p></div>

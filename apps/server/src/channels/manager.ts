@@ -296,7 +296,7 @@ export class ChannelManager {
     const parsed = last.map((x) => (x.body ? parseNumberedMenu(x.body) : null)).find((x) => !!x);
     if (!parsed) return false;
     const lang = await this.langOf(convId);
-    return !!(await this.sendMenu(channelId, ext, page === 0 ? parsed.body : (lang === 'en' ? 'More topics:' : lang === 'ar' ? 'مواضيع أخرى:' : 'נושאים נוספים:'), parsed.options, { lang, page }));
+    return !!(await this.sendMenu(channelId, ext, page === 0 ? parsed.body : (lang === 'en' ? 'More topics:' : lang === 'ar' ? 'مواضيع أخرى:' : lang === 'ru' ? 'Другие темы:' : 'נושאים נוספים:'), parsed.options, { lang, page }));
   }
 
   private statusSince = new Map<string, number>();
@@ -435,7 +435,7 @@ export class ChannelManager {
           if (r.messageId && !stop && !m.media && bot?.emergency.enabled && !isCommentContact(m.externalContactId) && isEmergency(m.text)) {
             // in English: the unit's own English text when it wrote one (its Hebrew text may have changed from the built-in one)
             const emLang = await this.langOf(r.conversationId);
-            const emText = emLang === 'en' && bot.emergency.textEn ? bot.emergency.textEn : emLang === 'ar' && bot.emergency.textAr ? bot.emergency.textAr : bot.emergency.text;
+            const emText = emLang === 'en' && bot.emergency.textEn ? bot.emergency.textEn : emLang === 'ar' && bot.emergency.textAr ? bot.emergency.textAr : emLang === 'ru' && bot.emergency.textRu ? bot.emergency.textRu : bot.emergency.text;
             await this.emergency(channelId, r.conversationId, m.externalContactId, r.messageId, emText).catch(() => undefined);
             this.emit({ channelId, type: 'message', conversationId: r.conversationId, messageId: r.messageId });
             this.onInbound?.(r.conversationId);
@@ -896,7 +896,7 @@ export class ChannelManager {
     if (!r.rowCount) return lang;
     // Hebrew is the default: an English conversation gets the tag "English", an Arabic one "العربية"; writing in another language
     // moves the tag (one language tag at a time)
-    const TAG: Partial<Record<Lang, string>> = { en: 'English', ar: 'العربية' };
+    const TAG: Partial<Record<Lang, string>> = { en: 'English', ar: 'العربية', ru: 'Русский' };
     const want = TAG[lang];
     const others = Object.values(TAG).filter((t) => t !== want).map((t) => t!.toLowerCase());
     await this.db.query(`DELETE FROM conversation_tags WHERE conversation_id = $1 AND tag_id IN (SELECT id FROM tags WHERE lower(name) = ANY($2::text[]))`, [convId, others]);
@@ -1111,9 +1111,9 @@ export class ChannelManager {
     }
     // "מי את?" / "את בוט?" / "מה שלומך?": the bot answers as itself, then picks up the question it was waiting for
     const told = async () => {
-      const r = (await this.db.query(`SELECT body FROM messages WHERE conversation_id = $1 AND direction = 'out' AND (body LIKE '💡 הידעת?%' OR body LIKE '💡 Did you know?%' OR body LIKE '💡 هل تعلم؟%') ORDER BY created_at DESC LIMIT 30`, [convId])).rows.map((x) => x.body as string);
+      const r = (await this.db.query(`SELECT body FROM messages WHERE conversation_id = $1 AND direction = 'out' AND (body LIKE '💡 הידעת?%' OR body LIKE '💡 Did you know?%' OR body LIKE '💡 هل تعلم؟%' OR body LIKE '💡 А вы знали?%') ORDER BY created_at DESC LIMIT 30`, [convId])).rows.map((x) => x.body as string);
       const last = (await this.db.query(`SELECT body FROM messages WHERE conversation_id = $1 AND direction = 'out' ORDER BY created_at DESC LIMIT 1`, [convId])).rows[0]?.body as string | undefined;
-      return { r, lastWasFact: !!last && /^💡 (הידעת\?|Did you know\?|هل تعلم؟)/.test(last) };
+      return { r, lastWasFact: !!last && /^💡 (הידעת\?|Did you know\?|هل تعلم؟|А вы знали\?)/.test(last) };
     };
     const chat = identityReply(text, persona) ?? smallTalkReply(text, persona.name);   // small talk: nothing to lose if the flow opens after it
     const own = chat ?? await officerReply(this.db, text).catch(() => null)
@@ -1489,7 +1489,7 @@ export class ChannelManager {
     const already = (await this.db.query(`SELECT 1 FROM messages WHERE conversation_id = $1 AND automation = 'incident' AND created_at >= $2 LIMIT 1`, [convId, i.startedAt])).rowCount;
     if (already) return false;
     const iLang = await this.langOf(convId);
-    const body = iLang === 'en' && i.textEn ? i.textEn : iLang === 'ar' && i.textAr ? i.textAr : i.text;
+    const body = iLang === 'en' && i.textEn ? i.textEn : iLang === 'ar' && i.textAr ? i.textAr : iLang === 'ru' && i.textRu ? i.textRu : i.text;
     const sent = await this.sendText(channelId, ext, body, { background: true }).catch(() => ({} as { externalMessageId?: string }));
     const ins = await this.db.query(`INSERT INTO messages (conversation_id, direction, body, external_id, auto, automation) VALUES ($1,'out',$2,$3,true,'incident') ON CONFLICT DO NOTHING RETURNING id`, [convId, body, sent.externalMessageId ?? null]);
     if (ins.rows[0]) { this.notifyMessage(channelId, convId, ins.rows[0].id); this.hookMessage('message.sent', convId, ins.rows[0].id); }
@@ -1545,9 +1545,9 @@ export class ChannelManager {
       const here = smallTalkReply(q, persona.name);
       // "תספרי לי עובדה מעניינת" while the team has not written yet: a safety fact ("עוד" right after one brings another)
       const fact = here ? null : await (async () => {
-        const told = (await this.db.query(`SELECT body FROM messages WHERE conversation_id = $1 AND direction = 'out' AND (body LIKE '💡 הידעת?%' OR body LIKE '💡 Did you know?%' OR body LIKE '💡 هل تعلم؟%') ORDER BY created_at DESC LIMIT 30`, [convId])).rows.map((x) => x.body as string);
+        const told = (await this.db.query(`SELECT body FROM messages WHERE conversation_id = $1 AND direction = 'out' AND (body LIKE '💡 הידעת?%' OR body LIKE '💡 Did you know?%' OR body LIKE '💡 هل تعلم؟%' OR body LIKE '💡 А вы знали?%') ORDER BY created_at DESC LIMIT 30`, [convId])).rows.map((x) => x.body as string);
         const last = (await this.db.query(`SELECT body FROM messages WHERE conversation_id = $1 AND direction = 'out' ORDER BY created_at DESC LIMIT 1`, [convId])).rows[0]?.body as string | undefined;
-        const lastWasFact = !!last && /^💡 (הידעת\?|Did you know\?|هل تعلم؟)/.test(last);
+        const lastWasFact = !!last && /^💡 (הידעת\?|Did you know\?|هل تعلم؟|А вы знали\?)/.test(last);
         return factReply(c.lang && c.lang !== 'he' ? await fromCustomer(this.db, c.lang, q) : q, told, lastWasFact);
       })().catch(() => null);
       if (here) { reply = `${here}\n\n${WAITING_NOTE}`; kind = 'waiting_answer'; }

@@ -13,7 +13,7 @@ export const designSchema = z.object({
   launcherLabel: z.string().trim().max(20).default(''),
   launcherIcon: z.enum(['chat', 'help', 'message']).default('chat'),
   /** the interface language: Hebrew, English, Arabic, or "auto" (the visitor's browser language) */
-  language: z.enum(['he', 'en', 'ar', 'auto']).default('he'),
+  language: z.enum(['he', 'en', 'ar', 'ru', 'auto']).default('he'),
 }).strict();
 
 /** "Continue on…" buttons in the widget: plain links to the networks' own deep links. Handles are validated so only safe URLs are built. */

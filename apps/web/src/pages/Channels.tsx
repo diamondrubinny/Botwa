@@ -658,7 +658,7 @@ function WebhookCheck({ channelId, connected, lastWebhookAt, lastAttempt, kind =
 
 type Level = 'off' | 'optional' | 'required';
 interface WebCfg {
-  design: { title: string; subtitle: string; welcome: string; color: string; position: 'left' | 'right'; launcherLabel: string; launcherIcon: 'chat' | 'help' | 'message'; language: 'he' | 'en' | 'ar' | 'auto' };
+  design: { title: string; subtitle: string; welcome: string; color: string; position: 'left' | 'right'; launcherLabel: string; launcherIcon: 'chat' | 'help' | 'message'; language: 'he' | 'en' | 'ar' | 'ru' | 'auto' };
   behavior: { askName: Level; askEmail: Level; askPhone: Level; popupText: string; popupDelaySec: number; autoOpenSec: number; showAgentName: boolean; consentText: string; consentLink: string; offlineMessage: string; maxLength: number; suggestions?: boolean; socialLinks?: SocialLink[] };
   allowedOrigins: string[]; allowAnyOrigin: boolean; publicKey: string; embedCode: string; previewUrl: string; status: string;
 }
@@ -764,8 +764,8 @@ function WebChatPanel({ channel, onSaved }: { channel: Channel; onSaved: () => v
           <div className="field"><label htmlFor={id('col')}>צבע המותג</label><input id={id('col')} type="color" value={c.design.color} onChange={(e) => d({ color: e.target.value })} style={{ width: 70, padding: 2 }} /></div>
           <div className="field"><label htmlFor={id('pos')}>מיקום הכפתור</label><select id={id('pos')} value={c.design.position} onChange={(e) => d({ position: e.target.value as 'left' })}><option value="left">שמאל</option><option value="right">ימין</option></select></div>
           <div className="field"><label htmlFor={id('ico')}>אייקון</label><select id={id('ico')} value={c.design.launcherIcon} onChange={(e) => d({ launcherIcon: e.target.value as 'chat' })}><option value="chat">בועת שיחה</option><option value="help">עזרה</option><option value="message">הודעה</option></select></div>
-          <div className="field"><label htmlFor={id('lang')}>שפת הממשק</label><select id={id('lang')} value={c.design.language} aria-describedby={id('lang-h')} onChange={(e) => d({ language: e.target.value as 'he' })}><option value="he">עברית</option><option value="en">English</option><option value="ar">العربية (ערבית)</option><option value="auto">אוטומטית (לפי שפת הדפדפן של המבקר)</option></select>
-            <p className="hint" id={id('lang-h')}>הכפתורים והכותרות בצ׳אט יוצגו בשפה הזו. כותרת, כותרת משנה והודעת פתיחה שלא שיניתם מוצגות בנוסח המובנה של השפה, וטקסט שכתבתם מוצג כמו שהוא. "אוטומטית" בוחרת עברית אם היא בין שפות הדפדפן, אחרת ערבית, אחרת אנגלית. כשההודעה הראשונה לא מספיקה לזיהוי (למשל "hi"), בטי עונה בשפת הצ׳אט.</p></div>
+          <div className="field"><label htmlFor={id('lang')}>שפת הממשק</label><select id={id('lang')} value={c.design.language} aria-describedby={id('lang-h')} onChange={(e) => d({ language: e.target.value as 'he' })}><option value="he">עברית</option><option value="en">English</option><option value="ar">العربية (ערבית)</option><option value="ru">Русский (רוסית)</option><option value="auto">אוטומטית (לפי שפת הדפדפן של המבקר)</option></select>
+            <p className="hint" id={id('lang-h')}>הכפתורים והכותרות בצ׳אט יוצגו בשפה הזו. כותרת, כותרת משנה והודעת פתיחה שלא שיניתם מוצגות בנוסח המובנה של השפה, וטקסט שכתבתם מוצג כמו שהוא. "אוטומטית" בוחרת עברית אם היא בין שפות הדפדפן, אחרת ערבית, אחרת רוסית (גם לדפדפן באוקראינית או בבלארוסית), אחרת אנגלית. כשההודעה הראשונה לא מספיקה לזיהוי (למשל "hi"), בטי עונה בשפת הצ׳אט.</p></div>
         </div>
         <div className="field"><label htmlFor={id('ll')}>טקסט על הכפתור (אופציונלי, במחשב בלבד)</label><input id={id('ll')} maxLength={20} value={c.design.launcherLabel} onChange={(e) => d({ launcherLabel: e.target.value })} /></div>
 

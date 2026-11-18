@@ -9,10 +9,11 @@ import { errText } from '../strings';
  */
 interface Item { he: string; en: string; builtIn: string | null; custom: boolean; where: string; used: boolean; suggest?: string | null }
 
-type TLang = 'en' | 'ar';
+type TLang = 'en' | 'ar' | 'ru';
 const L: Record<TLang, { name: string; title: string; tag: string; ph: string; dir: 'ltr' | 'rtl' }> = {
   en: { name: 'אנגלית', title: 'תרגום לאנגלית', tag: 'English', ph: 'English…', dir: 'ltr' },
   ar: { name: 'ערבית', title: 'תרגום לערבית', tag: 'العربية', ph: 'العربية…', dir: 'rtl' },
+  ru: { name: 'רוסית', title: 'תרגום לרוסית', tag: 'Русский', ph: 'По-русски…', dir: 'ltr' },
 };
 
 export function Translations({ canEdit }: { canEdit: boolean }) {
@@ -52,11 +53,11 @@ export function Translations({ canEdit }: { canEdit: boolean }) {
 
   return (
     <section className="card" aria-labelledby="tr-h">
-      <h2 id="tr-h">תרגומים: אנגלית וערבית</h2>
+      <h2 id="tr-h">תרגומים: אנגלית, ערבית ורוסית</h2>
       <fieldset style={{ border: 0, padding: 0, margin: '0 0 .5rem' }}>
         <legend className="sr-only">שפת התרגום</legend>
         <div className="row" role="radiogroup" aria-label="שפת התרגום">
-          {(['en', 'ar'] as const).map((l) => (
+          {(['en', 'ar', 'ru'] as const).map((l) => (
             <label key={l} style={{ display: 'inline-flex', gap: '.3rem', alignItems: 'center' }}>
               <input type="radio" name="tr-lang" value={l} checked={lang === l} style={{ width: 'auto', minHeight: 'auto' }}
                 onChange={() => { if (dirty && !window.confirm('יש שינויים שלא נשמרו. לעבור שפה בלי לשמור?')) return; setLang(l); setMsg(null); }} /> {L[l].title}
@@ -64,7 +65,7 @@ export function Translations({ canEdit }: { canEdit: boolean }) {
           ))}
         </div>
       </fieldset>
-      {lang === 'ar' && <p className="hint" role="note">⚠️ התרגום המובנה לערבית הוא טיוטה. לפני שמציעים ערבית ללקוחות, דובר/ת ערבית וממונה הבטיחות צריכים לעבור עליו, ובמיוחד על הודעות החירום והמפגעים.</p>}
+      {lang !== 'en' && <p className="hint" role="note">⚠️ התרגום המובנה ל{L[lang].name} הוא טיוטה. לפני שמציעים {L[lang].name} ללקוחות, דובר/ת {L[lang].name} וממונה הבטיחות צריכים לעבור עליו, ובמיוחד על הודעות החירום והמפגעים.</p>}
       <p className="hint">
         לקוח שכותב ב{L[lang].name} מקבל מבטי תשובות ב{L[lang].name}, ובשיחה שלו בפאנל מופיעה תגית "{L[lang].tag}". אם הלקוח עובר לכתוב בעברית, בטי עוברת איתו לעברית.
         לכל ההודעות הקבועות של בטי ושל תבנית הבטיחות כבר יש תרגום, ואפשר לשנות כל אחד מהם.

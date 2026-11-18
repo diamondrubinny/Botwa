@@ -8,7 +8,7 @@ import { usePoll } from '../hooks';
  */
 type Kind = 'emergency' | 'hazard' | 'worried' | 'upset';
 interface Row { kind: Kind; events: number; answered: number; within15: number; medianMinutes: number | null; unanswered: number }
-interface Report { days: number; rows: Row[]; topics: { name: string; n: number }[]; english: number; arabic?: number; waitingNow: number; hazardRating?: { avg: number | null; n: number } }
+interface Report { days: number; rows: Row[]; topics: { name: string; n: number }[]; english: number; arabic?: number; russian?: number; waitingNow: number; hazardRating?: { avg: number | null; n: number } }
 const LABEL: Record<Kind, string> = { emergency: '🚨 מצבי חירום', hazard: '⚠️ דיווחי מפגע', worried: '💛 לקוחות לחוצים', upset: '😕 לקוחות מתוסכלים' };
 
 export function SafetyReport({ days }: { days: number }) {
@@ -38,7 +38,7 @@ export function SafetyReport({ days }: { days: number }) {
       )}
       {r.topics.length > 0 && <p><strong>נושאים:</strong> {r.topics.map((t) => `${t.name} (${t.n})`).join(', ')}</p>}
       {!!r.hazardRating?.n && <p>⭐ שביעות רצון המדווחים מטיפול במפגעים: <strong>{r.hazardRating.avg}</strong> מתוך 5 ({r.hazardRating.n} דירוגים)</p>}
-      <p className="hint">שיחות באנגלית בתקופה: {r.english}. בערבית: {r.arabic ?? 0}. גם מנהלים שמחוברים לבטי בווצאפ יכולים לקבל את הסיכום הזה: כתבו לה "בטיחות" או "7".</p>
+      <p className="hint">שיחות באנגלית בתקופה: {r.english}. בערבית: {r.arabic ?? 0}. ברוסית: {r.russian ?? 0}. גם מנהלים שמחוברים לבטי בווצאפ יכולים לקבל את הסיכום הזה: כתבו לה "בטיחות" או "7".</p>
     </section>
   );
 }

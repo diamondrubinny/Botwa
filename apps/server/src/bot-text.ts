@@ -1,4 +1,4 @@
-import { arNorm } from './i18n/lang.js';
+import { arNorm, ruNorm } from './i18n/lang.js';
 /**
  * Variables in the bot's own messages (welcome, flow messages, questions and menus): who the bot is and who it talks to.
  * Only these names are replaced; anything else in curly braces is sent as written.
@@ -12,8 +12,8 @@ export const BOT_TEXT_VARIABLES = [
 
 export interface BotTextContext { botName?: string | null; fullName?: string | null; /** the greeting of this hour ("בוקר טוב"); default "שלום" */ greeting?: string | null;
   /** the customer called the bot by name, or it introduced itself in this conversation already: leave out "כאן {בוט}…" */ skipIntro?: boolean;
-  /** the conversation's language: what to call a bot that has no name ("הבוט", "the bot", "روبوت المحادثة") */ lang?: 'he' | 'en' | 'ar' }
-const NO_NAME = { he: 'הבוט', en: 'the bot', ar: 'روبوت المحادثة' } as const;
+  /** the conversation's language: what to call a bot that has no name ("הבוט", "the bot", "روبوت المحادثة") */ lang?: 'he' | 'en' | 'ar' | 'ru' }
+const NO_NAME = { he: 'הבוט', en: 'the bot', ar: 'روبوت المحادثة', ru: 'чат-бот' } as const;
 
 const escRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 /**
@@ -43,23 +43,26 @@ const GREETING = {
   he: { morning: 'בוקר טוב', noon: 'צהריים טובים', evening: 'ערב טוב', night: 'לילה טוב' },
   en: { morning: 'Good morning', noon: 'Good afternoon', evening: 'Good evening', night: 'Hello' },
   ar: { morning: 'صباح الخير', noon: 'نهارك سعيد', evening: 'مساء الخير', night: 'مساء الخير' },
+  ru: { morning: 'Доброе утро', noon: 'Добрый день', evening: 'Добрый вечер', night: 'Здравствуйте' },
 } as const;
 /** "בוקר טוב" / "Good evening"…: what to say at this hour. */
-export const greetingFor = (part: DayPart, lang: 'he' | 'en' | 'ar' = 'he'): string => GREETING[lang][part];
+export const greetingFor = (part: DayPart, lang: 'he' | 'en' | 'ar' | 'ru' = 'he'): string => GREETING[lang][part];
 
 /** "לילה טוב", "יום טוב", "תודה ולילה טוב", "good night": the customer is saying goodbye (not a new request, nothing to choose). */
 const BYE = /^((תודה|תודה רבה|thanks|thank you)\s*,?\s*(ו|and )?\s*)?(לילה טוב|ליל מנוחה|יום טוב|המשך יום טוב|יום נעים|המשך יום נעים|ערב טוב ונעים|ערב נעים|המשך ערב נעים|סוף שבוע נעים|שבת שלום|good ?night|nighty night|have a (good|nice|great) (day|night|evening|weekend))(\s+(לך|לכם|גם לך|גם לכם|ותודה|תודה|ותודה רבה|תודה רבה|and thanks|thanks|to you|too|bye|ביי))*$/;
 /** the same in Arabic (after arNorm): "تصبح على خير", "مع السلامه", "يوم سعيد", "شكرا ومع السلامه" */
 const BYE_AR = /^((شكرا|شكرا جزيلا)\s*(و)?\s*)?(تصبح علي خير|تصبحي علي خير|تصبحين علي خير|تصبحوا علي خير|تصبحون علي خير|ليله سعيده|مع السلامه|يوم سعيد|يومك سعيد|نهارك سعيد|مساء سعيد|نهايه اسبوع سعيده|عطله سعيده|الى اللقاء|باي)(\s+(وشكرا|شكرا|لك|لكم|كمان|ايضا|باي))*$/;
+/** the same in Russian (after ruNorm): "спокойной ночи", "до свидания", "спасибо, хорошего дня" */
+const BYE_RU = /^((спасибо|большое спасибо)\s*(и)?\s*)?(спокойной ночи|до свидания|хорошего (дня|вечера)|приятного (дня|вечера)|всего доброго|всего хорошего|пока|до встречи|хороших выходных|шаббат шалом)(\s+(и спасибо|спасибо|вам|тебе|тоже|пока))*$/;
 export function isFarewell(text: string | null | undefined): boolean {
   const t = (text ?? '').toLowerCase().replace(/[!.,״"׳:;()\u200e\u200f\u{1F300}-\u{1FAFF}\u2600-\u27BF\u{FE0F}،]/gu, ' ').replace(/\s+/g, ' ').trim();
   if (!t || t.length > 60 || /[?؟]/.test(text ?? '')) return false;
-  return BYE.test(t) || (/[\u0600-\u06FF]/.test(t) && BYE_AR.test(arNorm(t)));
+  return BYE.test(t) || (/[\u0600-\u06FF]/.test(t) && BYE_AR.test(arNorm(t))) || (/[\u0400-\u04FF]/.test(t) && BYE_RU.test(ruNorm(t.replace(/[«»]/g, ' '))));
 }
 /** Betty's goodbye, fitting the hour (a "לילה טוב" at noon gets "המשך יום נעים"; "שבת שלום" is answered in kind). */
 export function farewellReply(text: string, part: DayPart): string {
   if (/שבת שלום/.test(text)) return 'שבת שלום 🕯️ אם יעלה משהו, אני כאן.';
-  if (/סוף שבוע/.test(text) || /weekend/i.test(text) || /اسبوع|عطله|عطلة/.test(text)) return 'סוף שבוע נעים ☀️ אם יעלה משהו, אני כאן.';
+  if (/סוף שבוע/.test(text) || /weekend/i.test(text) || /اسبوع|عطله|عطلة/.test(text) || /выходн/i.test(text)) return 'סוף שבוע נעים ☀️ אם יעלה משהו, אני כאן.';
   return part === 'night' ? 'לילה טוב 🌙 אם יעלה משהו, אני כאן.' : part === 'evening' ? 'ערב נעים 🌆 אם יעלה משהו, אני כאן.' : 'המשך יום נעים ☀️ אם יעלה משהו, אני כאן.';
 }
 
@@ -109,9 +112,11 @@ const WHO_EN = /^(who are you|who is this|what('?s| is) your name|who am i (talk
 const ONLY = new Set(['מי זה', 'מי זאת', 'בוט', 'bot', 'רובוט']);
 /** The same questions in Arabic (after arNorm): "من انت؟", "هل انت روبوت؟", "هل انا اتحدث مع انسان؟" */
 const WHO_AR = /^(من (انت|انتي|حضرتك|معي|معاي|هذا|هذه)|ما (اسمك|هو اسمك)|شو اسمك|(هل )?(انت|انتي) (روبوت|بوت|انسان|انسانه|حقيقي|حقيقيه|اله|ذكاء اصطناعي)|(هل )?(انا )?(اتحدث|احكي|اتكلم) مع (روبوت|بوت|انسان|شخص|موظف حقيقي))$/;
+/** Russian (after ruNorm): "кто ты?", "ты бот?", "я говорю с человеком?" */
+const WHO_RU = /^(кто (ты|вы|это|со мной говорит)|как (тебя|вас) зовут|(ты|вы) (бот|робот|человек|живой человек|настоящий|настоящая|ии|искусственный интеллект)|(я )?(говорю|разговариваю|переписываюсь) (с ботом|с роботом|с человеком)|это бот)$/;
 export function identityReply(text: string | null | undefined, persona: { name?: string | null; role?: string | null }): string | null {
   const t = (text ?? '').toLowerCase().replace(/[?!.,״"׳:;()\u200e\u200f؟،]/g, ' ').replace(/\s+/g, ' ').trim();
-  if (!t || t.split(' ').length > 7 || !(ONLY.has(t) || WHO.test(t) || BOT_YOU.test(t) || BOT_IT.test(t) || WHO_EN.test(t) || WHO_AR.test(arNorm(t)))) return null;
+  if (!t || t.split(' ').length > 7 || !(ONLY.has(t) || WHO.test(t) || BOT_YOU.test(t) || BOT_IT.test(t) || WHO_EN.test(t) || WHO_AR.test(arNorm(t)) || WHO_RU.test(ruNorm(t)))) return null;
   const name = (persona.name ?? '').trim();
   const role = (persona.role ?? '').trim();
   const me = name ? `אני ${name}${role ? `, ${role}` : ', הבוט של השירות'}` : `אני ${role || 'הבוט של השירות'}`;
@@ -148,6 +153,11 @@ export function smallTalkReply(text: string | null | undefined, botName?: string
   if (!t) return /^\s*[?？]+\s*$/.test(text ?? '') ? 'כן, אני כאן איתך 😊' : null;   // a lone "?" (or "בטי?"): are you there?
   if (HOW.test(t) || HOW_EN.test(t)) return 'תודה ששאלת, הכול טוב אצלי 😊 במה אפשר לעזור?';
   if (HERE_EN.test(t)) return 'כן, אני כאן איתך 😊';
+  if (/[\u0400-\u04FF]/.test(t)) {   // Russian: "как дела?", "ты здесь?", "есть кто?"
+    const r = ruNorm(t).replace(/^(привет|здравствуйте|добрый день|добрый вечер|доброе утро)\s+/, '');
+    if (/^(как (дела|ты|вы|поживаешь|поживаете|у тебя дела|у вас дела)|как сама|что нового)$/.test(r)) return 'תודה ששאלת, הכול טוב אצלי 😊 במה אפשר לעזור?';
+    if (/^((ты|вы) (здесь|тут|на связи)|есть (кто|кто-нибудь)( здесь| тут)?|кто-нибудь (здесь|тут|есть)|алло)$/.test(r)) return 'כן, אני כאן איתך 😊';
+  }
   if (/[\u0600-\u06FF]/.test(t)) {   // Arabic: "كيف حالك؟", "شو الاخبار", "هل انت هنا؟", "في حدا؟"
     const a = arNorm(t.replace(/[؟،]/g, ' ')).replace(/^(مرحبا|اهلا|السلام عليكم|صباح الخير|مساء الخير|هاي)\s+/, '');
     if (/^(كيف (حالك|الحال|حالكم|الاحوال)|شو (الاخبار|اخبارك|الوضع)|كيفك|كيفك اليوم|ازيك)$/.test(a)) return 'תודה ששאלת, הכול טוב אצלי 😊 במה אפשר לעזור?';

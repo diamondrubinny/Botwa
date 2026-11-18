@@ -14,6 +14,7 @@ export const MAX_BUTTONS = 3, MAX_LIST_ROWS = 10;
 export const LIST_LABELS = {
   he: { button: '☰ תפריט', section: 'אפשרויות', more: 'נושאים נוספים ▸', moreDesc: 'עוד אפשרויות', back: '◂ חזרה לתחילת הרשימה' },
   en: { button: '☰ Menu', section: 'Options', more: 'More topics ▸', moreDesc: 'More options', back: '◂ Back to the start' },
+  ru: { button: '☰ Меню', section: 'Варианты', more: 'Другие темы ▸', moreDesc: 'Ещё варианты', back: '◂ В начало списка' },
   ar: { button: '☰ القائمة', section: 'الخيارات', more: 'مواضيع أخرى ▸', moreDesc: 'خيارات إضافية', back: '◂ العودة إلى البداية' },
 } as const;
 export type ListLang = keyof typeof LIST_LABELS;
@@ -59,7 +60,8 @@ export function listMenuBody(body: string): string {
   return body
     .replace('אפשר לבחור מספר, או לכתוב במילים במה מדובר.', 'אפשר לבחור מהתפריט (☰ למטה), או לכתוב במילים במה מדובר.')
     .replace('You can choose a number, or describe in your own words what it is about.', 'You can pick from the menu (☰ below), or describe in your own words what it is about.')
-    .replace('يمكن اختيار رقم، أو الكتابة بالكلمات عمّا يدور الحديث.', 'يمكن الاختيار من القائمة (☰ في الأسفل)، أو الكتابة بالكلمات عمّا يدور الحديث.');
+    .replace('يمكن اختيار رقم، أو الكتابة بالكلمات عمّا يدور الحديث.', 'يمكن الاختيار من القائمة (☰ في الأسفل)، أو الكتابة بالكلمات عمّا يدور الحديث.')
+    .replace('Можно выбрать номер или написать своими словами, о чём речь.', 'Можно выбрать из меню (☰ внизу) или написать своими словами, о чём речь.');
 }
 
 export interface TemplateSend { name: string; language: string; /** values for {{1}}, {{2}}... of the body, in order */ params: string[] }

@@ -2,13 +2,14 @@ import type { Db } from '../db.js';
 import { ADVICE, ADVICE_DEFAULT, ADVICE_DEFAULT_EN, ADVICE_EN } from '../empathy.js';
 import { SAFETY_FACTS, SAFETY_FACTS_EN } from '../safety/facts.js';
 import { PAIRS_AR } from './arabic.js';
-import { arNorm, type Lang } from './lang.js';
+import { PAIRS_RU } from './russian.js';
+import { arNorm, ruNorm, type Lang } from './lang.js';
 export { arNorm };
 
 /** The languages Betty translates into (Hebrew is the source). */
-export type Target = 'en' | 'ar';
-export const TARGETS: readonly Target[] = ['en', 'ar'];
-export const isTarget = (l: unknown): l is Target => l === 'en' || l === 'ar';
+export type Target = 'en' | 'ar' | 'ru';
+export const TARGETS: readonly Target[] = ['en', 'ar', 'ru'];
+export const isTarget = (l: unknown): l is Target => l === 'en' || l === 'ar' || l === 'ru';
 
 /**
  * Betty in English: one Hebrew → English dictionary for everything she sends. Defaults below (her fixed messages, the safety
@@ -213,6 +214,7 @@ const PAIRS: [string, string][] = [
 /** The built-in dictionary (with the safety facts and the first advice for hazards). */
 export function defaultEntries(target: Target = 'en'): Map<string, string> {
   if (target === 'ar') return new Map(PAIRS_AR);
+  if (target === 'ru') return new Map(PAIRS_RU);
   const m = new Map(PAIRS);
   SAFETY_FACTS.forEach((f, i) => { if (SAFETY_FACTS_EN[i]) m.set(f, SAFETY_FACTS_EN[i]!); });
   ADVICE.forEach(([, he], i) => { if (ADVICE_EN[i]) m.set(he, ADVICE_EN[i]!); });
@@ -243,8 +245,9 @@ export function buildDictionary(entries: Map<string, string>, target: Target = '
 const DAYS: Record<Target, Record<string, string>> = {
   en: { 'א׳': 'Sun', 'ב׳': 'Mon', 'ג׳': 'Tue', 'ד׳': 'Wed', 'ה׳': 'Thu', 'ו׳': 'Fri', 'ש׳': 'Sat' },
   ar: { 'א׳': 'الأحد', 'ב׳': 'الإثنين', 'ג׳': 'الثلاثاء', 'ד׳': 'الأربعاء', 'ה׳': 'الخميس', 'ו׳': 'الجمعة', 'ש׳': 'السبت' },
+  ru: { 'א׳': 'Вс', 'ב׳': 'Пн', 'ג׳': 'Вт', 'ד׳': 'Ср', 'ה׳': 'Чт', 'ו׳': 'Пт', 'ש׳': 'Сб' },
 };
-const LETTERS: Record<Target, Record<string, string>> = { en: { 'א': 'a', 'ב': 'b', 'ג': 'c' }, ar: { 'א': 'أ', 'ב': 'ب', 'ג': 'ج' } };
+const LETTERS: Record<Target, Record<string, string>> = { en: { 'א': 'a', 'ב': 'b', 'ג': 'c' }, ar: { 'א': 'أ', 'ב': 'ب', 'ג': 'ج' }, ru: { 'א': 'а', 'ב': 'б', 'ג': 'в' } };
 
 /** One piece (a line or less): exact, then a pattern (its changing parts translated by themselves), then a list item or a leading emoji. */
 function piece(s: string, d: Dictionary, depth = 0): string {
@@ -334,19 +337,31 @@ const COMMANDS: Record<Target, [RegExp, string][]> = {
     [/^(لا|كلا)$/, 'לא'],
     [/^((ال)?مزيد|كمان|اخر|واحد اخر|غيره)$/, 'עוד'],
   ],
+  // (compared after ruNorm: lower case, е for ё)
+  ru: [
+    [/^(главное )?меню$|^начать (сначала|заново)$/, 'תפריט'],
+    [/^(назад|вернуться|обратно|предыдущий)$/, 'אחורה'],
+    [/^(оператор|сотрудник|человек|живой человек|менеджер|позовите (оператора|сотрудника|человека)|(хочу|можно) (оператора|сотрудника|человека)|поговорить с (оператором|сотрудником|человеком))$/, 'נציג'],
+    [/^(пропустить|пропуск|дальше|далее)$/, 'דלג'],
+    [/^(да|ага|конечно|угу)$/, 'כן'],
+    [/^(нет|не)$/, 'לא'],
+    [/^(еще|ещё|еще одну|еще один|еще факт|давай еще)$/, 'עוד'],
+  ],
 };
 const AR_LETTERS: Record<string, string> = { 'ا': 'א', 'ب': 'ב', 'ج': 'ג' };
 
 export async function fromCustomer(db: Db, lang: Lang | null | undefined, text: string): Promise<string> {
   if (!isTarget(lang)) return text;
   const raw = text.trim().replace(/[.!?؟]+$/, '');
-  const t = lang === 'ar' ? arNorm(raw) : raw;
+  const t = lang === 'ar' ? arNorm(raw) : lang === 'ru' ? ruNorm(raw) : raw;
   for (const [re, he] of COMMANDS[lang]) if (re.test(t)) return he;
   if (lang === 'en' && /^[a-c]$/i.test(t)) return { a: 'א', b: 'ב', c: 'ג' }[t.toLowerCase()]!;   // "did you mean" letters
   if (lang === 'ar' && AR_LETTERS[t]) return AR_LETTERS[t]!;
+  if (lang === 'ru' && /^[абв]$/.test(t)) return { 'а': 'א', 'б': 'ב', 'в': 'ג' }[t]!;
   const d = await dictionary(db, lang);
-  const key = lang === 'ar' ? t : t.toLowerCase();
-  for (const [he, tr] of d.exact) if ((lang === 'ar' ? arNorm(tr) : tr.toLowerCase()) === key && he.length <= 80) return he;   // an option's label
+  const norm = (x: string) => (lang === 'ar' ? arNorm(x) : lang === 'ru' ? ruNorm(x) : x.toLowerCase());
+  const key = norm(t);
+  for (const [he, tr] of d.exact) if (norm(tr) === key && he.length <= 80) return he;   // an option's label
   return text;
 }
 export const fromEnglish = (db: Db, text: string) => fromCustomer(db, 'en', text);

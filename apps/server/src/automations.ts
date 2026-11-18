@@ -7,7 +7,7 @@ import { sendBlock, type AccessibleConversation } from './access.js';
 import { loadSending } from './channels/sender.js';
 import { FOLLOW_UP_AFTER, followUpText } from './empathy.js';
 import { localize } from './i18n/translate.js';
-import { arNorm } from './i18n/lang.js';
+import { arNorm, ruNorm } from './i18n/lang.js';
 import { hoursSummary } from './canned.js';
 import { autoAssign } from './routing.js';
 
@@ -94,9 +94,9 @@ export interface AutoSender {
   onAssigned?: ((conversationId: string, userId: string) => void) | null;
 }
 
-type ConvRow = AccessibleConversation & { contact_name: string | null; channel_label: string; agent_name: string | null; agent_name_plain?: string | null; agent_title: string | null; agent_title_en?: string | null; agent_title_ar?: string | null; agent_phone: string | null };
+type ConvRow = AccessibleConversation & { contact_name: string | null; channel_label: string; agent_name: string | null; agent_name_plain?: string | null; agent_title: string | null; agent_title_en?: string | null; agent_title_ar?: string | null; agent_title_ru?: string | null; agent_phone: string | null };
 const CONV = `SELECT c.id, c.channel_id, c.assigned_to, c.status, ct.external_id, ct.blocked, ct.opted_out, ch.type AS channel_type,
-                     ct.display_name AS contact_name, ch.label AS channel_label, COALESCE(u.name_he, u.name) AS agent_name, u.name AS agent_name_plain, u.job_title AS agent_title, u.job_title_en AS agent_title_en, u.job_title_ar AS agent_title_ar, u.intro_phone AS agent_phone
+                     ct.display_name AS contact_name, ch.label AS channel_label, COALESCE(u.name_he, u.name) AS agent_name, u.name AS agent_name_plain, u.job_title AS agent_title, u.job_title_en AS agent_title_en, u.job_title_ar AS agent_title_ar, u.job_title_ru AS agent_title_ru, u.intro_phone AS agent_phone
                 FROM conversations c JOIN contacts ct ON ct.id = c.contact_id JOIN channels ch ON ch.id = c.channel_id LEFT JOIN users u ON u.id = c.assigned_to`;
 /** comment threads (public posts) never get automatic messages */
 const NOT_COMMENT = `ct.external_id !~ '@(fb|ig)comment$'`;
@@ -113,12 +113,12 @@ export async function sendAutomatic(db: Db, out: AutoSender, conv: ConvRow, body
   const lang = (await db.query('SELECT lang FROM conversations WHERE id = $1', [conv.id])).rows[0]?.lang;
   // in English or Arabic, the person's name as written in Latin letters (their account name) and no Hebrew-only job title: never a
   // Hebrew name and role inside an English sentence ("Hello Dana, this is דיימונד, אחראי…")
-  const foreign = lang === 'en' || lang === 'ar';
+  const foreign = lang === 'en' || lang === 'ar' || lang === 'ru';
   const hasHe = (v: string | null | undefined) => !!v && /[\u05D0-\u05EA]/.test(v);
   const plain = conv.agent_name_plain && !hasHe(conv.agent_name_plain) && !conv.agent_name_plain.includes('@') ? conv.agent_name_plain : null;
   const agentName = foreign ? (plain ?? conv.agent_name ?? await localize(db, lang, 'הצוות')) : (conv.agent_name ?? 'הצוות');
   // the role in the conversation's language when the person wrote one; a Hebrew-only role is left out
-  const own = lang === 'en' ? conv.agent_title_en : lang === 'ar' ? conv.agent_title_ar : null;
+  const own = lang === 'en' ? conv.agent_title_en : lang === 'ar' ? conv.agent_title_ar : lang === 'ru' ? conv.agent_title_ru : null;
   const agentTitle = foreign ? (own || (hasHe(conv.agent_title) ? null : conv.agent_title)) : conv.agent_title;
   const rendered = renderCanned(await localize(db, lang, body), { customerName: conv.contact_name, agentName, agentTitle, agentPhone: conv.agent_phone, hours, channelLabel: conv.channel_label });
   // what the variables brought in Hebrew (the working hours) is translated as far as the dictionary goes
@@ -166,12 +166,15 @@ const NOT_CLOSE = new Set(['לא', 'אל', 'עדיין', 'אבל', 'עוד', 'ל
  * The customer says the matter is settled or asks to close it ("הסתדרתי", "הסתדר, תודה", "תסגרו את הקריאה", "אפשר לסגור"):
  * short, and with no question, "not yet", "but" or "don't close" in it.
  */
+/** "проблема решена", "все решилось", "можно закрыть заявку" (after ruNorm); not with "не" / "еще" / "но" */
+const SOLVED_RU = /(^|\s)(решено|проблема решена|все решилось|вопрос решен|разобрались|разобрался|разобралась|можно закрыть|закройте (обращение|заявку|чат)|закрывайте)(\s|$)/;
 /** "انحلت المشكله", "تم الحل", "اغلقوا الطلب" (after arNorm); not with "لا" / "لسا" / "لكن" */
 const SOLVED_AR = /(^|\s)(انحلت|اتحلت|انحل|اتحل|تم الحل|تم حلها|حليتها|زبطت|ضبطت|اغلقوا (الطلب|المحادثه|الطلبيه)|ممكن (تغلقوا|اغلاق) (الطلب|المحادثه)|سكروا (الطلب|المحادثه))(\s|$)/;
 export function isCloseRequest(textIn: string | null): boolean {
   if (!textIn) return false;
   const t = textIn.trim();
   if (!t || t.length > 140 || /[?؟]/.test(t)) return false;
+  if (/[\u0400-\u04FF]/.test(t)) { const r = ruNorm(t.replace(/[!.,:;()«»]/g, ' ')); return SOLVED_RU.test(r) && !/(^|\s)(не|нет|еще не|но|пока)(\s|$)/.test(r); }
   if (/[\u0600-\u06FF]/.test(t)) { const a = arNorm(t.replace(/[!.,،:;()]/g, ' ')); return SOLVED_AR.test(a) && !/(^|\s)(لا|لم|لسا|لسه|لكن|بس|مش|ما زال)(\s|$)/.test(a); }
   const words = t.toLowerCase().replace(/[!.,׳"״:;()\-–—~*]/g, ' ').replace(/[\p{Extended_Pictographic}\u{FE0F}\u{200D}\u{1F3FB}-\u{1F3FF}]/gu, ' ')
     .split(/\s+/).filter(Boolean)
@@ -253,6 +256,12 @@ export async function thankForFeedback(db: Db, out: AutoSender, convId: string):
  * 'done' (got it / nothing else: close kindly), 'more' (yes, something else: they will write it), or null (anything else: a new
  * question or request, handled as usual).
  */
+/** the same answers in Russian (after ruNorm): "нет" / "не получил" → missing, "да" / "получила" → done, "есть еще вопрос" → more */
+const REMINDER_RU: [RegExp, 'missing' | 'done' | 'more'][] = [
+  [/^(нет|еще нет|пока нет|не получил(а)?|не получил(а)? ответ(а)?|никто не ответил|мне не ответили|не ответили|все еще жду|до сих пор жду|жду)( ответа)?$/, 'missing'],
+  [/^(да|да,? спасибо|получил(а)?|да,? получил(а)?|нет,? спасибо|спасибо|все хорошо|все в порядке|все ок|ок)( спасибо| большое спасибо)?$/, 'done'],
+  [/^((у меня )?(есть )?еще (один )?вопрос|да,? есть вопрос)$/, 'more'],
+];
 /** the same answers in Arabic (after arNorm): "لا" / "لم يصلني رد" → missing, "نعم" / "وصلني" → done, "عندي سؤال اخر" → more */
 const REMINDER_AR: [RegExp, 'missing' | 'done' | 'more'][] = [
   [/^(لا|كلا|ليس بعد|مش بعد|لسا|لسه|لم (احصل|يصلني|يردوا|يرد)|ما (وصلني|اجاني|حدا رد|رد علي حدا|ردوا)|لا لم|ما زلت انتظر|لسا بستني|لسه مستني|لم يصلني رد|ما وصلني رد)( (شي|شيء|رد|بعد|ابدا))?$/, 'missing'],
@@ -263,6 +272,7 @@ export function reminderAnswer(textIn: string | null | undefined): 'missing' | '
   const t = (textIn ?? '').toLowerCase().replace(/[!.,?״"׳'():;\-–—\u{1F300}-\u{1FAFF}\u2600-\u27BF\u{FE0F}؟،]/gu, ' ').replace(/\s+/g, ' ').trim();
   if (!t || t.length > 120) return null;
   if (/[\u0600-\u06FF]/.test(t)) { const a = arNorm(t); return REMINDER_AR.find(([re]) => re.test(a))?.[1] ?? null; }
+  if (/[\u0400-\u04FF]/.test(t)) { const r = ruNorm(t.replace(/[«»]/g, ' ')).replace(/\s*,\s*/g, ', ').replace(/, /g, ' '); return REMINDER_RU.find(([re]) => re.test(r))?.[1] ?? null; }
   if (/(^|\s)(לא|עוד לא|עדיין לא)\s+(קיבלתי|קבלתי|קיבלנו|קיבלו|ענו|ענית|ענה|חזרו|חזר|חזרת|התקבלה|הגיעה|הגיע)|(^|\s)(אף אחד|איש) לא (ענה|חזר|התקשר)|לא קיבלתי (שום )?(תשובה|מענה)|עדיין מחכ|(^|\s)(עוד|עדיין) לא$|^לא ממש$|^(לא|no|nope)$|didn ?t (get|receive)|did not (get|receive)|(no|not) (an )?(answer|reply|response)( yet)?|not yet|still waiting|nobody (answered|replied|got back)/.test(t)) return 'missing';
   if (/^(כן|yes|yep|לא תודה|לא צריך|אין צורך|זהו|זה הכל|זה הכול|הכל טוב|הכול טוב|הכל בסדר|הכול בסדר|קיבלתי|קבלתי|כן קיבלתי|כן קיבלתי תודה|קיבלתי תודה|כן תודה|כן תודה רבה|קיבלתי תודה רבה|no|no thanks|nope|nothing else|got it|yes thanks|yes thank you|all good)( תודה| תודה רבה| thanks| thank you)?$/.test(t)) return 'done';
   if (/^(כן יש|יש|יש לי עוד שאלה|יש עוד שאלה|עוד שאלה|yes there is|i have another question)$/.test(t)) return 'more';

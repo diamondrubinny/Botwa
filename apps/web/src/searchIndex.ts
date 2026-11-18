@@ -17,7 +17,7 @@ export const SEARCH_INDEX: SearchEntry[] = [
   { label: 'הצהרה שבטי היא בוט ולא נציגה אנושית', where: 'בוט', words: 'הצהרה בוט שקיפות לא אנושי נציג אנושי גילוי disclosure transparency', page: 'bot', s: 'b-disc', allowed: P('bot.view') },
   { label: 'זהות הבוט (בטי): שם, תפקיד ותמונה', where: 'בוט', words: 'בטי פרסונה שם הבוט תמונה אווטאר persona', page: 'bot', s: 'persona-h', allowed: P('bot.view') },
   { label: 'מצב חירום: הודעת חירום ומספרים', where: 'בוט', words: 'חירום מד"א 101 102 100 מוקד ביטחון שריפה דחוף emergency', page: 'bot', s: 'em-t', allowed: P('bot.view') },
-  { label: 'תרגומים: אנגלית וערבית (שיחות בשפות אחרות)', where: 'בוט', words: 'אנגלית english ערבית arabic العربية תרגום שפה translation lang', page: 'bot', s: 'tr-h', allowed: P('bot.view') },
+  { label: 'תרגומים: אנגלית, ערבית ורוסית (שיחות בשפות אחרות)', where: 'בוט', words: 'אנגלית english ערבית arabic العربية רוסית russian русский תרגום שפה translation lang', page: 'bot', s: 'tr-h', allowed: P('bot.view') },
   { label: 'הודעת חירום בערבית', where: 'בוט', words: 'ערבית arabic חירום emergency طوارئ', page: 'bot', s: 'em-ar', allowed: P('bot.view') },
   { label: 'אירוע חירום רחב (הודעת מצב לכל הפונים)', where: 'בוט', words: 'אירוע חירום רחב אזעקה שריפה פינוי הודעת מצב incident', page: 'bot', s: 'inc-h', allowed: P('bot.view') },
   { label: 'ממונה בטיחות אחראי בהעברה לאדם (שיוך)', where: 'בוט', words: 'ממונה אחראי שיוך ניתוב העברה לנציג ברירת מחדל ממונה בטיחות routing officer', page: 'bot', s: 'resp-u', allowed: P('bot.view') },

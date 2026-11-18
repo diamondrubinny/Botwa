@@ -12,6 +12,7 @@ export const incidentSchema = z.object({
   text: z.string().trim().min(10).max(1000),
   textEn: z.string().trim().max(1000).default(''),
   textAr: z.string().trim().max(1000).default(''),
+  textRu: z.string().trim().max(1000).default(''),
 });
 export type Incident = z.infer<typeof incidentSchema> & { startedAt: string | null; startedBy: string | null };
 
@@ -19,7 +20,7 @@ export const DEFAULT_INCIDENT_TEXT = '⚠️ עדכון מיחידת הבטיח�
 
 export async function loadIncident(db: Db): Promise<Incident> {
   const v = (await db.query(`SELECT value FROM settings WHERE key = 'incident'`)).rows[0]?.value as Partial<Incident> | undefined;
-  return { active: !!v?.active, text: v?.text || DEFAULT_INCIDENT_TEXT, textEn: v?.textEn ?? '', textAr: v?.textAr ?? '', startedAt: v?.startedAt ?? null, startedBy: v?.startedBy ?? null };
+  return { active: !!v?.active, text: v?.text || DEFAULT_INCIDENT_TEXT, textEn: v?.textEn ?? '', textAr: v?.textAr ?? '', textRu: v?.textRu ?? '', startedAt: v?.startedAt ?? null, startedBy: v?.startedBy ?? null };
 }
 
 export async function saveIncident(db: Db, next: z.infer<typeof incidentSchema>, userId: string): Promise<Incident> {

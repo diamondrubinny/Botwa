@@ -334,6 +334,35 @@ describe('official channel: menus as buttons and message templates', () => {
     expect((await db.query(`SELECT t.name FROM conversation_tags x JOIN tags t ON t.id = x.tag_id WHERE x.conversation_id = $1`, [conv])).rows.map((r) => r.name)).not.toContain('العربية');
   });
 
+  it('Russian: answers in Russian, the menu behind "☰ Меню", Russian commands, a "Русский" tag, an emergency gets the numbers in Russian', async () => {
+    await call('PUT', '/settings/bot', 'adm', { ...DEFAULT_BOT, enabled: true, interactiveMenus: true, items: [{ title: 'שעות פעילות', answer: 'א׳–ה׳ 09:00–17:00' }, { title: 'דיווח על מפגע', answer: 'x' }, { title: 'לייזרים', answer: 'y' }], humanOption: true });
+    const texts = () => sent.filter((s) => s.body.type === 'text').map((s) => (s.body.text as { body: string }).body);
+    sent.length = 0;
+    await hook(inbound('wamid.RU1', '972501110031', { type: 'text', text: { body: 'Здравствуйте, у меня вопрос' } }));
+    await new Promise((r) => setTimeout(r, 80));
+    const menu = sent.find((s) => s.body.type === 'interactive')!.body.interactive as { body: { text: string }; action: { button: string; sections: { rows: { title: string }[] }[] } };
+    expect(menu.action.button).toBe('☰ Меню');
+    expect(menu.body.text).toContain('С вами');
+    expect(menu.body.text).toContain('я чат-бот, а не сотрудник');
+    expect(menu.body.text).not.toMatch(/[א-ת]{3,}/);
+    expect(menu.action.sections[0]!.rows.map((r) => r.title)).toEqual(['Часы работы', 'Сообщить об опасности', 'Лазеры', 'Сотрудник (оператор)']);
+    const conv = (await db.query(`SELECT conversation_id FROM messages WHERE external_id = 'wamid.RU1'`)).rows[0].conversation_id;
+    expect((await db.query(`SELECT lang FROM conversations WHERE id = $1`, [conv])).rows[0].lang).toBe('ru');
+    expect((await db.query(`SELECT t.name FROM conversation_tags x JOIN tags t ON t.id = x.tag_id WHERE x.conversation_id = $1`, [conv])).rows.map((r) => r.name)).toContain('Русский');
+    sent.length = 0;
+    await hook(inbound('wamid.RU2', '972501110031', { type: 'interactive', interactive: { type: 'list_reply', list_reply: { id: '1', title: 'Часы работы' } } }));
+    await new Promise((r) => setTimeout(r, 80));
+    expect(texts().join('\n')).toContain('Вс–Чт 09:00–17:00');
+    sent.length = 0;
+    await hook(inbound('wamid.RU3', '972501110031', { type: 'text', text: { body: 'меню' } }));
+    await new Promise((r) => setTimeout(r, 80));
+    expect(sent.some((s) => s.body.type === 'interactive')).toBe(true);
+    sent.length = 0;
+    await hook(inbound('wamid.RU4', '972501110031', { type: 'text', text: { body: 'Помогите! В лаборатории пожар' } }));
+    await new Promise((r) => setTimeout(r, 80));
+    expect(texts().join('\n')).toContain('немедленно звоните в «Маген Давид Адом» (скорая помощь) 101');
+  });
+
   it('two or three short options become reply buttons; when Meta refuses, or the setting is off, the numbered text is sent instead', async () => {
     await call('PUT', '/settings/bot', 'adm', { ...DEFAULT_BOT, enabled: true, items: [{ title: 'שעות', answer: 'a' }, { title: 'מיקום', answer: 'b' }], humanOption: false });
     sent.length = 0;

@@ -42,9 +42,9 @@
     var lg = c.design.language;
     if (lg === 'auto') {   // the same choice as inside the chat: Hebrew if the browser lists it, then Arabic, else English
       var ls = (navigator.languages && navigator.languages.length ? navigator.languages : [navigator.language || 'he']).map(function (l) { return String(l || '').toLowerCase().slice(0, 2); });
-      lg = ls.indexOf('he') >= 0 || ls.indexOf('iw') >= 0 ? 'he' : ls.indexOf('ar') >= 0 ? 'ar' : 'en';
+      lg = ls.indexOf('he') >= 0 || ls.indexOf('iw') >= 0 ? 'he' : ls.indexOf('ar') >= 0 ? 'ar' : ls.indexOf('ru') >= 0 || ls.indexOf('uk') >= 0 || ls.indexOf('be') >= 0 ? 'ru' : 'en';
     }
-    host.setAttribute('dir', lg === 'en' ? 'ltr' : 'rtl');
+    host.setAttribute('dir', lg === 'en' || lg === 'ru' ? 'ltr' : 'rtl');
     frameBox = el('div', {}, 'display:none;position:fixed;bottom:84px;' + side + ':16px;width:380px;max-width:calc(100vw - 24px);height:600px;max-height:calc(100vh - 100px);border-radius:16px;overflow:hidden;box-shadow:0 12px 40px rgba(0,0,0,.28);background:#fff;');
     frame = el('iframe', {
       src: origin + '/w/' + encodeURIComponent(key), title: c.design.title, allow: 'clipboard-write', referrerpolicy: 'strict-origin',
