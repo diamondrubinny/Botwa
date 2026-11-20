@@ -1,0 +1,257 @@
+import type { Config } from '../config.js';
+import { FlowError, flowIdIn } from '../channels/whatsapp-cloud.js';
+import type { Db } from '../db.js';
+import { FIRST_SCREEN, buildFlowJson, flowStartData, initialsOf, parseFlowReply } from './flowjson.js';
+import { byToken, createRequest, dateHe, deliverSignedCopy, event, getTemplate, sha256, submit, type CopyOut, type CopyStore, type StoredFlow, type TemplateRow } from './service.js';
+
+/**
+ * Forms filled inside WhatsApp (WhatsApp Flows, official channel, no endpoint). One published Flow per template version and
+ * channel; each request carries its own random token (flow_token) and prefilled values. The answers arrive in the chat as an
+ * nfm_reply message from the same number, are checked like the web form's, and become the same locked PDF with its record page.
+ */
+
+/** What the forms module needs from a running official channel (WhatsAppCloudAdapter). */
+export interface FlowApi {
+  flowCreate(name: string, json: unknown): Promise<{ id: string; errors: string[] }>;
+  flowGet(id: string): Promise<{ status: string; errors: string[]; previewUrl: string | null }>;
+  flowPublish(id: string): Promise<void>;
+  flowRetire(id: string, published: boolean): Promise<void>;
+  accountHealth?(): Promise<Record<string, string>>;
+}
+export interface FlowSender extends CopyOut {
+  sendFlow(channelId: string, ext: string, f: { flowId: string; token: string; body: string; cta: string; screen?: string; data?: Record<string, string> }): Promise<{ externalMessageId?: string }>;
+  sendText(channelId: string, ext: string, text: string, opts?: { background?: boolean }): Promise<{ externalMessageId?: string }>;
+}
+
+export class FlowProblem extends Error {
+  constructor(readonly key: string, readonly detail?: string) { super(key); }
+}
+
+/** The Flow JSON of the template as it is now, and its version (a change of fields or short labels needs a new Flow). */
+export function currentBuild(t: Pick<TemplateRow, 'title' | 'fields' | 'flowLabels'>) {
+  const b = buildFlowJson(t.title, t.fields, t.flowLabels);
+  return { ...b, version: sha256(JSON.stringify(b.json)).slice(0, 16) };
+}
+
+/** The template's Flow on a channel, with whether it matches the template as it is now. */
+export function flowState(t: TemplateRow, channelId: string): { flow: StoredFlow | null; upToDate: boolean; ready: boolean } {
+  const f = t.flows?.[channelId] ?? null;
+  const upToDate = !!f && f.version === currentBuild(t).version;
+  return { flow: f, upToDate, ready: upToDate && f!.status === 'PUBLISHED' };
+}
+
+async function saveFlow(db: Db, templateId: string, channelId: string, f: StoredFlow | null): Promise<void> {
+  await db.query(`UPDATE form_templates SET flows = CASE WHEN $3::jsonb IS NULL THEN flows - $2 ELSE jsonb_set(flows, ARRAY[$2], $3::jsonb) END WHERE id = $1`, [templateId, channelId, f ? JSON.stringify(f) : null]);
+}
+
+export type PublishResult = StoredFlow & { problem?: string; detail?: string; health?: Record<string, string> };
+
+/**
+ * Create the template's Flow on a channel as a draft (kept at once, so nothing is lost if publishing fails), then publish it.
+ * A retry of the same version publishes the same draft again instead of making a new one. A refusal (Meta's validation, its
+ * integrity checks on the account) comes back as `problem` with Meta's words, and for integrity what Meta says about the
+ * account. A previous draft is removed; a previous published Flow keeps serving requests already sent with it.
+ */
+export async function publishFlow(db: Db, api: FlowApi, templateId: string, channelId: string): Promise<PublishResult> {
+  const t = await getTemplate(db, templateId);
+  if (!t || !t.active) throw new FlowProblem('template_not_found');
+  if (!t.flowEnabled) throw new FlowProblem('flow_disabled');
+  const b = currentBuild(t);
+  if (b.problems.length) throw new FlowProblem(b.problems[0]!);
+  if (!Object.keys(b.names).length && !t.fields.some((f) => f.type === 'signature' || f.type === 'initials')) throw new FlowProblem('template_has_no_fields');
+  const prev = t.flows?.[channelId];
+  const now = () => new Date().toISOString();
+  const refused = async (draft: StoredFlow | null, e: FlowError): Promise<PublishResult> => {
+    const health = e.key === 'flow_integrity' ? await api.accountHealth?.().catch(() => ({})) : undefined;
+    const kept = draft ?? (flowIdIn(e.detail) ? { flowId: flowIdIn(e.detail)!, status: 'DRAFT', version: b.version, names: b.names, errors: [], previewUrl: null, at: now() } : null);
+    if (!kept) throw e;
+    const next: StoredFlow = { ...kept, status: 'DRAFT', errors: [e.detail ?? e.key], at: now() };
+    await saveFlow(db, t.id, channelId, next);
+    return { ...next, problem: e.key, ...(e.detail ? { detail: e.detail } : {}), ...(health && Object.keys(health).length ? { health } : {}) };
+  };
+  let draft: StoredFlow;
+  if (prev && prev.version === b.version && prev.status === 'DRAFT' && !prev.errors.some((x) => /validation|property|invalid/i.test(x))) {
+    draft = prev;   // the same version is already a draft at Meta: publish it again
+  } else {
+    let created: { id: string; errors: string[] };
+    try { created = await createUnique(api, t.title.slice(0, 120), b.json); } catch (e) {
+      if (e instanceof FlowError) return refused(null, e);
+      throw e;
+    }
+    draft = { flowId: created.id, status: 'DRAFT', version: b.version, names: b.names, errors: created.errors, previewUrl: null, at: now() };
+    await saveFlow(db, t.id, channelId, draft);
+    if (prev && prev.flowId !== draft.flowId && prev.status !== 'PUBLISHED') await api.flowRetire(prev.flowId, false);
+    if (created.errors.length) return { ...draft, problem: 'flow_validation' };
+  }
+  try { await api.flowPublish(draft.flowId); } catch (e) {
+    if (e instanceof FlowError) return refused(draft, e);
+    throw e;
+  }
+  const info = await api.flowGet(draft.flowId).catch(() => ({ status: 'PUBLISHED', errors: [] as string[], previewUrl: null }));
+  const f: StoredFlow = { ...draft, status: info.status, errors: info.errors, previewUrl: info.previewUrl, at: now() };
+  await saveFlow(db, t.id, channelId, f);
+  return f;
+}
+
+/**
+ * Meta: "Flow name should be unique within one WhatsApp business account". Every Flow gets the template's title and a short
+ * unique stamp; should the name still be taken (an old draft), it is tried once more with a new stamp.
+ */
+async function createUnique(api: FlowApi, base: string, json: unknown): Promise<{ id: string; errors: string[] }> {
+  const stamp = () => `${Date.now().toString(36)}${Math.floor(Math.random() * 1296).toString(36)}`;
+  try { return await api.flowCreate(`${base} (${stamp()})`, json); } catch (e) {
+    if (e instanceof FlowError && e.key === 'flow_name_taken') return api.flowCreate(`${base} (${stamp()}${stamp()})`, json);
+    throw e;
+  }
+}
+
+/** Publish a Flow JSON as a test and remove it again (retired if published, deleted if a draft). */
+async function trial(api: FlowApi, label: string, json: unknown): Promise<{ ok: true } | { ok: false; problem: string; detail?: string }> {
+  let id: string | null = null;
+  try {
+    const c = await createUnique(api, `Botwa check ${label}`, json);
+    id = c.id;
+    if (c.errors.length) { await api.flowRetire(id, false); return { ok: false, problem: 'flow_validation', detail: c.errors[0] }; }
+    await api.flowPublish(id);
+    await api.flowRetire(id, true);
+    return { ok: true };
+  } catch (e) {
+    if (!(e instanceof FlowError)) throw e;
+    if (id) await api.flowRetire(id, false);
+    return { ok: false, problem: e.key, ...(e.detail ? { detail: e.detail } : {}) };
+  }
+}
+
+const MINIMAL = { version: '7.3', screens: [{ id: 'SCREEN_A', title: 'בדיקה', terminal: true, success: true, data: {}, layout: { type: 'SingleColumnLayout', children: [
+  { type: 'TextBody', text: 'בדיקת מערכת. אין צורך לעשות דבר.' }, { type: 'Footer', label: 'סגירה', 'on-click-action': { name: 'complete', payload: {} } }] } }] };
+
+export interface Diagnosis {
+  /** account: even a Flow with nothing asked is refused; signature: only the signing statement and typed name; field: this field; content: the whole form only; none: everything passed */
+  verdict: 'account' | 'signature' | 'field' | 'content' | 'none' | 'other';
+  field?: { id: string; label: string; type: string };
+  problem?: string; detail?: string; health?: Record<string, string>; steps: { step: string; ok: boolean }[];
+}
+
+/**
+ * Find what Meta refuses, by publishing growing versions and stopping at the first refusal: a Flow with nothing asked (the
+ * account), the form's fields without the signing statement, then (when the fields are refused) halves of them down to one
+ * field, and finally the whole form. Every trial is removed again. Each step is one Flow at Meta, so this is rate limited.
+ */
+export async function diagnoseFlow(api: FlowApi, t?: TemplateRow | null): Promise<Diagnosis> {
+  const steps: Diagnosis['steps'] = [];
+  const health = async () => api.accountHealth?.().catch(() => undefined);
+  const first = await trial(api, 'minimal', MINIMAL);
+  steps.push({ step: 'minimal', ok: first.ok });
+  if (!first.ok) return { verdict: first.problem === 'flow_integrity' ? 'account' : 'other', problem: first.problem, detail: first.detail, health: await health(), steps };
+  if (!t) return { verdict: 'none', steps };
+  const inputs = t.fields.filter((f) => f.type !== 'signature' && f.type !== 'initials');
+  const build = (fields: typeof t.fields) => buildFlowJson(t.title, fields, t.flowLabels).json;
+  if (inputs.length) {
+    const fieldsOnly = await trial(api, 'fields', build(inputs));
+    steps.push({ step: 'fields', ok: fieldsOnly.ok });
+    if (!fieldsOnly.ok) {
+      if (fieldsOnly.problem !== 'flow_integrity') return { verdict: 'other', problem: fieldsOnly.problem, detail: fieldsOnly.detail, steps };
+      // halve until one field is left (assumes one field is the cause; at most ~log2(n) more trials)
+      let pool = inputs;
+      while (pool.length > 1) {
+        const half = pool.slice(0, Math.ceil(pool.length / 2));
+        const r = await trial(api, `part${half.length}`, build(half));
+        steps.push({ step: `part:${half.map((f) => f.id).join(',')}`, ok: r.ok });
+        pool = r.ok ? pool.slice(half.length) : half;
+      }
+      const f = pool[0]!;
+      return { verdict: 'field', field: { id: f.id, label: f.label, type: f.type }, problem: 'flow_integrity', steps };
+    }
+  }
+  const whole = await trial(api, 'full', currentBuild(t).json);
+  steps.push({ step: 'full', ok: whole.ok });
+  if (whole.ok) return { verdict: 'none', steps };
+  const signs = t.fields.some((f) => f.type === 'signature' || f.type === 'initials');
+  return { verdict: whole.problem !== 'flow_integrity' ? 'other' : signs ? 'signature' : 'content', problem: whole.problem, detail: whole.detail, steps };
+}
+
+/** Re-read the Flow's status from Meta (it can be blocked, throttled or deprecated there). */
+export async function refreshFlow(db: Db, api: FlowApi, t: TemplateRow, channelId: string): Promise<StoredFlow | null> {
+  const f = t.flows?.[channelId];
+  if (!f) return null;
+  const info = await api.flowGet(f.flowId);
+  const next = { ...f, status: info.status, errors: info.errors, previewUrl: info.previewUrl ?? f.previewUrl };
+  await saveFlow(db, t.id, channelId, next);
+  return next;
+}
+
+/** Send a form to fill inside WhatsApp from a conversation on the official channel. */
+export async function sendFlowRequest(db: Db, cfg: Config, out: FlowSender, a: { templateId: string; conversationId: string; userId: string | null; days: number; values?: Record<string, string>; note?: string }): Promise<{ id: string; number: number; messageId: string }> {
+  const t = await getTemplate(db, a.templateId);
+  if (!t || !t.active) throw new FlowProblem('template_not_found');
+  if (!t.flowEnabled) throw new FlowProblem('flow_disabled');
+  const ch = (await db.query(`SELECT c.channel_id, ch.type FROM conversations c JOIN channels ch ON ch.id = c.channel_id WHERE c.id = $1`, [a.conversationId])).rows[0] as { channel_id: string; type: string } | undefined;
+  if (!ch) throw new FlowProblem('not_found');
+  if (ch.type !== 'whatsapp_cloud') throw new FlowProblem('flow_needs_official_channel');
+  const st = flowState(t, ch.channel_id);
+  if (!st.flow) throw new FlowProblem('flow_not_published');
+  if (!st.upToDate) throw new FlowProblem('flow_outdated');
+  if (!st.ready) throw new FlowProblem('flow_not_published', st.flow.status);
+  const r = await createRequest(db, cfg, a);
+  await db.query(`UPDATE form_requests SET via = 'flow', flow_names = $2 WHERE id = $1`, [r.id, JSON.stringify(st.flow!.names)]);
+  const body = flowMessage(r.conv.display_name, r.title, r.expires, a.note);
+  let sent: { externalMessageId?: string };
+  try {
+    sent = await out.sendFlow(r.conv.channel_id, r.conv.external_id, { flowId: st.flow!.flowId, token: r.token, body, cta: 'מילוי הטופס', screen: FIRST_SCREEN, data: flowStartData(t.fields, st.flow!.names, r.prefill) });
+  } catch (e) {
+    await db.query('DELETE FROM form_requests WHERE id = $1', [r.id]);
+    throw e;
+  }
+  const m = await db.query(`INSERT INTO messages (conversation_id, direction, body, external_id, sender_user_id, auto) VALUES ($1,'out',$2,$3,$4,$4::uuid IS NULL) RETURNING id`, [r.conv.id, body, sent.externalMessageId ?? null, a.userId]);
+  await db.query(`UPDATE conversations SET last_message_at = now(), assigned_to = COALESCE(assigned_to, $2), bot_state = CASE WHEN $2::uuid IS NULL THEN bot_state ELSE 'human' END WHERE id = $1`, [r.conv.id, a.userId]);
+  await event(db, r.id, 'sent', `נשלח למילוי בתוך ווצאפ, בתוקף עד ${dateHe(r.expires)}`);
+  out.notifyMessage(r.conv.channel_id, r.conv.id, m.rows[0].id);
+  return { id: r.id, number: r.number, messageId: m.rows[0].id };
+}
+
+export function flowMessage(name: string | null, title: string, expires: Date, note?: string): string {
+  const hello = name && !/^\+?\d+$/.test(name) ? `שלום ${name},` : 'שלום,';
+  return [hello, `נא למלא ולחתום על "${title}" כאן בווצאפ, בלחיצה על הכפתור.`, `בתוקף עד ${dateHe(expires)}.`, note?.trim() ?? ''].filter(Boolean).join('\n');
+}
+
+/**
+ * A Flow reply arrived in a conversation. Checked: the token belongs to a Flow request of the same conversation, it is still
+ * open, the statement was confirmed and the name typed, and every value passes the same checks as the web form.
+ */
+export async function receiveFlowReply(db: Db, cfg: Config, out: FlowSender, store: CopyStore, a: { conversationId: string; channelId: string; externalContactId: string; messageId: string; responseJson: string; org: string }): Promise<'signed' | 'ignored' | 'invalid' | 'closed'> {
+  const say = async (text: string) => {
+    try {
+      const sent = await out.sendText(a.channelId, a.externalContactId, text, { background: true });
+      const m = await db.query(`INSERT INTO messages (conversation_id, direction, body, external_id, auto) VALUES ($1,'out',$2,$3,true) RETURNING id`, [a.conversationId, text, sent.externalMessageId ?? null]);
+      out.notifyMessage(a.channelId, a.conversationId, m.rows[0].id);
+    } catch { /* the team sees the note */ }
+  };
+  const note = (body: string) => db.query('INSERT INTO conversation_notes (conversation_id, body) VALUES ($1, $2)', [a.conversationId, body]).catch(() => undefined);
+  const pre = parseFlowReply(a.responseJson, {});
+  const r = pre?.token ? await byToken(db, pre.token) : null;
+  // only a Flow request sent to this very conversation: a token from elsewhere is ignored (and noted)
+  if (!r || r.via !== 'flow' || r.conversation_id !== a.conversationId || !r.flow_names) { await note('התקבלה תשובת טופס מווצאפ שאינה שייכת לבקשה פתוחה בשיחה הזו. היא לא נשמרה כחתימה.'); return 'ignored'; }
+  if (r.status === 'signed') { await say(`הטופס "${r.title}" כבר נחתם. אין צורך לשלוח שוב.`); return 'closed'; }
+  if (!['sent', 'opened', 'verified'].includes(r.status)) { await say(`הבקשה לחתימה על "${r.title}" כבר לא בתוקף. אפשר לבקש מאיתנו לשלוח אותה שוב.`); await event(db, r.id, 'flow_late'); return 'closed'; }
+  const reply = parseFlowReply(a.responseJson, r.flow_names)!;
+  const signs = r.fields.filter((f) => f.type === 'signature' || f.type === 'initials');
+  if (!reply.consent || (signs.length && (!reply.signer || reply.signer.length < 2))) {
+    await event(db, r.id, 'flow_invalid', 'missing consent or name');
+    await say('לא התקבל אישור ההצהרה או השם המלא לחתימה. אפשר לפתוח שוב את הטופס מההודעה הקודמת ולשלוח מחדש.');
+    return 'invalid';
+  }
+  const marks = Object.fromEntries(signs.map((f) => [f.id, { typed: f.type === 'initials' ? initialsOf(reply.signer!) : reply.signer! }]));
+  const identity = `מולא ונחתם בתוך ווצאפ, מהחשבון של השיחה שאליה נשלח (הודעה ${a.messageId.slice(0, 8)})`;
+  const res = await submit(db, cfg, { ...r, signer_name: reply.signer ?? r.signer_name, verified_at: new Date() }, { values: reply.values, marks, ip: null, ua: 'WhatsApp Flow', org: a.org, identity });
+  if (!res.ok) {
+    if (res.errors._ === 'already_signed') return 'closed';
+    const bad = Object.keys(res.errors).map((id) => r.fields.find((f) => f.id === id)?.label ?? id).slice(0, 6);
+    await event(db, r.id, 'flow_invalid', bad.join(', ').slice(0, 200));
+    await say(`חלק מהפרטים חסרים או לא תקינים (${bad.join(', ')}). אפשר לפתוח שוב את הטופס מההודעה הקודמת, לתקן ולשלוח.`);
+    return 'invalid';
+  }
+  await db.query(`UPDATE form_requests SET signer_name = COALESCE($2, signer_name) WHERE id = $1`, [r.id, reply.signer]);
+  await deliverSignedCopy(db, out, store, r, res.pdf);
+  await note(`✍️ הטופס "${r.title}" (בקשה ${r.number}) מולא ונחתם בתוך ווצאפ. אפשר להוריד אותו מ"טפסים" או מפרטי השיחה.`);
+  return 'signed';
+}

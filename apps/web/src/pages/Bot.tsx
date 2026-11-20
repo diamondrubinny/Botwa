@@ -1,0 +1,365 @@
+import { BotPersona } from '../components/BotPersona';
+import { Translations } from '../components/Translations';
+import { IncidentControl } from '../components/Incident';
+import { AnswerMode } from '../components/AnswerMode';
+import { AgentTranslationSetting } from '../components/Translation';
+import { Loading } from '../components/Loading';
+import { PageTitle } from '../components/Illustration';
+import { useEffect, useState, type FormEvent } from 'react';
+import { api, ApiError, can, personLabel, type Me } from '../api';
+import { usePoll } from '../hooks';
+
+interface BotCfg {
+  enabled: boolean; welcome: string; items: { title: string; answer: string; contact?: { name: string; phone: string; message: string }; route?: { userId: string; byArea?: boolean } }[]; humanOption: boolean; humanLabel: string;
+  humanKeywords: string[]; humanMessage: string; disclosure?: string; invalidMessage: string; invalidRetries: number; footer: string; preview?: string; mode?: 'menu' | 'flow';
+  kb: { enabled: boolean; minScore: number; maxChars: number; showSource: boolean; intro: string; answerMode?: 'quote' | 'local'; outro?: string };
+  reactions?: { enabled: boolean; ackAll?: boolean; working: string; done: string; noAnswer: string; handoff: string; greeting?: string; thanks?: string };
+  catchupHours?: number;
+  interactiveMenus?: boolean;
+  gifs?: { enabled: boolean; greeting: boolean; thanks: boolean; handoff: boolean; close: boolean; cooldownMinutes: number };
+  emergency?: { enabled: boolean; text: string; textEn?: string; textAr?: string; textRu?: string };
+  empathy?: { enabled: boolean };
+  escalation?: { enabled: boolean; minutes: number; backupUserId: string | null; sendPhoto?: boolean };
+  defaultOfficerUserId?: string | null;
+}
+const GIFS = { enabled: true, greeting: true, thanks: true, handoff: true, close: true, cooldownMinutes: 360 };
+
+const RX = { enabled: false, ackAll: false, working: '👀', done: '✅', noAnswer: '🤔', handoff: '🙋', greeting: '👋', thanks: '❤️' };
+const menuText = (b: BotCfg) =>
+  `${b.welcome}\n\n${[...b.items.map((it, i) => `${i + 1}. ${it.title}`), ...(b.humanOption ? [`0. ${b.humanLabel}`] : [])].join('\n')}`;
+
+export function Bot({ me }: { me: Me }) {
+  const canEdit = can(me, 'bot.manage');
+  const [b, setB] = useState<BotCfg | null>(null);
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const [people, setPeople] = useState<{ id: string; name: string; username?: string }[]>([]);
+  useEffect(() => { void api<{ id: string; name: string; username?: string }[]>('GET', '/settings/bot/assignees').then(setPeople).catch(() => undefined); }, []);
+  usePoll(async () => { if (!b) setB(await api<BotCfg>('GET', '/settings/bot').catch(() => null)); }, 60000);
+  if (!b) return <><h1 tabIndex={-1}>בוט</h1><Loading card lines={5} /></>;
+
+  const set = (patch: Partial<BotCfg>) => setB({ ...b, ...patch });
+  const esc = b.escalation ?? { enabled: true, minutes: 15, backupUserId: null };
+  const setItem = (i: number, patch: Partial<BotCfg['items'][number]>) => set({ items: b.items.map((it, k) => (k === i ? { ...it, ...patch } : it)) });
+  const move = (i: number, d: -1 | 1) => {
+    const j = i + d; if (j < 0 || j >= b.items.length) return;
+    const items = [...b.items]; [items[i], items[j]] = [items[j]!, items[i]!]; set({ items });
+  };
+
+  async function save(e: FormEvent) {
+    e.preventDefault();
+    setMsg(null);
+    const { preview: _p, ...payload } = b!;
+    try {
+      setB(await api<BotCfg>('PUT', '/settings/bot', payload));
+      setMsg({ ok: true, text: 'הבוט נשמר.' });
+    } catch (er) {
+      setMsg({ ok: false, text: er instanceof ApiError && er.code === 'bad_request' ? 'הנתונים אינם תקינים (בדקו שכל כותרת ותשובה מלאות, עד 9 פריטים).' : 'השמירה נכשלה.' });
+    }
+  }
+
+  return (
+    <>
+      <PageTitle art="welcome" title="בוט תפריט" />
+      {!canEdit && <p className="banner" role="note">צפייה בלבד. רק מנהל יכול לשנות את הבוט.</p>}
+      <BotPersona canEdit={can(me, 'settings.manage')} />
+      <form className="card" onSubmit={save}>
+        <p className="hint">הלקוח מקבל תפריט ממוספר ועונה במספר. אם אין התאמה, או שהוא מבקש נציג, השיחה עוברת לנציג (עם הודעה פנימית, שיוך אוטומטי אם הוגדר ניתוב, ו"מחוץ לשעות" אם הוגדרו שעות פעילות). אין שימוש בשירותי AI חיצוניים.</p>
+        <fieldset disabled={!canEdit} style={{ border: 0, padding: 0, margin: 0 }}>
+          <div className="field">
+            <label><input type="checkbox" role="switch" style={{ width: 'auto', minHeight: 0, marginInlineEnd: '.5rem' }} checked={b.enabled} onChange={(e) => set({ enabled: e.target.checked })} />הפעלת הבוט</label>
+          </div>
+          <div className="field">
+            <label htmlFor="b-welcome">הודעת פתיחה (מעל התפריט)</label>
+            <textarea id="b-welcome" rows={2} maxLength={1000} required aria-describedby="b-welcome-vars" value={b.welcome} onChange={(e) => set({ welcome: e.target.value })} />
+            <p id="b-welcome-vars" className="hint">אפשר לכתוב <code>{'{בוט}'}</code> (שם הבוט, למשל בטי) ו־<code>{'{שם פרטי}'}</code> (השם הפרטי של לקוח מוכר; ללקוח חדש המילה פשוט נשמטת), ו־<code>{'{ברכה}'}</code> (בוקר טוב, צהריים טובים, ערב טוב או לילה טוב, לפי השעה באזור הזמן של שעות הפעילות).</p>
+          </div>
+
+          <h2>פריטי התפריט (עד 9)</h2>
+          {b.items.map((it, i) => (
+            <fieldset key={i} className="card" style={{ marginBottom: '.75rem' }}>
+              <legend>פריט {i + 1}</legend>
+              <div className="field">
+                <label htmlFor={`bt${i}`}>כותרת (מוצגת בתפריט)</label>
+                <input id={`bt${i}`} required maxLength={60} value={it.title} onChange={(e) => setItem(i, { title: e.target.value })} />
+              </div>
+              <div className="field">
+                <label htmlFor={`ba${i}`}>תשובה</label>
+                <textarea id={`ba${i}`} required rows={3} maxLength={1500} value={it.answer} onChange={(e) => setItem(i, { answer: e.target.value })} />
+              </div>
+              <div className="field">
+                <label><input type="checkbox" style={{ width: 'auto', minHeight: 'auto' }} checked={!!it.route} onChange={(e) => setItem(i, { route: e.target.checked ? { userId: people[0]?.id ?? '' } : undefined })} disabled={people.length === 0} /> העברת השיחה לנציג מסוים שאחראי על הנושא (השיחה נשארת במערכת)</label>
+                {it.route && (
+                  <div className="card" style={{ marginTop: '.5rem' }}>
+                    <label htmlFor={`brt${i}`}>הנציג האחראי</label>
+                    <select id={`brt${i}`} required value={it.route.userId} onChange={(e) => setItem(i, { route: { ...it.route!, userId: e.target.value } })}>
+                      {people.map((u) => <option key={u.id} value={u.id}>{personLabel(u)}</option>)}
+                    </select>
+                    <label><input type="checkbox" style={{ width: 'auto', minHeight: 'auto' }} checked={!!it.route.byArea} onChange={(e) => setItem(i, { route: { ...it.route!, byArea: e.target.checked || undefined } })} /> לשאול את הלקוח באיזה בניין או מקום מדובר, ולהעביר לנציג שאחראי על המקום</label>
+                    <p className="hint">האחראי על כל מקום מוגדר ב<a href="#/safety">לוח בטיחות ← אזורי אחריות</a> (ידנית או בייבוא אקסל). אם המקום לא מזוהה, הנציג שנבחר כאן מקבל את השיחה.</p>
+                    <p className="hint">אחרי התשובה הלקוח מועבר לנציג הזה, והבוט שותק. אם הנציג מושבת, תופעל ההקצאה הרגילה. אפשר לשלב עם הפניה לווצאפ אישי (למטה), ואז הלקוח מקבל גם קישור וגם נציג במערכת.</p>
+                  </div>
+                )}
+              </div>
+              <div className="field">
+                <label><input type="checkbox" style={{ width: 'auto', minHeight: 'auto' }} checked={!!it.contact} onChange={(e) => setItem(i, { contact: e.target.checked ? { name: '', phone: '', message: '' } : undefined })} /> הפניה לווצאפ אישי של איש מקצוע (למשל ממונה בטיחות לתחום זה)</label>
+                {it.contact && (
+                  <div className="card" style={{ marginTop: '.5rem' }}>
+                    <div className="field"><label htmlFor={`bcn${i}`}>שם ותפקיד (יוצג ללקוח)</label><input id={`bcn${i}`} required maxLength={60} value={it.contact.name} onChange={(e) => setItem(i, { contact: { ...it.contact!, name: e.target.value } })} placeholder="דני כהן, ממונה בטיחות בעבודה בגובה" /></div>
+                    <div className="field"><label htmlFor={`bcp${i}`}>מספר ווצאפ</label><input id={`bcp${i}`} required dir="ltr" inputMode="tel" pattern="\+?[\d\s\-]{8,18}" value={it.contact.phone} onChange={(e) => setItem(i, { contact: { ...it.contact!, phone: e.target.value } })} placeholder="0501234567" /></div>
+                    <div className="field"><label htmlFor={`bcm${i}`}>הודעה שתוכתב מראש ללקוח (אופציונלי)</label><input id={`bcm${i}`} maxLength={200} value={it.contact.message} onChange={(e) => setItem(i, { contact: { ...it.contact!, message: e.target.value } })} placeholder="שלום, אני פונה בנושא בטיחות בגובה" /></div>
+                    <p className="hint">הלקוח יקבל קישור שפותח צ'אט ווצאפ ישירות עם האדם. המספר יוצג ללקוחות, ולכן יש לקבל את הסכמת האדם לכך. השיחה הנוכחית נשארת בבוט ולא תועבר לנציג.</p>
+                  </div>
+                )}
+              </div>
+              <div className="row">
+                <button type="button" onClick={() => move(i, -1)} disabled={i === 0}>הזזה למעלה<span className="sr-only"> פריט {i + 1}</span></button>
+                <button type="button" onClick={() => move(i, 1)} disabled={i === b.items.length - 1}>הזזה למטה<span className="sr-only"> פריט {i + 1}</span></button>
+                <button type="button" className="danger" onClick={() => set({ items: b.items.filter((_, k) => k !== i) })}>מחיקה<span className="sr-only"> פריט {i + 1}</span></button>
+              </div>
+            </fieldset>
+          ))}
+          {b.items.length < 9 && <button type="button" onClick={() => set({ items: [...b.items, { title: '', answer: '' }] })}>הוספת פריט</button>}
+          {b.items.some((it) => it.route) && (
+            <table style={{ marginTop: '.75rem' }}>
+              <caption>מי מטפל בכל נושא</caption>
+              <thead><tr><th scope="col">נושא</th><th scope="col">נציג</th><th scope="col">לפי מקום</th></tr></thead>
+              <tbody>{b.items.filter((it) => it.route).map((it, k) => <tr key={k}><th scope="row">{it.title || '(ללא כותרת)'}</th><td>{people.find((u) => u.id === it.route!.userId)?.name ?? 'לא נבחר'}</td><td>{it.route!.byArea ? 'כן' : 'לא'}</td></tr>)}</tbody>
+            </table>
+          )}
+
+          <h2 style={{ marginTop: '1.25rem' }}>מעבר לנציג</h2>
+          <div className="field">
+            <label><input type="checkbox" style={{ width: 'auto', minHeight: 0, marginInlineEnd: '.5rem' }} checked={b.humanOption} onChange={(e) => set({ humanOption: e.target.checked })} />להציג בתפריט את האפשרות "0" לנציג אנושי</label>
+          </div>
+          <div className="field">
+            <label htmlFor="b-hl">שם האפשרות "0"</label>
+            <input id="b-hl" required maxLength={40} value={b.humanLabel} onChange={(e) => set({ humanLabel: e.target.value })} />
+          </div>
+          <div className="field">
+            <label htmlFor="b-kw">מילים שמעבירות לנציג (מופרדות בפסיק)</label>
+            <input id="b-kw" value={b.humanKeywords.join(', ')} aria-describedby="b-kw-h"
+              onChange={(e) => set({ humanKeywords: e.target.value.split(',').map((x) => x.trim()).filter(Boolean).slice(0, 10) })} />
+            <p id="b-kw-h" className="hint">הודעה שמכילה אחת מהמילים (באותיות כלשהן) מעבירה לנציג, למשל "נציג, agent, human".</p>
+          </div>
+          <div className="field">
+            <label htmlFor="b-hm">הודעה ללקוח בעת המעבר לנציג</label>
+            <textarea id="b-hm" required rows={2} maxLength={500} value={b.humanMessage} onChange={(e) => set({ humanMessage: e.target.value })} />
+          </div>
+          <div className="field">
+            <label htmlFor="b-disc">הצהרה שזה בוט (נאמרת פעם אחת, בהודעה הראשונה של הבוט בכל שיחה)</label>
+            <textarea id="b-disc" rows={2} maxLength={400} aria-describedby="b-disc-h" value={b.disclosure ?? ''} onChange={(e) => set({ disclosure: e.target.value })} />
+            <p id="b-disc-h" className="hint">שקיפות כלפי הלקוח: הלקוח יודע שהוא מדבר עם בוט ולא עם נציג אנושי, ואיך מגיעים לאיש צוות. מומלץ להשאיר. שדה ריק מבטל את ההצהרה.</p>
+          </div>
+          <div className="field">
+            <label htmlFor="b-im">הודעה כשלא הובנה הבחירה</label>
+            <input id="b-im" required maxLength={300} value={b.invalidMessage} onChange={(e) => set({ invalidMessage: e.target.value })} />
+          </div>
+          <div className="field">
+            <label htmlFor="b-ir">כמה פעמים להציג שוב את התפריט לפני מעבר לנציג</label>
+            <select id="b-ir" value={b.invalidRetries} onChange={(e) => set({ invalidRetries: Number(e.target.value) })}>
+              <option value={0}>0 – מעבר מיידי לנציג</option>
+              <option value={1}>1</option>
+              <option value={2}>2</option>
+              <option value={3}>3</option>
+            </select>
+          </div>
+          <div className="field">
+            <label htmlFor="b-ft">שורת תחתית אחרי כל תשובה (אופציונלי)</label>
+            <input id="b-ft" maxLength={300} value={b.footer} onChange={(e) => set({ footer: e.target.value })} />
+          </div>
+        </fieldset>
+
+        <p className="card">מצב הבוט כעת: <strong>{b.mode === 'flow' ? 'תרשים זרימה' : 'תפריט ממוספר (העמוד הזה)'}</strong>. לבניית שיחה מתקדמת עם שאלות, תנאים והפניות: <a href="#/flow">תרשים זרימה</a>.</p>
+
+        <fieldset disabled={!canEdit}>
+          <legend>תפריט ככפתורים (ווצאפ רשמי)</legend>
+          <div className="field"><label><input type="checkbox" style={{ width: 'auto', minHeight: 'auto' }} checked={b.interactiveMenus !== false} onChange={(e) => set({ interactiveMenus: e.target.checked })} /> בערוץ הרשמי, לשלוח את התפריט ככפתורים או כרשימה לבחירה</label>
+            <p className="hint">עד שלוש אפשרויות קצרות (עד 20 תווים) נשלחות ככפתורים, עד עשר כרשימה, ותפריט ארוך מזה נשלח כטקסט ממוספר. לחיצה של הלקוח נקראת כמו מספר שהקליד. אם Meta דוחה את ההודעה, נשלח הטקסט הממוספר. בערוצים האחרים התפריט נשאר טקסט ממוספר. מגבלות והפורמט אצל Meta צריכים אימות מול התיעוד הרשמי.</p></div>
+        </fieldset>
+
+        <fieldset disabled={!canEdit}>
+          <legend>תשובה אחרי ניתוק החיבור</legend>
+          <p className="hint">אם הערוץ (למשל הטלפון) איבד תקשורת ובזמן הזה הבוט לא הצליח לענות, ההודעה של הלקוח נשמרת, והבוט עונה לה ברגע שהחיבור חוזר (בדרך כלל תוך כמה שניות, ובדיקה גם בכל דקה). אם הלקוח כתב כמה הודעות, הבוט עונה לאחרונה. אחרי חמישה ניסיונות או אחרי מספר השעות שמוגדר כאן הוא מפסיק ומשאיר הערה פנימית כדי שנציג יטפל בשיחה.</p>
+          <div className="field">
+            <label htmlFor="b-cu">להמשיך לענות עד כמה שעות אחרי ההודעה (0 = לא לענות אחרי ניתוק)</label>
+            <input id="b-cu" type="number" min={0} max={72} style={{ maxWidth: 120 }} value={b.catchupHours ?? 12} onChange={(e) => set({ catchupHours: Math.min(72, Math.max(0, Math.round(Number(e.target.value) || 0))) })} />
+          </div>
+        </fieldset>
+
+        <fieldset disabled={!canEdit}>
+          <legend>תגובות אוטומטיות (אימוג׳י על הודעת הלקוח)</legend>
+          <p className="hint">הבוט מגיב באימוג׳י על ההודעה של הלקוח לפי מה שהוא עושה: כשהלקוח שואל והבוט מחפש במאגר הידע, מופיע "עיניים" על ההודעה, ואחרי שהתשובה נשלחה האימוג׳י מוחלף בסימון הצלחה (או "לא מצאתי"). כשהבוט מעביר לנציג יופיע אימוג׳י העברה. אימוג׳י ריק = בלי תגובה לאירוע הזה, ואם כבר הוצגה "עיניים" היא תוסר.</p>
+          <div className="field"><label><input type="checkbox" role="switch" style={{ width: 'auto', minHeight: 'auto' }} checked={!!b.reactions?.enabled} onChange={(e) => set({ reactions: { ...(b.reactions ?? RX), enabled: e.target.checked } })} /> להפעיל תגובות אוטומטיות</label></div>
+          {b.reactions?.enabled && (
+            <div className="field"><label><input type="checkbox" style={{ width: 'auto', minHeight: 'auto' }} checked={!!b.reactions.ackAll} onChange={(e) => set({ reactions: { ...b.reactions!, ackAll: e.target.checked } })} /> להגיב על כל הודעה (עיניים מיד עם הקבלה, ואחרי המענה סימון סיום), גם כשלא מתבצע חיפוש</label>
+              <p className="hint">בלי הסימון, העיניים מופיעות רק כשהבוט מחפש במאגר הידע בעקבות שאלה חופשית. בתפריט ממוספר ובתרשים בלי צומת מאגר ידע אין חיפוש, ולכן בלי הסימון לא תהיה תגובה על רוב ההודעות.</p></div>
+          )}
+          {b.reactions?.enabled && (
+            <div className="row">
+              {([['working', 'בזמן חיפוש'], ['done', 'נמצאה תשובה'], ['noAnswer', 'לא נמצאה תשובה'], ['handoff', 'העברה לנציג'], ['greeting', 'ברכה (שלום, היי)']] as const).map(([k, label]) => (
+                <div className="field" key={k}><label htmlFor={`rx-${k}`}>{label}</label>
+                  <input id={`rx-${k}`} style={{ width: 90, fontSize: '1.4rem', textAlign: 'center' }} maxLength={12} value={b.reactions![k] ?? ''} onChange={(e) => set({ reactions: { ...b.reactions!, [k]: e.target.value.trim() } })} aria-describedby="rx-hint" /></div>
+              ))}
+            </div>
+          )}
+          <div className="field">
+            <span id="rx-thanks-l" className="label-like">לב על תודה ומחמאה (גם כשנציג מטפל בשיחה)</span>
+            <p className="hint" id="rx-thanks-h">כשהלקוח כותב "תודה", "תודה רבה", "אתם אחלה", "אחלה שירות" או "אין עליכם", ההודעה שלו מקבלת את הרגשון שבחרתם. הודעה עם שאלה, בקשה או תלונה ("תודה, אבל זה לא עובד") לא מקבלת לב. נציגים יכולים גם לבחור רגשון בעצמם על כל הודעה של לקוח, ישירות מהשיחה.</p>
+            <div className="rx-quick" role="group" aria-labelledby="rx-thanks-l" aria-describedby="rx-thanks-h">
+              {['❤️', '🙏', '😊', '👍', '🥰', ''].map((e) => (
+                <button type="button" key={e || 'none'} aria-pressed={(b.reactions?.thanks ?? '❤️') === e} aria-label={e || 'בלי תגובה'}
+                  onClick={() => set({ reactions: { ...(b.reactions ?? RX), thanks: e } })}>{e ? <span aria-hidden="true">{e}</span> : <span className="small">בלי</span>}</button>
+              ))}
+            </div>
+          </div>
+          <ReactionDiagnostics />
+          <p id="rx-hint" className="hint">אימוג׳י אחד בכל שדה. עובד בווצאפ (QR ורשמי) ובטלגרם (טלגרם מאפשר רק קבוצה קבועה של אימוג׳י, למשל 👀 👍 🤔 🙏; אחרים לא יוצגו). בצ׳אט באתר מוצגים רק הלב על תודה ורגשונים שנציג בחר. התגובות נשלחות רק בתגובה להודעה שהלקוח כתב, עד 30 בדקה לערוץ, ולכן הן לא מגדילות סיכון לחסימה כמו הודעות יזומות.</p>
+        </fieldset>
+
+        <fieldset disabled={!canEdit}>
+          <legend>מצב חירום</legend>
+          <p className="hint" id="em-h">הודעה שנראית כמו מצב חירום (חירום, הצילו, שריפה, עשן, דליפת גז או חומר, פיצוץ, פצוע, לא נושם, התחשמלות, אמבולנס…) מקבלת מיד את ההודעה הזו, לפני כל דבר אחר: בלי ברכה, תפריט או GIF. השיחה מסומנת "דחוף" ועוברת לנציג (גם מחוץ לשעות הפעילות), ונשלחת התראה למנהלים. שאלות על נהלים וציוד ("איפה יציאות החירום?", "גלאי עשן") לא נחשבות חירום.</p>
+          <div className="field"><label><input type="checkbox" role="switch" style={{ width: 'auto', minHeight: 'auto' }} aria-describedby="em-h" checked={b.emergency?.enabled ?? true} onChange={(e) => set({ emergency: { text: b.emergency?.text ?? '', textEn: b.emergency?.textEn ?? '', textAr: b.emergency?.textAr ?? '', textRu: b.emergency?.textRu ?? '', enabled: e.target.checked } })} /> טיפול אוטומטי במצב חירום</label></div>
+          <div className="field">
+            <label htmlFor="em-t">ההודעה ללקוח (כדאי להוסיף את מספר מוקד הביטחון של המוסד)</label>
+            <textarea id="em-t" rows={4} maxLength={800} value={b.emergency?.text ?? ''} onChange={(e) => set({ emergency: { enabled: b.emergency?.enabled ?? true, text: e.target.value, textEn: b.emergency?.textEn ?? '', textAr: b.emergency?.textAr ?? '', textRu: b.emergency?.textRu ?? '' } })} />
+          </div>
+          <div className="field">
+            <label htmlFor="em-en">ההודעה באנגלית (ללקוחות שכותבים באנגלית)</label>
+            <textarea id="em-en" dir="ltr" lang="en" rows={3} maxLength={800} aria-describedby="em-en-h" value={b.emergency?.textEn ?? ''} placeholder="🚨 If there is danger to life… call the Technion emergency centre …, Magen David Adom 101, Fire and Rescue 102 or the Police 100…" onChange={(e) => set({ emergency: { enabled: b.emergency?.enabled ?? true, text: b.emergency?.text ?? '', textEn: e.target.value, textAr: b.emergency?.textAr ?? '', textRu: b.emergency?.textRu ?? '' } })} />
+            <p className="hint" id="em-en-h">אם שיניתם את ההודעה בעברית (למשל הוספתם את מספר מוקד הביטחון), כתבו כאן את אותה הודעה באנגלית. אם השדה ריק, נשלח התרגום המובנה של ההודעה המקורית.</p>
+          </div>
+          <div className="field">
+            <label htmlFor="em-ar">ההודעה בערבית (ללקוחות שכותבים בערבית)</label>
+            <textarea id="em-ar" dir="rtl" lang="ar" rows={3} maxLength={800} aria-describedby="em-ar-h" value={b.emergency?.textAr ?? ''} placeholder="🚨 إذا كان هناك خطر على الحياة… اتصلوا بمركز الطوارئ في التخنيون …، نجمة داود الحمراء 101، الإطفاء 102 أو الشرطة 100…" onChange={(e) => set({ emergency: { enabled: b.emergency?.enabled ?? true, text: b.emergency?.text ?? '', textEn: b.emergency?.textEn ?? '', textAr: e.target.value, textRu: b.emergency?.textRu ?? '' } })} />
+            <p className="hint" id="em-ar-h">אם שיניתם את ההודעה בעברית (למשל הוספתם את מספר מוקד הביטחון), כתבו כאן את אותה הודעה בערבית. אם השדה ריק, נשלח התרגום המובנה של ההודעה המקורית (טיוטה, לבדיקה של דובר/ת ערבית).</p>
+          </div>
+          <div className="field">
+            <label htmlFor="em-ru">ההודעה ברוסית (ללקוחות שכותבים ברוסית)</label>
+            <textarea id="em-ru" dir="ltr" lang="ru" rows={3} maxLength={800} aria-describedby="em-ru-h" value={b.emergency?.textRu ?? ''} placeholder="🚨 Если есть угроза жизни… звоните в центр экстренной помощи Техниона …, «Маген Давид Адом» 101, пожарные 102 или полиция 100…" onChange={(e) => set({ emergency: { enabled: b.emergency?.enabled ?? true, text: b.emergency?.text ?? '', textEn: b.emergency?.textEn ?? '', textAr: b.emergency?.textAr ?? '', textRu: e.target.value } })} />
+            <p className="hint" id="em-ru-h">אם שיניתם את ההודעה בעברית (למשל הוספתם את מספר מוקד הביטחון), כתבו כאן את אותה הודעה ברוסית. אם השדה ריק, נשלח התרגום המובנה של ההודעה המקורית (טיוטה, לבדיקה של דובר/ת רוסית).</p>
+          </div>
+          <h3 id="resp-h">ממונה אחראי בהעברה לאדם</h3>
+          <p className="hint" id="resp-d">כשבטי מעבירה שיחה לאדם, היא תמיד משייכת אותה לממונה בטיחות אחראי ולא לנציג לא משויך: קודם לממונה הנושא (לפי ההודעה או נושא הפנייה), אחר כך לממונה האזור או הבניין שהלקוח ציין, אחר כך לממונה שנבחר כאן, אחר כך לממונה החלופי שלמטה, ולבסוף לממונה בטיחות כלשהו שיש לו חשבון, הפחות עמוס. נוספת הערה בשיחה שמסבירה למה הפנייה שויכה אליו.</p>
+          <div className="field"><label htmlFor="resp-u">ממונה בטיחות אחראי (ברירת מחדל, למשל ראש יחידת הבטיחות)</label>
+            <select id="resp-u" aria-describedby="resp-d" value={b.defaultOfficerUserId ?? ''} onChange={(e) => set({ defaultOfficerUserId: e.target.value || null })}>
+              <option value="">לא נבחר (הממונה החלופי, ואחריו ממונה זמין)</option>
+              {people.map((u) => <option key={u.id} value={u.id}>{personLabel(u)}</option>)}
+            </select>
+          </div>
+          <h3 id="esc-h">הסלמה אוטומטית</h3>
+          <p className="hint" id="esc-d">פנייה דחופה (מצב חירום או דיווח מפגע) שאף אדם מהצוות לא כתב בה עוברת אחרי הזמן שנקבע לממונה החלופי. אם לא נבחר ממונה חלופי, או שהוא כבר המטפל, היא עוברת למנהל זמין עם הכי מעט שיחות פתוחות. הנמען מקבל התראה, וגם הודעה בווצאפ אם קישר אותו לבטי. נוספת הערה בשיחה. ההסלמה פועלת גם מחוץ לשעות הפעילות.</p>
+          <div className="field"><label><input type="checkbox" role="switch" style={{ width: 'auto', minHeight: 'auto' }} aria-describedby="esc-d" checked={esc.enabled} onChange={(e) => set({ escalation: { ...esc, enabled: e.target.checked } })} /> הסלמה כשאין מענה אנושי</label></div>
+          <div className="field"><label htmlFor="esc-m">אחרי כמה דקות בלי מענה</label><input id="esc-m" type="number" min={3} max={240} value={esc.minutes} disabled={!esc.enabled} onChange={(e) => set({ escalation: { ...esc, minutes: Math.max(3, Math.min(240, Number(e.target.value) || 15)) } })} /></div>
+          <div className="field"><label htmlFor="esc-u">ממונה חלופי</label>
+            <select id="esc-u" value={esc.backupUserId ?? ''} disabled={!esc.enabled} onChange={(e) => set({ escalation: { ...esc, backupUserId: e.target.value || null } })}>
+              <option value="">מנהל זמין (אוטומטי)</option>
+              {people.map((u) => <option key={u.id} value={u.id}>{personLabel(u)}</option>)}
+            </select>
+          </div>
+          <div className="field"><label><input type="checkbox" role="switch" style={{ width: 'auto', minHeight: 'auto' }} aria-describedby="esc-ph-h" checked={!!esc.sendPhoto} disabled={!esc.enabled} onChange={(e) => set({ escalation: { ...esc, sendPhoto: e.target.checked } })} /> לשלוח גם את תמונת המפגע לווצאפ של מי שמקבל את ההסלמה</label>
+            <p className="hint" id="esc-ph-h">רק אם הוא קישר ווצאפ לבטי. נשלחת התמונה האחרונה שהמדווח צירף ב-24 השעות האחרונות, ורק אם סריקת האנטי-וירוס מצאה אותה נקייה. פרטיות: התמונה יוצאת לטלפון של איש הצוות ועלולה להופיע בה אדם. לכן זה כבוי כברירת מחדל, ומומלץ להפעיל רק אחרי בדיקה עם ממונה הפרטיות. כל שליחה נרשמת בשיחה וביומן הפעולות.</p></div>
+        </fieldset>
+
+        <fieldset disabled={!canEdit}>
+          <legend id="emp-l">ליווי אמפתי במצבי לחץ</legend>
+          <p className="hint" id="emp-h">לקוח שכותב שהוא לחוץ, מפחד או לא יודע מה לעשות, או מתוסכל מההמתנה ("כבר שעה מחכה", "אף אחד לא עונה"), מקבל תשובה שמכירה ברגש ואומרת מי מטפל בפנייה. השיחה עוברת מיד לאדם: לממונה על הנושא אם זוהה נושא ולממונה יש חשבון, ואחרת לפי הניתוב. היא מקבלת תגית "זקוק לליווי", ונשלחת התראה לצוות. עד שמישהו מהצוות עונה, בטי שולחת עדכוני ליווי אחרי 5, 15 ו-30 דקות, ואחרי 15 דקות נשלחת התראה נוספת. מחוץ לשעות הפעילות נשלח עדכון אחד בלבד. כשאדם כותב בשיחה, הליווי נעצר.</p>
+          <div className="field"><label><input type="checkbox" role="switch" style={{ width: 'auto', minHeight: 'auto' }} aria-describedby="emp-h" checked={b.empathy?.enabled ?? true} onChange={(e) => set({ empathy: { enabled: e.target.checked } })} /> ליווי אמפתי עד מענה של אדם</label></div>
+        </fieldset>
+
+        <fieldset disabled={!canEdit}>
+          <legend>GIF מהבוט ברגעים נעימים</legend>
+          <p className="hint" id="gif-h">הבוט מוסיף GIF מתאים מ<a href="#/canned">גלריית ה-GIF</a> (בעמוד התשובות המוכנות) לפי אופי השיחה: ברכה בתחילת פנייה, "שמחנו לעזור" על תודה, "נציג בדרך" כשהשיחה עוברת לאדם, ו"יום נעים" כשהלקוח סוגר את הפנייה. במתינות: GIF אחד לכל היותר בכל פרק הזמן שנבחר, <strong>אף פעם</strong> לא כשהשיחה עוסקת בתאונה, פגיעה, שריפה, דליפה או חירום, ולא ללקוח חסום או שביקש להפסיק לקבל הודעות. GIF שמסמנים במילות המפתח שלו "לא לבוט" לא יישלח מהבוט, ואפשר להוסיף GIF משלכם לרגע מסוים עם מילה כמו "ברוכים הבאים", "שמחנו לעזור", "נציג בדרך" או "יום נעים".</p>
+          <div className="field"><label><input type="checkbox" role="switch" style={{ width: 'auto', minHeight: 'auto' }} aria-describedby="gif-h" checked={(b.gifs ?? GIFS).enabled} onChange={(e) => set({ gifs: { ...(b.gifs ?? GIFS), enabled: e.target.checked } })} /> לשלוח GIF מהבוט</label></div>
+          {(b.gifs ?? GIFS).enabled && (
+            <>
+              <div className="row" role="group" aria-label="באילו רגעים">
+                {([['greeting', 'ברכה בתחילת פנייה'], ['thanks', 'תודה ומחמאה'], ['handoff', 'העברה לנציג'], ['close', 'הלקוח סגר את הפנייה']] as const).map(([k, label]) => (
+                  <label key={k} style={{ display: 'inline-flex', gap: '.35rem', alignItems: 'center' }}><input type="checkbox" style={{ width: 'auto', minHeight: 'auto' }} checked={(b.gifs ?? GIFS)[k]} onChange={(e) => set({ gifs: { ...(b.gifs ?? GIFS), [k]: e.target.checked } })} /> {label}</label>
+                ))}
+              </div>
+              <div className="field">
+                <label htmlFor="gif-cd">לכל היותר GIF אחד בשיחה בכל</label>
+                <select id="gif-cd" style={{ maxWidth: 220 }} value={(b.gifs ?? GIFS).cooldownMinutes} onChange={(e) => set({ gifs: { ...(b.gifs ?? GIFS), cooldownMinutes: Number(e.target.value) } })}>
+                  {[[60, 'שעה'], [180, '3 שעות'], [360, '6 שעות'], [720, '12 שעות'], [1440, 'יום'], [10080, 'שבוע']].map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+                </select>
+              </div>
+              <p className="hint">בווצאפ הרשמי נשלחים רק GIF שיש להם עותק וידאו (נוצר אוטומטית כשבשרת מותקן ffmpeg). כל GIF נשמר בשיחה כמו קובץ שנשלח.</p>
+            </>
+          )}
+        </fieldset>
+
+        <fieldset className="card" disabled={!canEdit}>
+          <legend>מענה ממאגר הידע</legend>
+          <p className="hint">הבוט עונה <strong>רק</strong> מתוך מה שיש ב<a href="#/kb">מאגר הידע</a>: מסמכים, חקיקה, תקנים, קישורים ושאלות ותשובות. כשאין התאמה בטוחה, הבוט לא מנחש: הוא ממשיך כרגיל (תפריט, ואז העברה לנציג). שום מידע לא נשלח לשירות חיצוני.</p>
+          <div className="field">
+            <label><input type="checkbox" role="switch" style={{ width: 'auto', minHeight: 'auto' }} checked={b.kb.enabled} onChange={(e) => set({ kb: { ...b.kb, enabled: e.target.checked } })} /> לאפשר מענה ממאגר הידע</label>
+          </div>
+          <div className="field">
+            <label htmlFor="b-kms">רמת ביטחון מינימלית ({Math.round(b.kb.minScore * 100)}%)</label>
+            <input id="b-kms" type="range" min={0.3} max={1} step={0.05} value={b.kb.minScore} onChange={(e) => set({ kb: { ...b.kb, minScore: Number(e.target.value) } })} />
+            <p className="hint">גבוה יותר = פחות תשובות אבל בטוחות יותר. מומלץ 60% ומעלה. אפשר לבדוק ב"בדיקת חיפוש" במאגר.</p>
+          </div>
+          <div className="field">
+            <label htmlFor="b-kin">פתיח לפני התשובה</label>
+            <input id="b-kin" maxLength={120} value={b.kb.intro} onChange={(e) => set({ kb: { ...b.kb, intro: e.target.value } })} />
+          </div>
+          <div className="field">
+            <label htmlFor="b-kmc">אורך תשובה מרבי (תווים)</label>
+            <input id="b-kmc" type="number" min={200} max={1500} step={50} value={b.kb.maxChars} onChange={(e) => set({ kb: { ...b.kb, maxChars: Number(e.target.value) } })} />
+          </div>
+          <AnswerMode mode={b.kb.answerMode ?? 'quote'} canEdit={canEdit} onChange={(m) => set({ kb: { ...b.kb, answerMode: m } })} />
+          <AgentTranslationSetting canEdit={canEdit} />
+          <div className="field">
+            <label htmlFor="b-kout">שורת סיום מתחת לתשובה (ריק = בלי)</label>
+            <input id="b-kout" maxLength={200} value={b.kb.outro ?? ''} onChange={(e) => set({ kb: { ...b.kb, outro: e.target.value } })} />
+          </div>
+          <div className="field">
+            <label><input type="checkbox" style={{ width: 'auto', minHeight: 'auto' }} checked={b.kb.showSource} onChange={(e) => set({ kb: { ...b.kb, showSource: e.target.checked } })} /> להציג את המקור (כתובת או שם המסמך) מתחת לתשובה</label>
+          </div>
+        </fieldset>
+
+        <section aria-labelledby="b-prev" className="card">
+          <h2 id="b-prev">תצוגה מקדימה של התפריט שהלקוח יקבל</h2>
+          <pre style={{ whiteSpace: 'pre-wrap', margin: 0, fontFamily: 'inherit' }}>{menuText(b)}</pre>
+          {b.items.some((x) => x.contact) && <p className="hint">פריטים עם הפניה שולחים ללקוח, אחרי התשובה, קישור ווצאפ לאיש הקשר שהגדרתם.</p>}
+        </section>
+
+        {canEdit && <button className="primary" type="submit">שמירה</button>}
+        <p role="status" className={msg?.ok ? 'ok' : 'error'}>{msg?.text}</p>
+      </form>
+      <IncidentControl canEdit={canEdit} />
+      <Translations canEdit={canEdit} />
+    </>
+  );
+}
+
+
+interface RxDiag { enabled: boolean; reactionsEnabled: boolean; ackAll: boolean; mode: string; searches: boolean; hints: string[]; log: { at: string; channel: string; emoji: string; outcome: string }[] }
+const OUTCOME: Record<string, string> = { sent: 'נשלחה', no_support: 'הערוץ לא תומך בתגובות', not_connected: 'הערוץ לא מחובר', paused: 'הערוץ מושהה', rate_limited: 'חריגה ממכסת התגובות (30 בדקה)' };
+
+/** Why there may be no reaction on a customer's message: what is on, whether this bot ever searches, and the last attempts with their outcome. */
+function ReactionDiagnostics() {
+  const [d, setD] = useState<RxDiag | null>(null);
+  const load = async () => setD(await api<RxDiag>('GET', '/settings/bot/reactions').catch(() => null));
+  return (
+    <details onToggle={(e) => { if ((e.target as HTMLDetailsElement).open) void load(); }}>
+      <summary>למה אין תגובות? בדיקה</summary>
+      {!d ? <Loading lines={2} /> : (
+        <>
+          <p>מה שמור בשרת: הבוט {d.enabled ? 'פעיל' : 'כבוי'}, תגובות {d.reactionsEnabled ? 'פעילות' : 'כבויות'}, "להגיב על כל הודעה" {d.ackAll ? 'פעיל' : 'כבוי'}, מצב {d.mode === 'flow' ? 'תרשים' : 'תפריט'}, חיפוש במאגר הידע {d.searches ? 'מתבצע' : 'לא מתבצע'}.</p>
+          {d.hints.length > 0 ? <ul>{d.hints.map((h) => <li key={h}>{h}</li>)}</ul> : <p className="ok">לא נמצאה סיבה בהגדרות.</p>}
+          <p><strong>ניסיונות אחרונים</strong> (מאז שהשרת עלה):</p>
+          {d.log.length === 0 ? <p className="hint">עוד לא נעשה אף ניסיון להגיב. אם שלחתם הודעה ולא נרשם כלום, ההגדרה לא נשמרה, השרת לא עודכן לגרסה הזו, או שהבוט לא טיפל בהודעה (שיחה שנציג לקח, או בוט כבוי).</p> : (
+            <table>
+              <caption className="sr-only">ניסיונות תגובה אחרונים</caption>
+              <thead><tr><th scope="col">מתי</th><th scope="col">ערוץ</th><th scope="col">אימוג׳י</th><th scope="col">תוצאה</th></tr></thead>
+              <tbody>{d.log.slice(0, 10).map((l, i) => <tr key={i}><td>{new Date(l.at).toLocaleTimeString('he-IL')}</td><td>{l.channel}</td><td>{l.emoji || '(הסרה)'}</td><td>{OUTCOME[l.outcome] ?? (l.outcome.startsWith('error:') ? `שגיאה: ${l.outcome.slice(6)}` : l.outcome)}</td></tr>)}</tbody>
+            </table>
+          )}
+          <button type="button" onClick={() => void load()}>רענון</button>
+        </>
+      )}
+    </details>
+  );
+}

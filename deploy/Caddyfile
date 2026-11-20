@@ -1,0 +1,12 @@
+# Automatic HTTPS (Let's Encrypt). DOMAIN comes from .env (compose passes it in).
+{$DOMAIN} {
+	encode zstd gzip
+	header {
+		-Server
+		Referrer-Policy no-referrer
+		Permissions-Policy "camera=(), microphone=(), geolocation=()"
+	}
+	reverse_proxy server:3000 {
+		flush_interval -1   # do not buffer Server-Sent Events (QR stream)
+	}
+}

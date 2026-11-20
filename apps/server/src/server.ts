@@ -1,0 +1,96 @@
+import { runAutomations } from './automations.js';
+import { sendAlert } from './alerts.js';
+import { sendDueScheduled } from './scheduled.js';
+import { buildApp } from './app.js';
+import { ChannelManager } from './channels/manager.js';
+import { runRetention } from './retention.js';
+import { HealthAlerts, systemHealth } from './system/health.js';
+import { offsiteConfigured, offsiteStatus, uploadBackup, weeklyOffsiteCheck } from './system/offsite.js';
+import { createBackup, verifyBackup, backupPath } from './backup.js';
+import { MediaService } from './media/store.js';
+import { loadConfig } from './config.js';
+import { createDb } from './db.js';
+import { migrate } from './migrate.js';
+import { seedGifPresets } from './gif-presets.js';
+import { purgeSmsLog } from './sms/service.js';
+import { seedIosh } from './kb/gov/iosh.js';
+import { gifToMp4 } from './media/animation.js';
+import path from 'node:path';
+
+const cfg = loadConfig();
+const db = createDb(cfg.DATABASE_URL);
+await migrate(db);
+const media = new MediaService(db, cfg);
+await media.init();
+const mgr = new ChannelManager(db, cfg, undefined, media);
+const app = await buildApp(cfg, db, mgr, media);
+await mgr.startAll();
+// built-in GIFs drawn for the system: added to the gallery once (in the background; the MP4 copies take a few seconds)
+void seedGifPresets(db, (gif) => gifToMp4(gif, { ffmpegPath: cfg.FFMPEG_PATH, tmpDir: path.join(cfg.MEDIA_DIR, 'tmp') }))
+  .then((n) => { if (n) app.log.info({ added: n }, 'built-in GIFs added to the gallery'); })
+  .catch((err) => app.log.error({ err }, 'built-in GIFs could not be added'));
+// the directory of the Institute for Occupational Safety and Hygiene's topic pages (links only), once per version
+if (mgr.kb) void seedIosh(db, mgr.kb).then((n) => { if (n) app.log.info({ added: n }, 'IOSH directory added to the knowledge base'); }).catch((err) => app.log.error({ err }, 'IOSH directory failed'));
+// Knowledge base: resume unfinished link imports, re-read links whose refresh time has come, drop old question logs.
+void mgr.kb?.resumePending().catch((err) => app.log.error({ err }, 'kb resume failed'));
+setInterval(() => void mgr.supervise().catch((err) => app.log.error({ err }, 'channel supervision failed')), 60_000).unref();
+setInterval(() => void sendDueScheduled(db, mgr).catch((err) => app.log.error({ err }, 'scheduled send failed')), 60_000).unref();
+setInterval(() => void mgr.checkSla().catch((err) => app.log.error({ err }, 'sla check failed')), 60_000).unref();
+setInterval(() => void runAutomations(db, mgr).catch((err) => app.log.error({ err }, 'automations failed')), 60_000).unref();
+setInterval(() => void mgr.runEscalations().catch((err) => app.log.error({ err }, 'escalation failed')), 60_000).unref();
+setInterval(() => void mgr.runWeeklySummary().catch((err) => app.log.error({ err }, 'weekly summary failed')), 300_000).unref();
+setInterval(() => void mgr.runInspectionReminders().catch((err) => app.log.error({ err }, 'inspection reminders failed')), 3600_000).unref();
+setInterval(() => void mgr.retryForwards().catch((err) => app.log.error({ err }, 'group forward retry failed')), 60_000).unref();
+setInterval(() => void mgr.catchUp().catch((err) => app.log.error({ err }, 'bot catch-up failed')), 60_000).unref();
+setInterval(() => void mgr.kb?.embedMissing().catch((err) => app.log.error({ err }, 'kb embed failed')), 600_000).unref();
+setInterval(() => void mgr.gov?.runDue().then((r) => { if (r?.failed.length) void sendAlert(cfg, `ייבוא החקיקה למאגר הידע: ${r.failed.length} כשלים (${r.failed.map((f) => f.error).slice(0, 3).join(', ')})`); if (r?.knesset?.repealed.length) void sendAlert(cfg, `לפי מאגר החקיקה של הכנסת בוטלו: ${r.knesset.repealed.join(', ')}. הם הושבתו במאגר הידע.`); }).catch((err) => app.log.error({ err }, 'law import failed')), 3600_000).unref();
+setInterval(() => void mgr.standards?.runDue().then((r) => { if (r?.failed.length) void sendAlert(cfg, `ייבוא התקנים הרשמיים למאגר הידע נכשל (${r.failed.map((f) => f.error).slice(0, 3).join(', ')})`); }).catch((err) => app.log.error({ err }, 'standards import failed')), 3600_000).unref();
+setInterval(() => void mgr.fire?.runDue().then((r) => { if (r?.failed.length) void sendAlert(cfg, `ייבוא דרישות הכבאות למאגר הידע נכשל (${r.failed.map((f) => f.error).slice(0, 3).join(', ')})`); }).catch((err) => app.log.error({ err }, 'fire requirements import failed')), 3600_000).unref();
+setInterval(() => void purgeSmsLog(db).catch((err) => app.log.error({ err }, 'sms log purge failed')), 86_400_000).unref();
+setInterval(() => void mgr.kb?.refreshDue().catch((err) => app.log.error({ err }, 'kb refresh failed')), 3600_000).unref();
+// learning suggestions nobody approved: kept 90 days at most (they may hold customers' wording)
+
+// the retention policy: every rule in one daily pass, recorded with how many records of each kind were deleted
+const purge = () => runRetention(db, cfg, media).then((r) => { if (r.error) app.log.error({ error: r.error }, 'retention purge had errors'); }).catch((err) => app.log.error({ err }, 'retention purge failed'));
+void purge();
+setInterval(purge, 24 * 3600 * 1000).unref();
+// system status: an alert (ALERT_WEBHOOK_URL) for a channel down 10+ minutes, a full disk or a missing backup; once until it recovers
+const healthAlerts = new HealthAlerts((text) => void sendAlert(cfg, text));
+setInterval(() => void systemHealth(db, cfg, media, { channels: () => mgr.channelStates(), offsite: () => offsiteStatus(db, cfg) }).then((h) => healthAlerts.check(h.items)).catch((err) => app.log.error({ err }, 'health check failed')), 5 * 60_000).unref();
+// once a week: the newest copy outside the server is downloaded, decrypted and checked like a restore would read it
+setInterval(() => void weeklyOffsiteCheck(db, cfg).then(async (ran) => { if (ran) { const st = await offsiteStatus(db, cfg); if (!st.lastCheckOk) void sendAlert(cfg, `⚠️ בדיקת השחזור מהגיבוי שמחוץ לשרת נכשלה: ${st.lastCheckError ?? ''}`); } }).catch((err) => app.log.error({ err }, 'offsite check failed')), 3600_000).unref();
+// Optional automatic daily encrypted backup.
+if (cfg.BACKUP_AUTO_HOUR !== undefined) {
+  let lastDay = '';
+  setInterval(() => {
+    const now = new Date();
+    const day = now.toDateString();
+    if (now.getHours() === cfg.BACKUP_AUTO_HOUR && day !== lastDay) {
+      lastDay = day;
+      createBackup(cfg).then(async (b) => {
+        const v = await verifyBackup(cfg, backupPath(cfg, b.name));
+        (v.ok ? app.log.info : app.log.error).call(app.log, { backup: b.name, verified: v.ok, reason: v.reason }, 'automatic backup done');
+        // a verified backup is copied outside the server (when configured); a failure is an alert, the local copy stays
+        if (v.ok && offsiteConfigured(cfg)) {
+          const up = await uploadBackup(db, cfg, b.name);
+          if (!up.ok) { app.log.error({ error: up.error }, 'offsite backup upload failed'); void sendAlert(cfg, `⚠️ העלאת הגיבוי אל מחוץ לשרת נכשלה: ${up.error}. הגיבוי המקומי קיים.`); }
+        }
+      }).catch((err) => app.log.error({ err }, 'automatic backup failed'));
+    }
+  }, 60_000).unref();
+}
+// Retry attachments whose antivirus scan could not complete (scanner down/updating).
+// antivirus: every hour, files stored a week ago or more are checked again with the current signatures
+setInterval(() => void media.rescanClean(200).then((r) => { if (r.infected) void sendAlert(cfg, `🛡️ סריקה חוזרת מצאה ${r.infected} קבצים נגועים; הם נמחקו וסומנו.`); }).catch((err) => app.log.error({ err }, 'rescan failed')), 3600_000).unref();
+setInterval(() => void media.scanPending().catch((err) => app.log.error({ err }, 'scan retry failed')), 60_000).unref();
+
+for (const sig of ['SIGINT', 'SIGTERM'] as const) {
+  process.on(sig, async () => {
+    await mgr.stopAll();
+    await app.close();
+    await db.end();
+    process.exit(0);
+  });
+}
+
+await app.listen({ port: cfg.PORT, host: cfg.HOST });
