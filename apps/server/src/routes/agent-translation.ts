@@ -6,7 +6,8 @@ import { requireAuth } from '../auth.js';
 import type { Config } from '../config.js';
 import type { Db } from '../db.js';
 import { asLang, detectLang, type Lang } from '../i18n/lang.js';
-import { MT_MAX_INPUT, translateText } from '../i18n/mt.js';
+import { GLOSSARY_MAX, MT_MAX_INPUT, translateText } from '../i18n/mt.js';
+import { DEFAULT_GLOSSARY, loadGlossary } from '../i18n/glossary.js';
 import { llmStatus, type LlmConfig } from '../kb/compose.js';
 
 type FetchLike = (url: string, init?: RequestInit) => Promise<Response>;
@@ -60,6 +61,20 @@ export function agentTranslationRoutes(app: FastifyInstance, db: Db, cfg?: Confi
     return b.data;
   });
 
+  // the unit's fixed terms for translation (see i18n/glossary.ts)
+  app.get('/settings/mt-glossary', { preHandler: requireAuth(db, 'bot.view') }, async () => ({ entries: await loadGlossary(db), defaults: DEFAULT_GLOSSARY }));
+  app.put('/settings/mt-glossary', { preHandler: requireAuth(db, 'bot.manage') }, async (req, reply) => {
+    const cell = z.string().trim().max(120).default('');
+    const b = z.object({ entries: z.array(z.object({ he: cell, en: cell, ar: cell, ru: cell }).strict()).max(GLOSSARY_MAX) }).strict().safeParse(req.body);
+    if (!b.success) return reply.code(400).send({ error: 'bad_request' });
+    // a row needs the Hebrew term and at least one translation; duplicates of a Hebrew term keep the first
+    const seen = new Set<string>();
+    const entries = b.data.entries.filter((e) => e.he && (e.en || e.ar || e.ru) && !seen.has(e.he) && seen.add(e.he));
+    await db.query(`INSERT INTO settings (key, value) VALUES ('mt_glossary', $1) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()`, [JSON.stringify(entries)]);
+    await audit(db, { actorId: req.user!.id, action: 'settings.mt_glossary', ip: req.ip, meta: { entries: entries.length } });
+    return { entries };
+  });
+
   app.post('/conversations/:id/messages/:mid/translation', { preHandler: any, config: limit }, async (req, reply) => {
     const p = z.object({ id: z.string().uuid(), mid: z.string().uuid() }).safeParse(req.params);
     if (!p.success) return reply.code(400).send({ error: 'bad_request' });
@@ -78,7 +93,7 @@ export function agentTranslationRoutes(app: FastifyInstance, db: Db, cfg?: Confi
     if (!body || from === 'he') return reply.code(409).send({ error: 'not_needed' });
     if (body.length > MT_MAX_INPUT) return reply.code(413).send({ error: 'too_long' });
     if (!(await ready())) return reply.code(503).send({ error: 'translation_unavailable' });
-    const r = await translateText(llm, body, from, 'he', fetchImpl);
+    const r = await translateText(llm, body, from, 'he', fetchImpl, await loadGlossary(db));
     if (!r) return reply.code(502).send({ error: 'translation_failed' });
     await db.query(
       `INSERT INTO message_translations (message_id, lang, body, model, numbers_differ) VALUES ($1, 'he', $2, $3, $4) ON CONFLICT (message_id, lang) DO NOTHING`,
@@ -98,7 +113,7 @@ export function agentTranslationRoutes(app: FastifyInstance, db: Db, cfg?: Confi
     const from: Lang = detectLang(b.data.text) ?? 'he';
     if (from === to) return reply.code(409).send({ error: 'not_needed' });
     if (!(await ready())) return reply.code(503).send({ error: 'translation_unavailable' });
-    const r = await translateText(llm, b.data.text, from, to, fetchImpl);
+    const r = await translateText(llm, b.data.text, from, to, fetchImpl, await loadGlossary(db));
     if (!r) return reply.code(502).send({ error: 'translation_failed' });
     return { text: r.text, to, ...(r.warning ? { warning: r.warning } : {}) };
   });

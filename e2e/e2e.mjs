@@ -675,6 +675,39 @@ await vframe.evaluate(axeSrc);
 const vax = await vframe.evaluate(() => axe.run(document, { runOnly: ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'] }));
 check('axe: widget chat window', vax.violations.length === 0, vax.violations.map((v) => `${v.id}: ${v.nodes[0].html.slice(0, 80)}`).join(' | '));
 
+// a QR sticker on a door: the scan page leads to the website chat as a page of its own, and the conversation knows the place
+{
+  const pj = (m, u, b) => page.evaluate(async ([m, u, b]) => { const r = await fetch(u, { method: m, headers: { 'content-type': 'application/json' }, body: b ? JSON.stringify(b) : undefined }); return { status: r.status, body: await r.json().catch(() => null) }; }, [m, u, b]);
+  check('qr: chat site set as the sticker target', (await pj('PUT', '/places/targets', { whatsappNumber: '', webchatKey: wcKey })).status === 200);
+  const pl = (await pj('POST', '/places', { building: 'שרמן', room: '214', label: 'מעבדה לכימיה' })).body;
+  const qrCtx = await browser.newContext({ locale: 'he-IL' });   // a new person, on their own phone
+  const qp = await qrCtx.newPage();
+  await qp.goto(`http://localhost:3077/q/${pl.code}`);
+  check('qr: scan page shows the place', (await qp.textContent('.place')).includes('מעבדה לכימיה, בניין שרמן, חדר 214'));
+  await qp.evaluate(axeSrc);
+  const qax = await qp.evaluate(() => axe.run(document, { runOnly: ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'] }));
+  check('axe: QR scan page', qax.violations.length === 0, qax.violations.map((v) => v.id).join(' | '));
+  await qp.click('a.btn.chat');
+  await qp.waitForURL(new RegExp(`/w/${wcKey}\\?place=${pl.code}`));
+  check('qr: the chat opened as a page has no close button', await qp.locator('header button.close').isHidden());
+  if (await qp.locator('form.pre').count()) {
+    await qp.locator('input#f-name').fill('סורק מהדלת');
+    if (await qp.locator('input#consent').count()) await qp.locator('input#consent').check();
+    await qp.locator('button.primary').click();
+  }
+  await qp.locator('textarea').fill('המנדף לא שואב');
+  await qp.locator('button.send').click();
+  await qp.locator('.msg.me:has-text("המנדף לא שואב")').waitFor();
+  let noted = false;
+  for (let i = 0; i < 20 && !noted; i++) {
+    const list = (await pj('GET', '/conversations?q=' + encodeURIComponent('סורק מהדלת'))).body ?? [];
+    if (list[0]) noted = ((await pj('GET', `/conversations/${list[0].id}/notes`)).body ?? []).some((n) => n.body.includes(`מדבקת QR: מעבדה לכימיה, בניין שרמן, חדר 214 (קוד ${pl.code})`));
+    if (!noted) await qp.waitForTimeout(300);
+  }
+  check('qr: the conversation from the sticker carries the place for the team', noted);
+  await qrCtx.close();
+}
+
 // the conversation arrives in the inbox; a staff reply reaches the visitor
 await page.click('aside.sidebar nav >> text=שיחות');
 await page.click('.conv-list button:has-text("דנה מהאתר")');

@@ -12,6 +12,8 @@ export interface FlowState {
   endedAt?: number;
   /** files received during the flow (photos, documents) */
   files?: number;
+  /** answers taken from the QR sticker the customer scanned (not kept on the customer's card: the place is not theirs) */
+  placed?: string[];
   /** progress inside a `list` node */
   list?: { items: string[]; phase: 'item' | 'more' };
   /** "did you mean" candidates offered after a question the knowledge base could not answer with confidence (picked by letter) */
@@ -52,6 +54,8 @@ export interface FlowContext {
   profile?: Vars;
   /** details the channel already collected (the website chat's form): a question of that kind is not asked again */
   known?: { name?: string; email?: string; phone?: string };
+  /** the place of the QR sticker this conversation came from (where, building, room): those questions are not asked */
+  place?: Vars;
   /** confident knowledge-base answer text (already formatted) or null */
   kbAnswer: (text: string) => Promise<string | null>;
   /** index of the option whose meaning matches the free text, or null (needs the local model; returns null when it is off) */
@@ -392,7 +396,7 @@ export async function runFlow(flow: Flow, prev: FlowState | null, input: FlowInp
       case 'form': if (n.text) replies.push(n.text); effects.push({ kind: 'form', templateId: n.templateId, days: n.days }); cursor = n.next; break;
       case 'remember': {
         const keep: Vars = {};
-        for (const k of n.vars) if (state.vars[k]) keep[k] = state.vars[k]!;
+        for (const k of n.vars) if (state.vars[k] && !state.placed?.includes(k)) keep[k] = state.vars[k]!;
         effects.push({ kind: 'profile', vars: keep });
         cursor = n.next;
         break;
@@ -428,6 +432,13 @@ export async function runFlow(flow: Flow, prev: FlowState | null, input: FlowInp
       }
       // questions stay short (a hint under every question of a form is noise); "back" still works there
       case 'question': case 'media': {
+        const placed = n.type === 'question' ? ctx.place?.[n.save] : undefined;
+        if (n.type === 'question' && placed && !state.vars[n.save]) {   // the QR sticker says where: taken, not asked
+          state = { ...state, vars: { ...state.vars, [n.save]: placed }, placed: [...(state.placed ?? []), n.save] };
+          cursor = n.next;
+          if (!cursor) return finished();
+          break;
+        }
         const already = n.type === 'question' && n.kind && n.kind !== 'text' ? ctx.known?.[n.kind] : undefined;
         if (n.type === 'question' && already && !state.vars[n.save]) {   // given already (website chat form): taken, not asked again
           state = { ...state, vars: { ...state.vars, [n.save]: already } };

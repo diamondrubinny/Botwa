@@ -48,6 +48,7 @@ import { loadIncident } from '../incident.js';
 import { sendRequest } from '../forms/service.js';
 import { FlowProblem, sendFlowRequest } from '../forms/flows.js';
 import { dueReminders, reminderText } from '../safety/inspections.js';
+import { conversationPlace, extractPlaceCode, notePlace, placeVars } from '../safety/places.js';
 import { officerReply, officerUserFor } from '../safety/whoIs.js';
 import { comfortText, detectDistress, stillHereText, type Distress } from '../empathy.js';
 import { asLang, detectLang, withDirectionMarks, type Lang } from '../i18n/lang.js';
@@ -407,6 +408,14 @@ export class ChannelManager {
             if (await this.sendMenuPage(channelId, r.conversationId, m.externalContactId, m.menuPage).catch(() => false)) return;
             // the page could not be shown (no menu among the last messages, or the list was refused): the main menu, never an invalid choice
             m = { ...m, text: 'תפריט', menuPage: undefined };
+          }
+          // a QR sticker: the place is kept on the conversation; the code itself is not something for the bot to answer
+          if (r.messageId && !isCommentContact(m.externalContactId)) {
+            const inText = m.media ? null : extractPlaceCode(m.text);
+            const code = m.placeCode ?? inText?.code;
+            if (code) await notePlace(this.db, r.conversationId, code).catch(() => null);
+            // what the bot reads is the message without the code, even when the sticker is unknown or switched off
+            if (inText) m = { ...m, text: inText.rest || 'שלום' };
           }
           // the customer's language (Hebrew or English): Betty answers in it, and the conversation shows it as a tag
           if (r.messageId && !m.media && m.text && !isCommentContact(m.externalContactId)) await this.noteLanguage(r.conversationId, m.text, m.langHint).catch(() => undefined);
@@ -1649,6 +1658,7 @@ export class ChannelManager {
       channelType: this.types.get(channelId) ?? 'whatsapp',
       humanKeywords: bot.humanKeywords, humanOption: bot.humanOption, invalidRetries: bot.invalidRetries, invalidMessage: bot.invalidMessage,
       profile: (row?.profile ?? {}) as Record<string, string>,
+      place: await conversationPlace(this.db, convId).then((p) => (p ? placeVars(p) : undefined)).catch(() => undefined),
       // the website chat's own form already asked these: the flow does not ask them again
       known: this.types.get(channelId) === 'webchat' ? {
         name: row?.display_name && !/^מבקר באתר #/.test(row.display_name) ? cleanName(row.display_name) || undefined : undefined,

@@ -6,7 +6,8 @@ import { buildApp } from '../src/app.js';
 import { ChannelManager } from '../src/channels/manager.js';
 import { loadConfig } from '../src/config.js';
 import { createDb } from '../src/db.js';
-import { checkTranslation, cleanTranslation, translateText } from '../src/i18n/mt.js';
+import { checkTranslation, cleanTranslation, glossaryFor, translateText } from '../src/i18n/mt.js';
+import { DEFAULT_GLOSSARY } from '../src/i18n/glossary.js';
 import { ingestInbound } from '../src/inbox.js';
 import { migrate } from '../src/migrate.js';
 import { hashPassword } from '../src/password.js';
@@ -53,6 +54,20 @@ describe('local machine translation', () => {
     expect(checkTranslation('Call 2222 now', 'התקשרו ל-2223 עכשיו', 'he')).toEqual({ text: 'התקשרו ל-2223 עכשיו', warning: 'numbers' });
     // Arabic-Indic digits are the same number
     expect(checkTranslation('החדר 204', 'الغرفة ٢٠٤', 'ar')).toEqual({ text: 'الغرفة ٢٠٤' });
+  });
+
+  it('the glossary gives the model the unit\'s fixed terms that appear in the text', async () => {
+    // Hebrew with prefixes (במנדף), the longest term first, only terms in the text
+    expect(glossaryFor(DEFAULT_GLOSSARY, 'יש בעיה במנדף, צריך ממונה בטיחות', 'he', 'en')).toEqual(['ממונה בטיחות → safety officer', 'מנדף → fume hood']);
+    // English on word edges only ("hood" alone, "childhood" is not a match for anything)
+    expect(glossaryFor(DEFAULT_GLOSSARY, 'The Fume Hood is broken', 'en', 'he')).toEqual(['fume hood → מנדף']);
+    expect(glossaryFor(DEFAULT_GLOSSARY, 'my childhood', 'en', 'he')).toEqual([]);
+    expect(glossaryFor(DEFAULT_GLOSSARY, 'Не работает вытяжной шкаф', 'ru', 'he')).toEqual(['вытяжной шкаф → מנדף']);
+    // a row without the target language is skipped
+    expect(glossaryFor([{ he: 'מנדף', en: 'fume hood', ar: '', ru: '' }], 'המנדף', 'he', 'ar')).toEqual([]);
+    const seen: Parameters<typeof fakeFetch>[1] = [];
+    await translateText(llm, 'המנדף לא עובד', 'he', 'en', fakeFetch('The fume hood is not working', seen), DEFAULT_GLOSSARY);
+    expect(seen[0]!.body!.messages[0]!.content).toContain('Required terms (always translate these exactly so):\nמנדף → fume hood');
   });
 
   it('returns null when not configured, on an error or a timeout', async () => {
@@ -121,6 +136,14 @@ describe('translation for the agent (routes)', () => {
     expect((await call('PUT', '/settings/agent-translation', 'adm@t.io', { auto: false })).statusCode).toBe(200);
     expect((await call('GET', '/translation/status', 'a1@t.io')).json().auto).toBe(false);
     await call('PUT', '/settings/agent-translation', 'adm@t.io', { auto: true });
+  });
+
+  it('the glossary: defaults until edited; managers edit it; empty or duplicate rows are dropped', async () => {
+    expect((await call('GET', '/settings/mt-glossary', 'adm@t.io')).json().entries[0]).toMatchObject({ he: 'מנדף', en: 'fume hood' });
+    expect((await call('PUT', '/settings/mt-glossary', 'a1@t.io', { entries: [] })).statusCode).toBe(403);
+    const r = await call('PUT', '/settings/mt-glossary', 'adm@t.io', { entries: [{ he: 'מנדף', en: 'fume hood', ar: '', ru: '' }, { he: 'מנדף', en: 'hood', ar: '', ru: '' }, { he: 'ריק', en: '', ar: '', ru: '' }, { he: '', en: 'x', ar: '', ru: '' }] });
+    expect(r.json().entries).toEqual([{ he: 'מנדף', en: 'fume hood', ar: '', ru: '' }]);
+    expect((await call('PUT', '/settings/mt-glossary', 'adm@t.io', { entries: [{ he: 'a', en: 'b', ar: '', ru: '', x: 1 }] })).statusCode).toBe(400);
   });
 
   it("translates a customer's message into Hebrew once, keeps it with the message and lists it", async () => {

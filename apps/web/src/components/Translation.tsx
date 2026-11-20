@@ -171,6 +171,55 @@ export function AgentTranslationSetting({ canEdit }: { canEdit: boolean }) {
         {!st.configured ? 'המודל המקומי לא מותקן בשרת, ולכן התרגום לא זמין. התקנה: bash scripts/enable-local-llm.sh.' : !st.ready ? 'המודל המקומי לא עונה כרגע, ולכן התרגום לא זמין.' : 'התרגום זמין.'}
         {msg && ` ${msg}`}
       </p>
+      <GlossaryEditor canEdit={canEdit} />
     </fieldset>
+  );
+}
+
+interface Term { he: string; en: string; ar: string; ru: string }
+/** The unit's fixed terms for machine translation (מנדף = fume hood). The model gets the terms that appear in each text. */
+export function GlossaryEditor({ canEdit }: { canEdit: boolean }) {
+  const [rows, setRows] = useState<Term[] | null>(null);
+  const [defaults, setDefaults] = useState<Term[]>([]);
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const [busy, setBusy] = useState(false);
+  useEffect(() => { void api<{ entries: Term[]; defaults: Term[] }>('GET', '/settings/mt-glossary').then((r) => { setRows(r.entries); setDefaults(r.defaults); }).catch(() => setRows([])); }, []);
+  if (!rows) return null;
+  const set = (i: number, k: keyof Term, v: string) => setRows(rows.map((r, j) => (j === i ? { ...r, [k]: v } : r)));
+  const COLS: [keyof Term, string, 'rtl' | 'ltr'][] = [['he', 'עברית', 'rtl'], ['en', 'English', 'ltr'], ['ar', 'العربية', 'rtl'], ['ru', 'Русский', 'ltr']];
+  return (
+    <details className="field" id="mt-glossary">
+      <summary>מילון מונחים לתרגום ({rows.length})</summary>
+      <p className="hint">מונח שמופיע בטקסט מתורגם תמיד כפי שכתוב כאן, למשל "מנדף" ← "fume hood". אפשר להשאיר תא ריק. התרגומים לערבית ולרוסית ברשימה ההתחלתית הם טיוטה שכדאי שדובר השפה יבדוק.</p>
+      <div className="table-wrap">
+        <table>
+          <caption className="sr-only">מונחים קבועים לתרגום</caption>
+          <thead><tr>{COLS.map(([k, l]) => <th key={k} scope="col">{l}</th>)}<th scope="col"><span className="sr-only">פעולות</span></th></tr></thead>
+          <tbody>
+            {rows.map((r, i) => (
+              <tr key={i}>
+                {COLS.map(([k, l, dir]) => (
+                  <td key={k}><input aria-label={`${l}, שורה ${i + 1}`} dir={dir} lang={k} maxLength={120} disabled={!canEdit} value={r[k]} onChange={(e) => set(i, k, e.target.value)} /></td>
+                ))}
+                <td>{canEdit && <button type="button" className="sm" onClick={() => setRows(rows.filter((_, j) => j !== i))}>הסרה<span className="sr-only"> – {r.he || `שורה ${i + 1}`}</span></button>}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {canEdit && (
+        <div className="row" style={{ gap: '.5rem', flexWrap: 'wrap', marginTop: '.5rem' }}>
+          <button type="button" onClick={() => setRows([...rows, { he: '', en: '', ar: '', ru: '' }])} disabled={rows.length >= 300}>הוספת מונח</button>
+          <button type="button" className="primary" disabled={busy} onClick={async () => {
+            setBusy(true); setMsg(null);
+            try { const r = await api<{ entries: Term[] }>('PUT', '/settings/mt-glossary', { entries: rows }); setRows(r.entries); setMsg({ ok: true, text: `נשמר (${r.entries.length} מונחים). שורות בלי מונח בעברית או בלי אף תרגום לא נשמרות.` }); }
+            catch { setMsg({ ok: false, text: 'השמירה נכשלה.' }); }
+            finally { setBusy(false); }
+          }}>שמירת המילון</button>
+          <button type="button" onClick={() => setRows(defaults)}>חזרה לרשימה ההתחלתית</button>
+        </div>
+      )}
+      {msg && <p role={msg.ok ? 'status' : 'alert'} className={msg.ok ? 'ok' : 'error'}>{msg.text}</p>}
+    </details>
   );
 }

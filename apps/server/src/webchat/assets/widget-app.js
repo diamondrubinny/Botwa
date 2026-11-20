@@ -3,6 +3,10 @@
   'use strict';
   var key = decodeURIComponent((location.pathname.match(/^\/w\/([\w-]+)/) || [])[1] || '');
   var app = document.getElementById('app');
+  // opened from a QR sticker on a door (/w/KEY?place=CODE): the place goes with each message, so Betty knows where the person is
+  var place = (/[?&]place=([A-HJ-NP-Z2-9]{6})(?:&|$)/.exec(location.search) || [])[1] || '';
+  // opened as a page of its own (a QR sticker, a link), not inside a site: there is nothing to close
+  var standalone = window.parent === window;
   var T = {
     he: { sugLabel: 'שאלות נפוצות מתאימות', sugCount: ' שאלות נפוצות מתאימות. חצים למעלה ולמטה לבחירה, Enter לתשובה.', faq: 'תשובה מהמאגר', faqHint: 'לא מה שחיפשתם? כתבו לנו ונחזור אליכם.', loading: 'טוען…', send: 'שליחה', msg: 'כתבו הודעה…', msgLabel: 'ההודעה שלכם', start: 'התחלת שיחה', name: 'שם', email: 'אימייל', phone: 'טלפון', optional: ' (לא חובה)', close: 'סגירת הצ׳אט', you: 'אתם', team: 'הצוות', bot: 'הבוט', consent: 'יש לאשר כדי להמשיך.', required: 'שדה חובה', badEmail: 'כתובת אימייל לא תקינה', badPhone: 'מספר טלפון לא תקין', failed: 'השליחה נכשלה. נסו שוב.', offline: 'לא ניתן להתחבר כרגע. נסו שוב מאוחר יותר.', limit: 'שלחתם הרבה הודעות. נסו שוב בעוד רגע.', privacy: 'מדיניות הפרטיות', log: 'שיחה', newmsg: 'הודעה חדשה', social: 'אפשר גם לכתוב לנו ב:', botTag: 'בוט', reacted: 'הצוות הגיב', ext: ' (נפתח מחוץ לצ׳אט)', nets: { whatsapp: 'WhatsApp', messenger: 'Messenger', instagram: 'Instagram', telegram: 'Telegram', email: 'אימייל', phone: 'טלפון' } },
     en: { sugLabel: 'Matching common questions', sugCount: ' matching common questions. Use up and down arrows, Enter for the answer.', faq: 'Answer from our help center', faqHint: 'Not what you were looking for? Write to us and we will get back to you.', loading: 'Loading…', send: 'Send', msg: 'Type a message…', msgLabel: 'Your message', start: 'Start chat', name: 'Name', email: 'Email', phone: 'Phone', optional: ' (optional)', close: 'Close chat', you: 'You', team: 'Team', bot: 'Bot', consent: 'Please accept to continue.', required: 'Required', badEmail: 'Invalid email address', badPhone: 'Invalid phone number', failed: 'Sending failed. Please try again.', offline: 'Cannot connect right now. Please try again later.', limit: 'You are sending too fast. Try again in a moment.', privacy: 'Privacy policy', log: 'Conversation', newmsg: 'New message', social: 'You can also reach us on:', botTag: 'bot', reacted: 'The team reacted', ext: ' (opens outside this chat)', nets: { whatsapp: 'WhatsApp', messenger: 'Messenger', instagram: 'Instagram', telegram: 'Telegram', email: 'Email', phone: 'Phone' }, defTitle: 'Chat with the team', defSubtitle: 'We usually answer within minutes', defWelcome: 'Hello! How can we help?' },
@@ -159,6 +163,7 @@
     app.textContent = '';
     var close = h('button', { type: 'button', class: 'close', 'aria-label': L.close, text: '×' });
     close.addEventListener('click', function () { parent({ type: 'botwa:close' }); });
+    if (standalone) close.hidden = true;
     var head = h('header', {}, [logoEl(), h('div', { class: 'grow' }, [h('h1', { text: cfg.design.title }), h('p', { text: cfg.design.subtitle })]), close].filter(Boolean));
     var kids = [head];
     if (!cfg.online) kids.push(h('div', { class: 'offline', role: 'status', text: cfg.behavior.offlineMessage }));
@@ -238,7 +243,7 @@
       var text = ta.value.trim(); if (!text) return;
       btn.disabled = true; err.textContent = '';
       var extra = pending; pending = null;
-      api('POST', '/widget/messages', Object.assign({ text: text, lang: lang }, extra || {}), true)
+      api('POST', '/widget/messages', Object.assign({ text: text, lang: lang }, place ? { place: place } : {}, extra || {}), true)
         .then(function () { ta.value = ''; if (!started) { started = true; parent({ type: 'botwa:started' }); } poll(); })
         .catch(function (er) { pending = extra; err.textContent = er.status === 429 ? L.limit : L.failed; })
         .then(function () { btn.disabled = false; ta.focus(); });
@@ -255,6 +260,7 @@
     app.textContent = '';
     var close = h('button', { type: 'button', class: 'close', 'aria-label': L.close, text: '×' });
     close.addEventListener('click', function () { parent({ type: 'botwa:close' }); });
+    if (standalone) close.hidden = true;
     app.appendChild(h('header', {}, [logoEl(), h('div', { class: 'grow' }, [h('h1', { text: cfg.design.title }), h('p', { text: cfg.design.subtitle })]), close].filter(Boolean)));
     var form = h('form', { class: 'pre', novalidate: 'novalidate' });
     var hi = h('div', { class: 'hello' }); hi.appendChild(helloEl()); form.appendChild(hi);

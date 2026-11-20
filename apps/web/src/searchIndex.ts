@@ -26,6 +26,8 @@ export const SEARCH_INDEX: SearchEntry[] = [
   { label: 'GIF מהבוט ברגעים נעימים', where: 'בוט', words: 'gif גיף אנימציה', page: 'bot', s: 'gif-cd', allowed: P('bot.view') },
   { label: 'תגובות אוטומטיות (אימוג׳י, לב על תודה)', where: 'בוט', words: 'רגשון אימוגי emoji לב תודה reactions', page: 'bot', s: 'rx-thanks-l', allowed: P('bot.view') },
   { label: 'מענה ממאגר הידע: רמת ביטחון, ניסוח, מודל מקומי', where: 'בוט', words: 'מאגר ידע ביטחון מודל מקומי llm ollama ניסוח ציטוט', page: 'bot', s: 'b-kms', allowed: P('bot.view') },
+  { label: 'מדבקות QR לדלתות (דיווח עם מיקום)', where: 'לוח בטיחות', words: 'qr קוד מדבקה דלת מיקום חדר בניין סריקה הדפסה', page: 'safety', s: 'qr-h', allowed: P('bot.view') },
+  { label: 'מילון מונחים לתרגום (מנדף = fume hood)', where: 'בוט', words: 'מילון מונחים תרגום glossary terms מנדף', page: 'bot', s: 'mt-glossary', allowed: P('bot.view') },
   { label: 'תרגום לנציג: הודעות לקוח לעברית ותשובה לשפת הלקוח', where: 'בוט', words: 'תרגום מתרגם translate translation אנגלית ערבית רוסית שפה מודל מקומי', page: 'bot', s: 'agent-mt', allowed: P('bot.view') },
   { label: 'מענה אחרי ניתוק (כמה שעות להמשיך לענות)', where: 'בוט', words: 'ניתוק השלמה catchup', page: 'bot', s: 'b-cu', allowed: P('bot.view') },
   { label: 'תרשים זרימה ובדיקה בשיחה', where: 'תרשים זרימה', words: 'תרשים זרימה flow סימולטור הזדהות צמתים', page: 'flow', s: 'sim-h', allowed: P('bot.view') },

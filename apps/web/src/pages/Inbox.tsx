@@ -10,6 +10,7 @@ import { ConfirmDialog } from '../components/ConfirmDialog';
 import { PersonPanel } from '../components/PersonPanel';
 import { CaseHistory } from '../components/CaseHistory';
 import { IdentityCard } from '../components/IdentityCard';
+import { AssistBar } from '../components/Assist';
 import { DraftTranslation, foreignLang, MessageTranslation, SentOriginal, useTranslationStatus } from '../components/Translation';
 import { botAvatarSrc, botLabel, useBrand } from '../brand';
 import { Icon } from '../components/Icon';
@@ -737,6 +738,12 @@ export function Inbox({ me }: { me: Me }) {
                     <label><input type="radio" name="comment-reply" checked={commentReply === 'public'} onChange={() => setCommentReply('public')} /> תגובה ציבורית מתחת לתגובה</label>
                     {commentReply === 'public' && <p className="reply-warn" role="note">התשובה תהיה גלויה לכל מי שרואה את הפוסט. אל תכללו פרטים אישיים, מספרי טלפון או פרטי פנייה.</p>}
                   </fieldset>
+                )}
+                {mt?.ready && !isComment && !sel.blocked && (
+                  <AssistBar convId={sel.id} draft={text} onDraft={(t) => { edit(t.slice(0, 4000)); taRef.current?.focus(); }}
+                    onSummary={sel.assignedTo && (sel.assignedTo === me.id || canAssignOthers) ? (t) => {
+                      void openHandover().then(() => { setHo((h) => (h ? { ...h, note: t.slice(0, 1000) } : h)); requestAnimationFrame(() => document.getElementById('ho-to')?.focus()); });
+                    } : undefined} />
                 )}
                 {mt?.ready && convLang !== 'he' && !file && (
                   <DraftTranslation convId={sel.id} lang={convLang} draft={text} disabled={sending || !!sel.blocked || !!sel.optedOut || (isComment && !commentReply)} onSend={sendTranslated} />

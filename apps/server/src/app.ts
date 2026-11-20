@@ -63,6 +63,8 @@ import { systemRoutes } from './routes/system.js';
 import { mediaRoutes } from './routes/media.js';
 import { conversationRoutes } from './routes/conversations.js';
 import { agentTranslationRoutes } from './routes/agent-translation.js';
+import { placeRoutes } from './routes/places.js';
+import { agentAssistRoutes } from './routes/agent-assist.js';
 import type { ChannelManager } from './channels/manager.js';
 import type { Config } from './config.js';
 import type { Db } from './db.js';
@@ -174,6 +176,8 @@ export async function buildApp(cfg: Config, db: Db, mgr: ChannelManager, media: 
   settingsRoutes(app, db, mgr);
   translationRoutes(app, db);
   agentTranslationRoutes(app, db, cfg);
+  placeRoutes(app, db);
+  agentAssistRoutes(app, db, mgr, cfg);
   incidentRoutes(app, db, cfg);
   inspectionRoutes(app, db);
   backupRoutes(app, db, cfg);

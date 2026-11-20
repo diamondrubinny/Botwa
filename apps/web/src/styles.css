@@ -937,3 +937,26 @@ td.warn { color: var(--warn); font-weight: 600; }
 .draft-translation > button { min-height: 36px; }
 .draft-translation-preview { display: grid; gap: .35rem; padding: .5rem; border: 1px solid var(--border); border-radius: 8px; background: var(--surface-2); }
 .draft-translation-preview label { font-size: .85rem; font-weight: 600; }
+
+/* QR stickers: management, preview and the printed A4 sheet (only the sheet shows on paper) */
+.table-wrap { max-width: 100%; overflow-x: auto; }
+.qr-preview { display: flex; gap: 1rem; align-items: flex-start; flex-wrap: wrap; margin-top: .75rem; padding: .75rem; border: 1px solid var(--border); border-radius: 12px; background: var(--surface-2); }
+.qr-preview img { background: #fff; border-radius: 8px; padding: 4px; }
+.qr-print-sheet { display: none; }
+@media print {
+  body.print-qr > *:not(.qr-print-sheet) { display: none !important; }
+  body.print-qr { background: #fff !important; }
+  body.print-qr .qr-print-sheet { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8mm; padding: 8mm; color: #000; font-family: system-ui, Arial, sans-serif; }
+  .qr-sticker { break-inside: avoid; border: 1.5px dashed #555; border-radius: 6mm; padding: 5mm; text-align: center; }
+  .qr-sticker img { width: 55mm; height: 55mm; }
+  .qr-sticker p { margin: 1.5mm 0; }
+  .qr-head { font-weight: 700; font-size: 12pt; }
+  .qr-cta { font-weight: 700; font-size: 14pt; }
+  .qr-place { font-size: 11pt; }
+  .qr-code { font-size: 9pt; color: #333; }
+  @page { size: A4; margin: 0; }
+}
+.assist-bar { margin: .3rem 0; }
+.assist-bar p { margin: .25rem 0 0; }
+.assist-summary { display: grid; gap: .35rem; margin-top: .4rem; padding: .5rem; border: 1px solid var(--border); border-radius: 8px; background: var(--surface-2); }
+.assist-summary label { font-size: .85rem; font-weight: 600; }

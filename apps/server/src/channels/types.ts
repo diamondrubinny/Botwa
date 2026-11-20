@@ -25,6 +25,8 @@ export interface InboundMessage {
   flowReply?: { responseJson: string };
   /** the website chat's interface language: the conversation's language when the message itself does not tell (e.g. "hi", "?") */
   langHint?: 'he' | 'en' | 'ar' | 'ru';
+  /** the website chat opened from a QR sticker (/w/KEY?place=CODE): the sticker's code */
+  placeCode?: string;
   /** a tap on the "more topics" row of a long list menu: show that page of the last menu (not an answer for the bot) */
   menuPage?: number;
   externalMessageId: string;
